@@ -1,0 +1,1 @@
+An emoji in the file name: still a valid UTF-8 entry name.

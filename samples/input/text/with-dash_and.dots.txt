@@ -1,0 +1,2 @@
+A file name with a dash, an underscore and several dots.
+Glob demos (--include "*.txt") pick it up; "*.md" filters leave it out.
