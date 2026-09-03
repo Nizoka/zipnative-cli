@@ -56,7 +56,7 @@
 - `verify.ts` (`verifyZip` + counters, `E_VERIFY_FAILED` with `zipCode`), `crc32.ts`,
   `inflate.ts` (`createInflator` with a mandatory bound; `--sync` / `--method`).
 - `batch.ts` (directory create / verify with a pool; `--manifest` pipelines), `doctor.ts`,
-  `schema.ts` (22 subjects + `errors` + `manifest`), `completion.ts` (the `COMMANDS` table,
+  `schema.ts` (22 subjects, including `errors` and `manifest`), `completion.ts` (the `COMMANDS` table,
   four shells), `govern.ts`.
 
 ### Utilities (`src/utils/`)

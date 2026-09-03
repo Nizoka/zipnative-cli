@@ -61,7 +61,6 @@ on:
     paths:
       - 'src/**'
       - 'scripts/**'
-      - 'samples/input/**'
       - 'package.json'
       - 'package-lock.json'
       - 'tsup.config.ts'
@@ -72,7 +71,6 @@ on:
     paths:
       - 'src/**'
       - 'scripts/**'
-      - 'samples/input/**'
       - 'package.json'
       - 'package-lock.json'
       - 'tsup.config.ts'
