@@ -1,0 +1,71 @@
+cff-version: 1.2.0
+message: >-
+  If you use zipnative-cli in academic work or research pipelines,
+  please cite it using the metadata below.
+title: "zipnative-cli — Official CLI for the zipnative ZIP engine"
+abstract: >-
+  A zero-extra-dependency command-line interface for zipnative — a
+  pure-TypeScript, safe-by-default, deterministic, streaming ZIP engine.
+  zipnative-cli exposes 15 commands over the engine's frozen 1.0 surface:
+  creating reproducible archives (canonical order, pinned timestamps, a
+  pinned pure-TS encoder for identical SHA-256 on every runtime, streaming
+  and worker-parallel writers), listing and forensic inspection without
+  extraction (with determinism and security assertions for CI), secure
+  extraction in which the CLI is the proven filesystem trust boundary
+  (zip-slip, symlink, overlap, duplicate-path and decompression-bomb
+  refusals on by default), forward-only reading of unseekable streams,
+  one-call deep integrity verification, CRC-32 and bounded raw-DEFLATE
+  decoding, incremental modification without recompression, and batch
+  and manifest orchestration. An agent-first contract — a global --json
+  envelope carrying a stable error class and the engine's frozen ZIP_*
+  code verbatim, --dry-run, --strict, eight CWE-tagged security bounds,
+  versioned JSON Schemas and a capability manifest — lets autonomous AI
+  agents and CI pipelines drive the CLI deterministically, offline, under
+  a human-in-the-loop governance model. Every archive the CLI writes is
+  validated against ISO/IEC 21320-1:2015 by an engine-independent
+  validator in continuous integration.
+type: software
+authors:
+  - name: "Nizoka"
+    email: "hello@pdfnative.dev"
+    website: "https://zipnative.dev"
+repository-code: "https://github.com/Nizoka/zipnative-cli"
+url: "https://zipnative.dev"
+license: MIT
+version: 1.0.0
+date-released: "2026-09-03"
+keywords:
+  - zip
+  - unzip
+  - zip64
+  - archive
+  - compression
+  - deflate
+  - cli
+  - typescript
+  - nodejs
+  - zero-dependencies
+  - deterministic
+  - reproducible-builds
+  - secure-by-default
+  - zip-slip
+  - zip-bomb
+  - iso-21320
+  - conformance
+  - streaming
+  - crc32
+  - verify
+  - ai-agent
+  - automation
+  - ai-governance
+  - human-in-the-loop
+  - shell
+  - pipeline
+references:
+  - type: software
+    title: "zipnative — A safe, deterministic, streaming ZIP engine for modern apps"
+    version: 1.0.0
+    authors:
+      - name: "Nizoka"
+    repository-code: "https://github.com/Nizoka/zipnative"
+    url: "https://zipnative.dev"

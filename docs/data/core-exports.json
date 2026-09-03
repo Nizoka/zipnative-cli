@@ -1,0 +1,392 @@
+{
+  "$comment": "Derived from zipnative docs/assets/api.json (1.0.0). One row per export of the two entry points; docs/KNOWLEDGE_BASE.md section 8 maps every name to a CLI touchpoint and tests/docs/consistency.test.ts enforces it. kind is derived from the export signature.",
+  "zipnativeVersion": "1.0.0",
+  "exportCount": 77,
+  "exports": [
+    {
+      "name": "AddEntryOptions",
+      "kind": "interface",
+      "subpath": "."
+    },
+    {
+      "name": "ByteSource",
+      "kind": "type",
+      "subpath": "."
+    },
+    {
+      "name": "CodecCompressOptions",
+      "kind": "interface",
+      "subpath": "."
+    },
+    {
+      "name": "CreateZipOptions",
+      "kind": "interface",
+      "subpath": "."
+    },
+    {
+      "name": "DEFAULT_ZIP_LIMITS",
+      "kind": "const",
+      "subpath": "."
+    },
+    {
+      "name": "DeflateTier",
+      "kind": "type",
+      "subpath": "."
+    },
+    {
+      "name": "EntryVerification",
+      "kind": "interface",
+      "subpath": "."
+    },
+    {
+      "name": "ExtractOptions",
+      "kind": "interface",
+      "subpath": "."
+    },
+    {
+      "name": "ExtractedEntry",
+      "kind": "interface",
+      "subpath": "."
+    },
+    {
+      "name": "ExtractedStreamEntry",
+      "kind": "interface",
+      "subpath": "."
+    },
+    {
+      "name": "FLAG_DATA_DESCRIPTOR",
+      "kind": "const",
+      "subpath": "."
+    },
+    {
+      "name": "FLAG_ENCRYPTED",
+      "kind": "const",
+      "subpath": "."
+    },
+    {
+      "name": "FLAG_STRONG_ENCRYPTION",
+      "kind": "const",
+      "subpath": "."
+    },
+    {
+      "name": "FLAG_UTF8",
+      "kind": "const",
+      "subpath": "."
+    },
+    {
+      "name": "Inflator",
+      "kind": "interface",
+      "subpath": "."
+    },
+    {
+      "name": "IterateZipOptions",
+      "kind": "type",
+      "subpath": "."
+    },
+    {
+      "name": "METHOD_DEFLATE",
+      "kind": "const",
+      "subpath": "."
+    },
+    {
+      "name": "METHOD_STORE",
+      "kind": "const",
+      "subpath": "."
+    },
+    {
+      "name": "OpenZipOptions",
+      "kind": "interface",
+      "subpath": "."
+    },
+    {
+      "name": "ReadEntryOptions",
+      "kind": "interface",
+      "subpath": "."
+    },
+    {
+      "name": "StreamOptions",
+      "kind": "interface",
+      "subpath": "."
+    },
+    {
+      "name": "StreamedZipEntry",
+      "kind": "interface",
+      "subpath": "."
+    },
+    {
+      "name": "StreamedZipHeader",
+      "kind": "interface",
+      "subpath": "."
+    },
+    {
+      "name": "VERSION",
+      "kind": "const",
+      "subpath": "."
+    },
+    {
+      "name": "VerifiedEntry",
+      "kind": "interface",
+      "subpath": "."
+    },
+    {
+      "name": "VerifyZipOptions",
+      "kind": "interface",
+      "subpath": "."
+    },
+    {
+      "name": "ZipBaseErrorCode",
+      "kind": "type",
+      "subpath": "."
+    },
+    {
+      "name": "ZipCodec",
+      "kind": "interface",
+      "subpath": "."
+    },
+    {
+      "name": "ZipCommonOptions",
+      "kind": "interface",
+      "subpath": "."
+    },
+    {
+      "name": "ZipCompressionOptions",
+      "kind": "interface",
+      "subpath": "."
+    },
+    {
+      "name": "ZipDataError",
+      "kind": "class",
+      "subpath": "."
+    },
+    {
+      "name": "ZipDataErrorCode",
+      "kind": "type",
+      "subpath": "."
+    },
+    {
+      "name": "ZipDiagnostic",
+      "kind": "interface",
+      "subpath": "."
+    },
+    {
+      "name": "ZipDiagnosticCode",
+      "kind": "type",
+      "subpath": "."
+    },
+    {
+      "name": "ZipDiagnosticHandler",
+      "kind": "type",
+      "subpath": "."
+    },
+    {
+      "name": "ZipEntry",
+      "kind": "interface",
+      "subpath": "."
+    },
+    {
+      "name": "ZipError",
+      "kind": "class",
+      "subpath": "."
+    },
+    {
+      "name": "ZipErrorCode",
+      "kind": "type",
+      "subpath": "."
+    },
+    {
+      "name": "ZipExtraField",
+      "kind": "interface",
+      "subpath": "."
+    },
+    {
+      "name": "ZipFormatError",
+      "kind": "class",
+      "subpath": "."
+    },
+    {
+      "name": "ZipFormatErrorCode",
+      "kind": "type",
+      "subpath": "."
+    },
+    {
+      "name": "ZipLimitError",
+      "kind": "class",
+      "subpath": "."
+    },
+    {
+      "name": "ZipLimitErrorCode",
+      "kind": "type",
+      "subpath": "."
+    },
+    {
+      "name": "ZipLimits",
+      "kind": "interface",
+      "subpath": "."
+    },
+    {
+      "name": "ZipModifier",
+      "kind": "interface",
+      "subpath": "."
+    },
+    {
+      "name": "ZipModifierOptions",
+      "kind": "interface",
+      "subpath": "."
+    },
+    {
+      "name": "ZipReader",
+      "kind": "interface",
+      "subpath": "."
+    },
+    {
+      "name": "ZipSecurityError",
+      "kind": "class",
+      "subpath": "."
+    },
+    {
+      "name": "ZipSecurityErrorCode",
+      "kind": "type",
+      "subpath": "."
+    },
+    {
+      "name": "ZipUnsupportedError",
+      "kind": "class",
+      "subpath": "."
+    },
+    {
+      "name": "ZipUnsupportedErrorCode",
+      "kind": "type",
+      "subpath": "."
+    },
+    {
+      "name": "ZipUnsupportedFeature",
+      "kind": "type",
+      "subpath": "."
+    },
+    {
+      "name": "ZipVerificationReport",
+      "kind": "interface",
+      "subpath": "."
+    },
+    {
+      "name": "ZipWriter",
+      "kind": "interface",
+      "subpath": "."
+    },
+    {
+      "name": "activeDeflateTier",
+      "kind": "function",
+      "subpath": "."
+    },
+    {
+      "name": "crc32",
+      "kind": "function",
+      "subpath": "."
+    },
+    {
+      "name": "createInflator",
+      "kind": "function",
+      "subpath": "."
+    },
+    {
+      "name": "createZip",
+      "kind": "function",
+      "subpath": "."
+    },
+    {
+      "name": "createZipModifier",
+      "kind": "function",
+      "subpath": "."
+    },
+    {
+      "name": "extractZip",
+      "kind": "function",
+      "subpath": "."
+    },
+    {
+      "name": "extractZipStream",
+      "kind": "function",
+      "subpath": "."
+    },
+    {
+      "name": "getCodec",
+      "kind": "function",
+      "subpath": "."
+    },
+    {
+      "name": "getUnixMode",
+      "kind": "function",
+      "subpath": "."
+    },
+    {
+      "name": "initNodeZipCodecs",
+      "kind": "function",
+      "subpath": "."
+    },
+    {
+      "name": "isSymlinkEntry",
+      "kind": "function",
+      "subpath": "."
+    },
+    {
+      "name": "iterateZipEntries",
+      "kind": "function",
+      "subpath": "."
+    },
+    {
+      "name": "openZip",
+      "kind": "function",
+      "subpath": "."
+    },
+    {
+      "name": "registerCodec",
+      "kind": "function",
+      "subpath": "."
+    },
+    {
+      "name": "sanitizeEntryPath",
+      "kind": "function",
+      "subpath": "."
+    },
+    {
+      "name": "setDeflateImpl",
+      "kind": "function",
+      "subpath": "."
+    },
+    {
+      "name": "setInflateImpl",
+      "kind": "function",
+      "subpath": "."
+    },
+    {
+      "name": "verifyZip",
+      "kind": "function",
+      "subpath": "."
+    },
+    {
+      "name": "ByteSource",
+      "kind": "type",
+      "subpath": "./worker"
+    },
+    {
+      "name": "ParallelZipOptions",
+      "kind": "interface",
+      "subpath": "./worker"
+    },
+    {
+      "name": "ParallelZipWriter",
+      "kind": "interface",
+      "subpath": "./worker"
+    },
+    {
+      "name": "StreamOptions",
+      "kind": "interface",
+      "subpath": "./worker"
+    },
+    {
+      "name": "createParallelZip",
+      "kind": "function",
+      "subpath": "./worker"
+    }
+  ]
+}
