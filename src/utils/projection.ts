@@ -105,8 +105,9 @@ export function selectFields(value: unknown, paths: readonly string[]): unknown 
 
 /**
  * Emit a JSON report on stdout honouring the token-economy flags:
- * `--summary` (caller supplies the canonical minimal shape), then `--fields`,
- * then compact-vs-pretty. Shared by every JSON-on-stdout command.
+ * `--summary` (caller supplies the canonical minimal shape), then `--fields`
+ * (applied to whichever document is being emitted), then compact-vs-pretty.
+ * Shared by every JSON-on-stdout command.
  */
 export function emitJsonReport(
     args: ParsedArgs,
@@ -116,10 +117,9 @@ export function emitJsonReport(
     let out: unknown = full;
     if (summary !== undefined && hasFlag(args.flags, 'summary')) {
         out = summary();
-    } else {
-        const fields = getStringFlag(args.flags, 'fields');
-        if (fields !== undefined) out = selectFields(full, parseFieldList(fields));
     }
+    const fields = getStringFlag(args.flags, 'fields');
+    if (fields !== undefined) out = selectFields(out, parseFieldList(fields));
     const pretty = hasFlag(args.flags, 'pretty') || !isJsonMode();
     process.stdout.write(serializeJson(out, pretty) + '\n');
 }

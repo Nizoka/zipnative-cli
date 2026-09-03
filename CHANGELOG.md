@@ -202,7 +202,7 @@ socket. Zero extra runtime dependencies. Node.js ≥ 22.
 - **Tests** — in-process vitest suites (stdout / stderr captured) for every command and
   util, an engine-independent raw ZIP builder for adversarial shapes (never committed — see
   `tests/fixtures/README.md`), two foreign-provenance interop fixtures, one spawn smoke test
-  against the built binary, and `tests/docs/consistency.test.ts`. 1062 tests across
+  against the built binary, and `tests/docs/consistency.test.ts`. 1063 tests across
   45 files (statements 97 %, branches 92 %, functions 99 %, lines 98 %).
 - **Samples** — a `.sh` + `.ps1` pair per command under `samples/`, plus `samples/agent/`
   and `samples/run-all.js`; every sample runs offline.

@@ -146,7 +146,7 @@ Usage:
 Options:
   --input,   -i       Archive path (default: stdin)
   --format text|json|ndjson   (default text; json under --json)
-  --long,    -l       Add mode, flags, versions, offsets and extra fields
+  --long              Add mode, flags, versions, offsets and extra fields
   --validate lazy|eager       Cross-check every local header up front (eager)
   --include <glob>    Keep only matching names (repeatable)
   --exclude <glob>    Drop matching names (repeatable)
@@ -252,7 +252,7 @@ Options:
   --output-dir, -d    Extract under <dir> (sanitizeEntryPath + containment)
   --cat <name>        Write the named entry's data to stdout (repeatable)
   --format text|json|ndjson   (default text; ndjson under --json)
-  --long,    -l       Add flags, versions and extra fields to the rows
+  --long              Add flags, versions and extra fields to the rows
   --include/--exclude <glob>, --overwrite, --on-duplicate, --flat,
   --preserve-mtime    As in \`extract\`
   --skip-unsafe       Skip unsafe names instead of failing

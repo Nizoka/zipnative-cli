@@ -67,7 +67,7 @@ export async function list(args: ParsedArgs): Promise<void> {
     if (validate !== undefined && validate !== 'lazy' && validate !== 'eager') {
         throw new CliError(`--validate must be "lazy" or "eager", got "${validate}".`, 2);
     }
-    const long = hasFlag(args.flags, 'long', 'l');
+    const long = hasFlag(args.flags, 'long');
     const filter = parseNameFilter(args);
 
     const bytes = await readArchiveBytes(resolveInputPath(args));

@@ -114,7 +114,7 @@
   smoke test against `dist/cli.cjs`, the veraZIP vendor test, and
   `tests/docs/consistency.test.ts` (command counts, `E_*` codes, the `ZIP_*` mapping, the
   77-export map, the limits table, the schema subjects).
-- **1062 tests, 45 files, all green.** Coverage above the enforced thresholds
+- **1063 tests, 45 files, all green.** Coverage above the enforced thresholds
   (statements 85 / branches 75 / functions 85 / lines 85).
 
 ## Independent audit (this release)
@@ -134,7 +134,7 @@
 ## Validation
 
 - `npm run typecheck:all` — clean · `npm run lint` — 0 errors ·
-  `npm run test:coverage` — 1062/1062 (8 platform-skipped), statements 97 % / branches 92 % / functions 99 % / lines 98 %, thresholds met · `npm run build` — ok ·
+  `npm run test:coverage` — 1063/1063 (8 platform-skipped), statements 97 % / branches 92 % / functions 99 % / lines 98 %, thresholds met · `npm run build` — ok ·
   `npm audit --audit-level=high` — 0 vulnerabilities.
 - Built-binary smoke (`node dist/cli.cjs`): `--version --json` = 1.0.0 / zipnative 1.0.0,
   `--help` (15 commands, four groups), `doctor` (`deflate-tier: node-zlib`, workers

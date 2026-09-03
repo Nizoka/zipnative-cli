@@ -155,10 +155,16 @@ describe('emitJsonReport', () => {
         expect(out.text()).toContain('\n  "archive"');
     });
 
-    it('--summary wins over --fields when a summary is provided', () => {
+    it('--summary selects the summary shape and --fields then projects it', () => {
+        const out = captureStdout();
+        emitJsonReport(parseArgs(['--summary', '--fields', 'entryCount']), full, summary);
+        expect(JSON.parse(out.text())).toEqual({ entryCount: 2 });
+    });
+
+    it('--fields on a summary omits paths the summary does not have', () => {
         const out = captureStdout();
         emitJsonReport(parseArgs(['--summary', '--fields', 'archive']), full, summary);
-        expect(JSON.parse(out.text())).toEqual({ entryCount: 2 });
+        expect(JSON.parse(out.text())).toEqual({});
     });
 
     it('--summary without a summary function falls back to --fields / full', () => {

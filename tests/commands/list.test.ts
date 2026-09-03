@@ -104,8 +104,6 @@ describe('list', () => {
         expect(text).toContain('Flags');
         expect(text).toContain('0644');
         expect(text).toContain('U---');
-        const short = await runText(['--input', zip, '-l']);
-        expect(short).toContain('Flags');
     });
 
     it('accepts a positional archive path', async () => {

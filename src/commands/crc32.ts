@@ -60,17 +60,22 @@ export async function crc32(args: ParsedArgs): Promise<void> {
         for (const r of results) process.stdout.write(`${r.crc32}  ${r.bytes}  ${r.file}\n`);
     }
 
-    emitStatus({ command: 'crc32', files: results.length, bytes: results.reduce((n, r) => n + r.bytes, 0) });
-
     if (expect !== undefined) {
         const got = results[0] as { value: number; crc32: string };
         if (got.value !== expect) {
             throw new CliError(
-                format === 'json' ? `CRC-32 mismatch: expected ${crcHex(expect)}, got ${got.crc32}` : `CRC-32 mismatch: expected ${crcHex(expect)}, got ${got.crc32}`,
+                `CRC-32 mismatch: expected ${crcHex(expect)}, got ${got.crc32}`,
                 1,
                 ErrorCode.CHECK_FAILED,
                 { detail: { expectedCrc: expect, actualCrc: got.value } },
             );
         }
     }
+
+    emitStatus({
+        command: 'crc32',
+        files: results.length,
+        bytes: results.reduce((n, r) => n + r.bytes, 0),
+        ...(expect !== undefined ? { expect: crcHex(expect), matched: true } : {}),
+    });
 }

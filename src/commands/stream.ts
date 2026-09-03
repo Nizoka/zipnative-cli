@@ -66,7 +66,7 @@ export async function stream(args: ParsedArgs): Promise<void> {
     if (outputDir !== undefined) validatePath(outputDir);
     const mode: 'list' | 'extract' | 'cat' = outputDir !== undefined ? 'extract' : catNames.length > 0 ? 'cat' : 'list';
     const format = parseFormat(args, ['text', 'json', 'ndjson'] as const, isJsonMode() ? 'ndjson' : 'text');
-    const long = hasFlag(args.flags, 'long', 'l');
+    const long = hasFlag(args.flags, 'long');
     const overwrite = hasFlag(args.flags, 'overwrite');
     const skipUnsafe = hasFlag(args.flags, 'skip-unsafe');
     const skipUnsupported = hasFlag(args.flags, 'skip-unsupported');
