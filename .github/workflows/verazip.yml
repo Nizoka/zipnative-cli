@@ -1,0 +1,292 @@
+name: ISO 21320-1 Validation (veraZIP)
+
+# veraZIP — zipnative-cli's analogue of pdfnative-cli's veraPDF gate.
+#
+# WHAT: the BUILT binary (dist/cli.cjs) writes a corpus of 34 archives
+# (scripts/generate-zip-corpus.mjs → test-output/zip/ + manifest.json)
+# covering a representative sample of the features the CLI exposes:
+# store/deflate, --stream, --parallel, --deterministic, zip64, directory
+# entries, comments, modify append-only / --compact … plus raw-crafted
+# NEGATIVE CANARIES (hostile archives built byte by byte, never by the
+# CLI) that the validator MUST reject. scripts/validate-zip.mjs — a
+# vendored copy of zipnative's ISO/IEC 21320-1:2015 validator with its
+# own independent raw parser (it never imports the engine, so the engine
+# is not attesting itself) — then checks every archive clause by clause
+# and compares the verdict with the manifest's expectation:
+#   level 0  ISO/IEC 21320-1 clause checks + APPNOTE cross-checks
+#            (CD↔LFH agreement, offsets, overlap). ALWAYS runs.
+#   level 1  foreign integrity pass (unzip -t, 7z t, python -m zipfile
+#            -t, bsdtar -tf, jar tf) over the conformant corpus. Absent
+#            tools are SKIPped, never simulated.
+# An unexpected pass of a canary (XPASS) is fatal, so a validator that
+# accepts everything fails the run instead of turning it green.
+#
+# WHY BLOCKING ON LINUX *AND* WINDOWS: the ZIP the CLI writes must be the
+# same bytes on both platforms (deterministic builds are a semver-major
+# contract), the corpus generator exercises the Windows-specific sink
+# paths (reserved device names, `\` separators, case-folded collisions),
+# and the level-1 tool set differs per runner image — a Windows-only
+# rejection by bsdtar (tar.exe) or a Linux-only one by unzip would
+# otherwise go unnoticed. Status: BLOCKING in zipnative-cli as of 1.0.0
+# (precedent: zipnative's conformance gate, pdfnative-cli's veraPDF gate
+# blocking since 1.4.0). The validate step has no `continue-on-error`.
+#
+# Exit codes of scripts/validate-zip.mjs:
+#   0 all expectations met · 1 conformance FAIL / XPASS / level-1
+#   rejection / canary drift · 2 no corpus · 3 INFRA (VERAZIP_REQUIRED=1
+#   and no level-1 tool usable, or a file produced an INFRA outcome —
+#   not a verdict).
+#
+# NOTE on `paths:` filters vs. required checks: this workflow only triggers
+# when the listed paths change. GitHub reports a path-filtered workflow that
+# did not run as "Expected — Waiting for status" on a PR, which BLOCKS merging
+# forever if the check is marked "required" in branch protection. Before
+# making this job a required check, either drop the `paths:` filters (run it
+# on every PR) or add a companion workflow with `paths-ignore` mirroring this
+# list that reports a passing status of the same name.
+#
+# Level-1 tools come from the runner images, never from npm — the package
+# keeps its zero-runtime-dependency policy (`zipnative` is the only runtime
+# dependency) and nothing is downloaded:
+#   ubuntu-latest   unzip, 7z (p7zip), python3, jar (Temurin), GNU tar —
+#                   NOT bsdtar, so the bsdtar leg reports SKIP on Linux.
+#   windows-latest  7z (7-Zip), tar.exe (bsdtar), python, jar (Temurin) —
+#                   no unzip, so the unzip leg reports SKIP on Windows.
+# Tool versions are echoed into the job summary first, so a failure is
+# attributable to "our bug" vs "runner image tool drift".
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'src/**'
+      - 'scripts/**'
+      - 'samples/input/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsup.config.ts'
+      - 'tsconfig.json'
+      - '.github/workflows/verazip.yml'
+  pull_request:
+    branches: [main, master]
+    paths:
+      - 'src/**'
+      - 'scripts/**'
+      - 'samples/input/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsup.config.ts'
+      - 'tsconfig.json'
+      - '.github/workflows/verazip.yml'
+  # Manual runs against any branch from the Actions UI.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verazip-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Fail-closed: zero usable level-1 integrity tools is an INFRA failure
+  # (exit 3), never a silent skip that would leave the step green.
+  VERAZIP_REQUIRED: '1'
+  VERAZIP_REPORT_DIR: test-output/zip/reports
+
+jobs:
+  verazip-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Record tool versions
+        run: |
+          {
+            echo '## veraZIP level-1 tool versions (ubuntu-latest)'
+            echo '```'
+            unzip -v | head -1 || true
+            7z i | head -3 || true
+            python3 --version || true
+            tar --version | head -1 || true
+            java -version 2>&1 | head -1 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build
+        run: npm run build
+
+      - name: Generate ZIP corpus
+        # Drives the BUILT dist/cli.cjs; dist/ comes from the Build step above.
+        run: npm run corpus:zip
+
+      # BLOCKING (see header). The exit code drives the step outcome — the
+      # step fails naturally on a non-zero exit — and the summary step below
+      # surfaces the verdict:
+      #   0 all expectations met · 1 conformance FAIL / XPASS / level-1
+      #   rejection / canary · 2 no corpus · 3 INFRA (not a verdict).
+      # Plain redirects only (no process substitution) so the identical
+      # script runs under Git Bash on the Windows job.
+      - name: Validate ZIP corpus (blocking)
+        id: validate
+        shell: bash
+        run: |
+          set +e
+          node scripts/validate-zip.mjs > verazip-report.txt 2> verazip-stderr.txt
+          code=$?
+          cat verazip-report.txt
+          [ -s verazip-stderr.txt ] && cat verazip-stderr.txt >&2
+          echo "exit_code=${code}" >> "$GITHUB_OUTPUT"
+          exit "${code}"
+
+      # Per-file JSON reports + summary.json live under
+      # test-output/zip/reports/ — upload them so a FAIL / INFRA line can be
+      # diagnosed without re-running the job.
+      - name: Upload veraZIP report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: verazip-report-${{ runner.os }}
+          path: |
+            verazip-report.txt
+            verazip-stderr.txt
+            test-output/zip/manifest.json
+            test-output/zip/reports/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Job summary
+        if: always()
+        shell: bash
+        run: |
+          code='${{ steps.validate.outputs.exit_code }}'
+          case "${code}" in
+            0) verdict='all expectations met' ;;
+            1) verdict='CONFORMANCE failure (FAIL, XPASS, level-1 rejection or canary drift — see report)' ;;
+            2) verdict='no corpus generated' ;;
+            3) verdict='INFRA failure — no usable level-1 tool or an INFRA outcome (NOT a conformance verdict)' ;;
+            *) verdict="unknown (exit ${code:-n/a})" ;;
+          esac
+          {
+            echo "## ISO/IEC 21320-1 validation (veraZIP, blocking, ${{ runner.os }})"
+            echo
+            echo "Step outcome: ${{ steps.validate.outcome }} · exit ${code:-n/a} · ${verdict}"
+            echo
+            echo '```'
+            cat verazip-report.txt 2>/dev/null || echo "(no report produced)"
+            echo '```'
+            if [ -s verazip-stderr.txt ]; then
+              echo
+              echo '<details><summary>validator stderr</summary>'
+              echo
+              echo '```'
+              cat verazip-stderr.txt
+              echo '```'
+              echo '</details>'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  verazip-windows:
+    runs-on: windows-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Record tool versions
+        shell: pwsh
+        run: |
+          "## veraZIP level-1 tool versions (windows-latest)" >> $env:GITHUB_STEP_SUMMARY
+          '```' >> $env:GITHUB_STEP_SUMMARY
+          & "C:\Program Files\7-Zip\7z.exe" i | Select-Object -First 3 >> $env:GITHUB_STEP_SUMMARY
+          tar.exe --version | Select-Object -First 1 >> $env:GITHUB_STEP_SUMMARY
+          python --version >> $env:GITHUB_STEP_SUMMARY
+          java -version 2>&1 | Select-Object -First 1 >> $env:GITHUB_STEP_SUMMARY
+          '```' >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Build
+        run: npm run build
+
+      - name: Generate ZIP corpus
+        run: npm run corpus:zip
+
+      # Same script as the Linux leg — Git Bash on windows-latest.
+      - name: Validate ZIP corpus (blocking)
+        id: validate
+        shell: bash
+        run: |
+          set +e
+          node scripts/validate-zip.mjs > verazip-report.txt 2> verazip-stderr.txt
+          code=$?
+          cat verazip-report.txt
+          [ -s verazip-stderr.txt ] && cat verazip-stderr.txt >&2
+          echo "exit_code=${code}" >> "$GITHUB_OUTPUT"
+          exit "${code}"
+
+      - name: Upload veraZIP report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: verazip-report-${{ runner.os }}
+          path: |
+            verazip-report.txt
+            verazip-stderr.txt
+            test-output/zip/manifest.json
+            test-output/zip/reports/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Job summary
+        if: always()
+        shell: bash
+        run: |
+          code='${{ steps.validate.outputs.exit_code }}'
+          case "${code}" in
+            0) verdict='all expectations met' ;;
+            1) verdict='CONFORMANCE failure (FAIL, XPASS, level-1 rejection or canary drift — see report)' ;;
+            2) verdict='no corpus generated' ;;
+            3) verdict='INFRA failure — no usable level-1 tool or an INFRA outcome (NOT a conformance verdict)' ;;
+            *) verdict="unknown (exit ${code:-n/a})" ;;
+          esac
+          {
+            echo "## ISO/IEC 21320-1 validation (veraZIP, blocking, ${{ runner.os }})"
+            echo
+            echo "Step outcome: ${{ steps.validate.outcome }} · exit ${code:-n/a} · ${verdict}"
+            echo
+            echo '```'
+            cat verazip-report.txt 2>/dev/null || echo "(no report produced)"
+            echo '```'
+            if [ -s verazip-stderr.txt ]; then
+              echo
+              echo '<details><summary>validator stderr</summary>'
+              echo
+              echo '```'
+              cat verazip-stderr.txt
+              echo '```'
+              echo '</details>'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
