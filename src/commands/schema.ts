@@ -526,7 +526,7 @@ function statusSchema(): JsonSchema {
         $schema: DRAFT,
         $id: id('status'),
         title: 'zipnative-cli --json success status envelope',
-        description: 'One JSON line on stderr after a successful write / dry-run of create, modify, extract, stream, cat, inflate, crc32. Fields beyond the required ones are command-specific (documented in AGENTS.md).',
+        description: 'One JSON line on stderr after a successful run (or --dry-run) of create, modify, extract, stream, cat, inflate, or after crc32. Fields beyond the required ones are command-specific (documented in AGENTS.md).',
         type: 'object',
         required: ['ok', 'command'],
         properties: {

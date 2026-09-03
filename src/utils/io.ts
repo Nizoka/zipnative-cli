@@ -131,9 +131,16 @@ export async function writeFileStream(
     onChunk?: (bytes: number) => void,
 ): Promise<void> {
     const stream = createWriteStream(filePath);
+    // Settle only on 'close': the file descriptor is opened asynchronously, so
+    // rejecting on the first pull failure (before 'open') would let the caller
+    // unlink the path and then have the deferred open() recreate an empty file.
+    let failure: unknown;
     await new Promise<void>((resolve, reject) => {
-        stream.on('error', reject);
-        stream.on('finish', resolve);
+        stream.on('error', (e: unknown) => { failure ??= e; });
+        stream.on('close', () => {
+            if (failure !== undefined) reject(failure);
+            else resolve();
+        });
         (async () => {
             for await (const chunk of chunks) {
                 onChunk?.(chunk.length);
@@ -144,8 +151,8 @@ export async function writeFileStream(
             }
             stream.end();
         })().catch((e: unknown) => {
+            failure ??= e;
             stream.destroy();
-            reject(e);
         });
     });
 }

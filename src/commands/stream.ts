@@ -243,7 +243,10 @@ async function pumpEntry(
         const mapped = mapZipError(e, `Failed to read entry "${name}"`, name);
         if (skipUnsupported && mapped.code === ErrorCode.UNSUPPORTED) {
             skipped.push({ name, reason: 'unsupported' });
-            // The core consumed / cannot consume this payload; nothing more to do.
+            // The payload could not be decoded — discard its raw bytes so the
+            // forward iterator can advance (it refuses to seek past an
+            // unconsumed entry with ZIP_API_MISUSE).
+            await item.skip();
             return 0;
         }
         throw mapped;

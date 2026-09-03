@@ -13,6 +13,7 @@ export interface ParsedArgs {
  *   --flag=value      flags.flag = 'value'
  *   -f value          flags.f   = 'value'
  *   --flag            flags.flag = true   (boolean)
+ *   --flag -          flags.flag = '-'    (a lone dash is a VALUE: stdin/stdout)
  *   --                stop flag parsing; rest → positionals
  *   bare token        positionals[]
  *
@@ -66,7 +67,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
             } else {
                 const key = token.slice(2);
                 const next = argv[i + 1];
-                if (next !== undefined && !next.startsWith('-')) {
+                if (next !== undefined && (next === '-' || !next.startsWith('-'))) {
                     // --flag value
                     setFlag(key, next);
                     i++;
@@ -75,11 +76,11 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
                     setFlag(key, true);
                 }
             }
-        } else if (token.startsWith('-') && token.length === 2) {
+        } else if (token.startsWith('-') && token.length === 2 && token !== '--') {
             // -f value
             const key = token.slice(1);
             const next = argv[i + 1];
-            if (next !== undefined && !next.startsWith('-')) {
+            if (next !== undefined && (next === '-' || !next.startsWith('-'))) {
                 setFlag(key, next);
                 i++;
             } else {

@@ -20,7 +20,8 @@ Global options (any command):
   --dry-run         Validate inputs and plan without writing output (create,
                     extract, modify, stream, cat, inflate, batch)
   --strict          Escalate the first engine diagnostic into E_CHECK_FAILED
-                    before any output byte
+                    before any output byte (verify: the report is printed and
+                    the verdict becomes E_VERIFY_FAILED)
   --max-entries <n>            Security bounds (zipnative ZipLimits); "none"
   --max-entry-size <size>      disables a bound. Defaults: 100000 entries,
   --max-total-size <size>      1 GiB per entry, 8 GiB total, ratio 1024:1,
@@ -116,9 +117,11 @@ Compression & determinism:
   --store-ext png,jpg,zip  Store (no deflate) entries with these extensions
 
 Output modes:
-  --stream                 Constant-memory writer (data-descriptor layout,
-                           byte-identical to buffered output); entries > 4 GiB
-                           are refused (ZIP_UNSUPPORTED_ZIP64_STREAMING)
+  --stream                 Constant-memory writer: file inputs are streamed
+                           (data-descriptor layout, so the bytes differ from
+                           the buffered layout — the content is identical);
+                           entries > 4 GiB are refused
+                           (ZIP_UNSUPPORTED_ZIP64_STREAMING)
   --chunk-size <size>      Chunk size for --stream (default 65536)
   --parallel               Deflate across a worker pool (zipnative/worker);
                            byte-identical to the sequential writer per tier
@@ -159,6 +162,7 @@ zipnative inspect — Forensic archive report with CI assertions
 
 Usage:
   zipnative inspect --input <a.zip> [--format json|text] [--check <assert>]...
+  zipnative inspect <a.zip> [options]
 
 Options:
   --input,   -i       Archive path (default: stdin). Opened EAGERLY: every local
@@ -299,6 +303,7 @@ zipnative verify — Deep integrity verification in one call
 
 Usage:
   zipnative verify --input <a.zip> [--format json|text] [--strict]
+  zipnative verify <a.zip> [options]
 
 Options:
   --input,   -i       Archive path (default: stdin)

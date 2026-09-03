@@ -37,7 +37,11 @@ async function verifyIssue(args: ParsedArgs): Promise<void> {
     assertJsonSizeLimit(buf);
     const result: GovernanceValidation = validateGovernanceDraft(buf.toString('utf8'));
 
-    const jsonOut = isJsonMode() || getStringFlag(args.flags, 'format', 'f') === 'json';
+    const format = getStringFlag(args.flags, 'format', 'f');
+    if (format !== undefined && format !== 'json' && format !== 'text') {
+        throw new CliError(`--format must be "json" or "text", got "${format}".`, 2);
+    }
+    const jsonOut = isJsonMode() || format === 'json';
     if (jsonOut) {
         const pretty = hasFlag(args.flags, 'pretty') || !isJsonMode();
         process.stdout.write(serializeJson(result, pretty) + '\n');
