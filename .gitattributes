@@ -1,0 +1,14 @@
+# Normalize line endings to LF for all text files.
+# CRITICAL for a ZIP tool: a single autocrlf rewrite of a binary fixture or a
+# sample input silently corrupts offsets, CRCs and the deterministic-build
+# proofs (zipnative and pdfnative both lost fixture bytes to exactly this).
+* text=auto eol=lf
+
+# Binary fixtures and sample inputs — never touched by line-ending conversion
+# or diffed as text.
+tests/fixtures/** binary
+samples/input/binary/** binary
+*.zip binary
+*.jar binary
+*.bin binary
+*.png binary

@@ -1,0 +1,116 @@
+{
+  "name": "zipnative-cli",
+  "version": "1.0.0",
+  "description": "Official CLI for zipnative — create deterministic, reproducible ZIP archives (store/deflate, streaming, worker-parallel), list and inspect without extracting, extract with secure-by-default guards (zip-slip, zip-bomb, symlink, duplicate-path and device-name refusals), verify integrity in one call, stream unseekable input, modify archives without recompression, and drive it all from AI agents through a stable --json contract carrying zipnative's frozen error codes. ISO/IEC 21320-1:2015 conformance validated in CI. Zero extra runtime dependencies.",
+  "type": "module",
+  "bin": {
+    "zipnative": "./dist/cli.cjs"
+  },
+  "main": "./dist/cli.cjs",
+  "module": "./dist/cli.js",
+  "types": "./dist/cli.d.ts",
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md",
+    "llms.txt"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit",
+    "typecheck:tests": "tsc --project tsconfig.test.json --noEmit",
+    "typecheck:all": "npm run typecheck && npm run typecheck:tests",
+    "corpus:zip": "node scripts/generate-zip-corpus.mjs",
+    "validate:zip": "npm run build && npm run corpus:zip && node scripts/validate-zip.mjs",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "zip",
+    "unzip",
+    "zip64",
+    "archive",
+    "compression",
+    "decompression",
+    "deflate",
+    "inflate",
+    "cli",
+    "zipnative",
+    "zero-dependency",
+    "typescript",
+    "streaming",
+    "random-access",
+    "incremental",
+    "deterministic",
+    "reproducible-builds",
+    "zip-slip",
+    "zip-bomb",
+    "secure-by-default",
+    "iso-21320",
+    "conformance",
+    "crc32",
+    "verify",
+    "extract",
+    "command-line",
+    "shell-completions",
+    "powershell-completion",
+    "json-output",
+    "json-schema",
+    "ai-agent",
+    "agentic",
+    "ai-governance",
+    "hitl",
+    "human-in-the-loop",
+    "automation",
+    "batch",
+    "pipeline",
+    "llms-txt",
+    "mcp",
+    "sbom",
+    "supply-chain"
+  ],
+  "author": "Nizoka <hello@pdfnative.dev> (https://pdfnative.dev)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Nizoka/zipnative-cli.git"
+  },
+  "homepage": "https://github.com/Nizoka/zipnative-cli#readme",
+  "bugs": {
+    "url": "https://github.com/Nizoka/zipnative-cli/issues"
+  },
+  "funding": {
+    "type": "individual",
+    "url": "https://plika.app"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "dependencies": {
+    "zipnative": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@vitest/coverage-v8": "^4.1.7",
+    "eslint": "^9.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.4.0",
+    "typescript-eslint": "^8.59.2",
+    "vitest": "^4.1.7"
+  },
+  "overrides": {
+    "esbuild": "^0.28.1",
+    "js-yaml": "^4.3.1",
+    "nanoid": "^3.3.18",
+    "vite": "^8.0.16"
+  }
+}
