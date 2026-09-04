@@ -1,27 +1,40 @@
 import { CliError } from './error.js';
+import { BOOLEAN_FLAGS } from './flags.js';
 
 export interface ParsedArgs {
     readonly flags: Record<string, string | boolean | readonly string[]>;
     readonly positionals: readonly string[];
 }
 
+export interface ParseOptions {
+    /**
+     * Flags that never take a value (bare names). Defaults to the CLI's own
+     * table (utils/flags.ts) so `--json list` and `list --long a.zip` keep the
+     * positional. Pass an empty set to get the value-greedy legacy behaviour.
+     */
+    readonly booleans?: ReadonlySet<string>;
+}
+
 /**
  * Zero-dependency argument parser.
  *
  * Supported forms:
- *   --flag value      flags.flag = 'value'
- *   --flag=value      flags.flag = 'value'
+ *   --flag value      flags.flag = 'value'   (value-taking flags only)
+ *   --flag=value      flags.flag = 'value'   (works for boolean flags too: use getBoolFlag)
  *   -f value          flags.f   = 'value'
- *   --flag            flags.flag = true   (boolean)
- *   --flag -          flags.flag = '-'    (a lone dash is a VALUE: stdin/stdout)
+ *   --flag            flags.flag = true      (boolean flags never consume the next token)
+ *   --flag -          flags.flag = '-'       (a lone dash is a VALUE: stdin/stdout)
+ *   --flag -1         flags.flag = '-1'      (a dash followed by a digit is a VALUE)
  *   --                stop flag parsing; rest → positionals
  *   bare token        positionals[]
  *
- * When the same long flag is provided more than once with a string value
+ * Combined short flags (`-lq`) are refused with a usage error — write `-l -q`.
+ * When the same value-taking flag is provided more than once
  * (e.g. `--remove a.txt --remove b.txt`), values are collected into a
  * `readonly string[]`. Use `getStringFlagAll()` to retrieve them.
  */
-export function parseArgs(argv: readonly string[]): ParsedArgs {
+export function parseArgs(argv: readonly string[], options: ParseOptions = {}): ParsedArgs {
+    const booleans = options.booleans ?? BOOLEAN_FLAGS;
     const flags: Record<string, string | boolean | string[]> = {};
     const positionals: string[] = [];
     let i = 0;
@@ -44,6 +57,9 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
         }
     };
 
+    // A token is a VALUE (never a flag) when it is a lone `-` or a negative number.
+    const isValueToken = (tok: string): boolean => tok === '-' || /^-\d/.test(tok) || !tok.startsWith('-');
+
     while (i < argv.length) {
         const token = argv[i] as string;
 
@@ -60,27 +76,33 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
         if (token.startsWith('--')) {
             const eqIdx = token.indexOf('=');
             if (eqIdx !== -1) {
-                // --flag=value
+                // --flag=value (explicit — also the way to write `--bool=false`)
                 const key = token.slice(2, eqIdx);
                 const value = token.slice(eqIdx + 1);
                 setFlag(key, value);
             } else {
                 const key = token.slice(2);
                 const next = argv[i + 1];
-                if (next !== undefined && (next === '-' || !next.startsWith('-'))) {
+                if (!booleans.has(key) && next !== undefined && isValueToken(next)) {
                     // --flag value
                     setFlag(key, next);
                     i++;
                 } else {
-                    // --flag (boolean)
+                    // --flag (boolean, or a value flag with nothing usable after it)
                     setFlag(key, true);
                 }
             }
-        } else if (token.startsWith('-') && token.length === 2 && token !== '--') {
+        } else if (token.startsWith('-') && token.length > 1 && !/^-\d/.test(token)) {
+            if (token.length > 2) {
+                throw new CliError(
+                    `Combined short flags are not supported ("${token}"): write them separately, e.g. ${[...token.slice(1)].map((c) => `-${c}`).join(' ')}.`,
+                    2,
+                );
+            }
             // -f value
             const key = token.slice(1);
             const next = argv[i + 1];
-            if (next !== undefined && (next === '-' || !next.startsWith('-'))) {
+            if (!booleans.has(key) && next !== undefined && isValueToken(next)) {
                 setFlag(key, next);
                 i++;
             } else {
@@ -143,9 +165,23 @@ export function getStringFlagAll(
     return out;
 }
 
-/** Return true if any of the given flag names is present (boolean or string value). */
+/**
+ * Return true if any of the given flag names is present AND not explicitly
+ * negated (`--flag=false|0|no|off`). A boolean flag written `--flag=false` is
+ * therefore treated as absent by every `hasFlag` caller.
+ */
 export function hasFlag(flags: ParsedArgs['flags'], ...names: string[]): boolean {
-    return names.some((n) => flags[n] !== undefined);
+    return names.some((n) => {
+        const value = flags[n];
+        if (value === undefined) return false;
+        if (typeof value === 'string') return !isNegation(value);
+        return true;
+    });
+}
+
+function isNegation(raw: string): boolean {
+    const v = raw.trim().toLowerCase();
+    return v === 'false' || v === '0' || v === 'no' || v === 'off';
 }
 
 /**
@@ -166,20 +202,8 @@ export function getBoolFlag(
         if (typeof value === 'boolean') return value;
         const v = (typeof value === 'string' ? value : (value[0] ?? '')).trim().toLowerCase();
         if (v === '' || v === 'true' || v === '1' || v === 'yes' || v === 'on') return true;
-        if (v === 'false' || v === '0' || v === 'no' || v === 'off') return false;
+        if (isNegation(v)) return false;
         throw new CliError(`Flag --${name} expects a boolean (true/false), got "${value}".`, 2);
     }
     return undefined;
-}
-
-/**
- * Return a new ParsedArgs with the given flag names removed. Used by `batch`
- * to strip its own flags before forwarding the rest to a task command.
- */
-export function omitFlags(args: ParsedArgs, names: readonly string[]): ParsedArgs {
-    const flags: Record<string, string | boolean | readonly string[]> = {};
-    for (const [k, v] of Object.entries(args.flags)) {
-        if (!names.includes(k)) flags[k] = v;
-    }
-    return { flags, positionals: args.positionals };
 }

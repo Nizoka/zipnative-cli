@@ -1,7 +1,8 @@
 import { parseArgs, hasFlag, getStringFlag } from './utils/args.js';
-import { CliError } from './utils/error.js';
+import { CliError, ErrorCode } from './utils/error.js';
 import { isJsonMode, emitJsonError } from './utils/agent.js';
 import { loadConfig, applyConfigDefaults } from './utils/config.js';
+import { installEpipeGuard } from './utils/io.js';
 import { cliVersion, engineVersion } from './utils/version.js';
 
 // Lazy-import commands to keep startup fast for --help / --version
@@ -145,7 +146,7 @@ Usage:
 
 Options:
   --input,   -i       Archive path (default: stdin)
-  --format text|json|ndjson   (default text; json under --json)
+  --format, -f text|json|ndjson   (default text; json under --json)
   --long              Add mode, flags, versions, offsets and extra fields
   --validate lazy|eager       Cross-check every local header up front (eager)
   --include <glob>    Keep only matching names (repeatable)
@@ -167,7 +168,7 @@ Usage:
 Options:
   --input,   -i       Archive path (default: stdin). Opened EAGERLY: every local
                       header cross-checked, overlap table built up front.
-  --format text|json  (default text; json under --json)
+  --format, -f text|json  (default text; json under --json)
   --entries           Include every entry (long form) in the report
   --entry <name>      Include only the named entries (repeatable)
   --extra             Include extra-field payloads as hex
@@ -254,7 +255,7 @@ Options:
   --list              List entries as they arrive (default mode)
   --output-dir, -d    Extract under <dir> (sanitizeEntryPath + containment)
   --cat <name>        Write the named entry's data to stdout (repeatable)
-  --format text|json|ndjson   (default text; ndjson under --json)
+  --format, -f text|json|ndjson   (default text; ndjson under --json)
   --long              Add flags, versions and extra fields to the rows
   --include/--exclude <glob>, --overwrite, --on-duplicate, --flat,
   --preserve-mtime    As in \`extract\`
@@ -310,7 +311,7 @@ Usage:
 
 Options:
   --input,   -i       Archive path (default: stdin)
-  --format text|json  (default text; json under --json)
+  --format, -f text|json  (default text; json under --json)
   --strict            Also fail when any diagnostic was emitted
   --summary           { ok, entries, failed, skipped, diagnostics, error? }
   --fields a,b.c      Dot-path projection
@@ -332,7 +333,7 @@ Options:
   --input,   -i       File (repeatable); default stdin
   --seed <hex>        Continue a running checksum from this value
   --expect <hex>      Single input: exit 1 / E_CHECK_FAILED on mismatch
-  --format text|json  (default text: "<crc>  <bytes>  <file>")
+  --format, -f text|json  (default text: "<crc>  <bytes>  <file>")
 
 Streams input in 64 KiB chunks — constant memory for any size.
 `;
@@ -386,7 +387,7 @@ Manifest mode:
   --allow-codec-load  Permit a "codec" flag inside tasks (executes user code)
 
 Output:
-  --format text|json  (default text; json under --json)
+  --format, -f text|json  (default text; json under --json)
   --summary           { ok, command, mode, total, succeeded, failed, skipped }
   --fields a,b.c      Dot-path projection
   --dry-run           Validate and print the plan; execute nothing
@@ -450,7 +451,7 @@ Usage:
 
 Options (verify-issue):
   --input, -i         Draft path (alternative to the positional; "-" = stdin)
-  --format json|text  Report format (json under --json)
+  --format, -f json|text  Report format (json under --json)
 
 Agents are draftsmen, never autonomous submitters: no runtime dependencies, no
 anti-goals (encryption, other formats, multi-disk, repair, I/O in the engine),
@@ -495,7 +496,7 @@ async function loadCommand(name: string): Promise<CommandFn> {
         case 'govern': return (await import('./commands/govern.js')).govern;
         default:
             return Promise.reject(
-                new CliError(`Unknown command: ${name}. Run zipnative --help for usage.`, 1),
+                new CliError(`Unknown command: ${name}. Run zipnative --help for usage.`, 2, ErrorCode.USAGE),
             );
     }
 }
@@ -504,6 +505,7 @@ async function loadCommand(name: string): Promise<CommandFn> {
 let activeCommand: string | null = null;
 
 async function main(): Promise<void> {
+    installEpipeGuard();
     const argv = process.argv.slice(2);
     const args = parseArgs(argv);
 
@@ -545,8 +547,16 @@ async function main(): Promise<void> {
     const commandName = args.positionals[0];
 
     if (commandName === undefined) {
-        process.stdout.write(USAGE);
-        process.exit(0);
+        if (argv.length === 0) {
+            process.stdout.write(USAGE);
+            process.exit(0);
+        }
+        // Flags but no command (`zipnative --frob`, `zipnative --json`): a usage
+        // error, never the help text with exit 0.
+        throw new CliError(
+            `No command given (got: ${argv.join(' ')}). Run zipnative --help for usage.`,
+            2,
+        );
     }
 
     activeCommand = commandName;
@@ -554,8 +564,7 @@ async function main(): Promise<void> {
     if (hasFlag(args.flags, 'help', 'h')) {
         const usage = COMMAND_USAGE[commandName];
         if (usage === undefined) {
-            process.stderr.write(`Unknown command: ${commandName}. Run zipnative --help for usage.\n`);
-            process.exit(1);
+            throw new CliError(`Unknown command: ${commandName}. Run zipnative --help for usage.`, 2);
         }
         process.stdout.write(usage);
         process.exit(0);

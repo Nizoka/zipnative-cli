@@ -5,7 +5,6 @@ import {
     getStringFlagAll,
     hasFlag,
     getBoolFlag,
-    omitFlags,
 } from '../../src/utils/args.js';
 import { CliError } from '../../src/utils/error.js';
 
@@ -76,10 +75,9 @@ describe('parseArgs', () => {
         expect(result.flags['weird-unknown-flag']).toBe('val');
     });
 
-    it('treats a lone "-" and multi-letter single-dash tokens as positionals', () => {
-        const result = parseArgs(['-', '-abc']);
-        expect(result.positionals).toEqual(['-', '-abc']);
-        expect(result.flags).toEqual({});
+    it('treats a lone "-" as a positional and refuses combined short flags', () => {
+        expect(parseArgs(['-']).positionals).toEqual(['-']);
+        expect(() => parseArgs(['-abc'])).toThrow(CliError);
     });
 
     it('collects repeated string flags into an array in order', () => {
@@ -207,24 +205,3 @@ describe('getBoolFlag', () => {
     });
 });
 
-describe('omitFlags', () => {
-    it('removes the named flags and keeps the rest', () => {
-        const args = parseArgs(['--manifest', 'm.json', '--json', '--level', '9', 'pos']);
-        const out = omitFlags(args, ['manifest', 'json']);
-        expect(out.flags).toEqual({ level: '9' });
-        expect(out.positionals).toEqual(['pos']);
-    });
-
-    it('returns a new object and leaves the input untouched', () => {
-        const args = parseArgs(['--a', '1', '--b', '2']);
-        const out = omitFlags(args, ['a']);
-        expect(out).not.toBe(args);
-        expect(args.flags).toEqual({ a: '1', b: '2' });
-        expect(out.flags).toEqual({ b: '2' });
-    });
-
-    it('is a no-op for names that are not present', () => {
-        const args = parseArgs(['--a', '1']);
-        expect(omitFlags(args, ['zzz']).flags).toEqual({ a: '1' });
-    });
-});

@@ -121,8 +121,53 @@ describe.skipIf(!existsSync(BIN))('integration: built binary smoke (dist/cli.cjs
         expect(missing.status).toBe(1);
         const env = JSON.parse(missing.stderr.trim().split('\n').pop() as string) as { ok: boolean; command: string; error: { code: string } };
         expect(env).toMatchObject({ ok: false, command: 'list', error: { code: 'E_IO' } });
-        const unknown = zipnative(['frobnicate']);
-        expect(unknown.status).toBe(1);
+        const unknown = zipnative(['frobnicate', '--json']);
+        expect(unknown.status).toBe(2);
+        expect(JSON.parse(unknown.stderr.trim().split('\n').pop() as string)).toMatchObject({ ok: false, error: { code: 'E_USAGE' } });
         expect(unknown.stderr).toContain('Unknown command');
+    });
+
+    it('global flags before the command and booleans before positionals are order-independent (A-01)', async () => {
+        const first = zipnative(['--json', 'list', '--input', join(dir, 'absent.zip')]);
+        expect(first.status).toBe(1);
+        expect(JSON.parse(first.stderr.trim().split('\n').pop() as string)).toMatchObject({ ok: false, command: 'list', error: { code: 'E_IO' } });
+
+        await mkdir(join(dir, 'src'));
+        await writeFile(join(dir, 'src', 'a.txt'), 'hello');
+        const created = zipnative(['create', '--deterministic', join(dir, 'src'), '-o', join(dir, 'a.zip')]);
+        expect(created.status).toBe(0);
+        const listed = zipnative(['list', '--long', join(dir, 'a.zip')]);
+        expect(listed.status).toBe(0);
+        expect(listed.stdout).toContain('src/a.txt');
+
+        const noCommand = zipnative(['--frob']);
+        expect(noCommand.status).toBe(2);
+        expect(noCommand.stdout).toBe('');
+        expect(noCommand.stderr).toContain('No command given');
+    });
+
+    it('a downstream pipe closing early (EPIPE) ends the process quietly with exit 0 (A-03)', async () => {
+        await mkdir(join(dir, 'big'));
+        await writeFile(join(dir, 'big', 'big.bin'), Buffer.alloc(6 * 1024 * 1024, 7));
+        expect(zipnative(['create', join(dir, 'big'), '--method', 'store', '-o', join(dir, 'big.zip')]).status).toBe(0);
+        for (const extra of [[], ['--json']]) {
+            const { spawn } = await import('node:child_process');
+            const child = spawn(process.execPath, [BIN, 'cat', join(dir, 'big.zip'), 'big/big.bin', ...extra], {
+                stdio: ['ignore', 'pipe', 'pipe'],
+                env: { ...process.env, NO_COLOR: '1' },
+            });
+            let stderr = '';
+            child.stderr.setEncoding('utf8');
+            child.stderr.on('data', (d: string) => { stderr += d; });
+            let seen = 0;
+            child.stdout.on('data', (chunk: Buffer) => {
+                seen += chunk.length;
+                if (seen >= 10) child.stdout.destroy();
+            });
+            const status = await new Promise<number | null>((resolveExit) => child.on('close', (code) => resolveExit(code)));
+            expect(status, stderr).toBe(0);
+            expect(stderr).not.toContain('Unhandled');
+            expect(stderr).not.toContain('EPIPE');
+        }
     });
 });

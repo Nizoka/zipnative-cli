@@ -19,9 +19,26 @@ export function validatePath(filePath: string): void {
 }
 
 /**
- * Read all bytes from stdin.
+ * Refuse to wait for stdin when nothing is piped: an interactive terminal
+ * with no `--input` would otherwise block forever. An explicit `-` is the
+ * caller saying "yes, stdin" and is never guarded.
  */
-export function readStdin(): Promise<Buffer> {
+export function assertStdinNotTty(): void {
+    if (process.stdin.isTTY === true) {
+        throw new CliError(
+            'No input: pass --input <file> (or a positional path), or pipe data on stdin.',
+            2,
+        );
+    }
+}
+
+/**
+ * Read all bytes from stdin.
+ *
+ * @param explicit true when the caller wrote `-` (skip the TTY guard)
+ */
+export function readStdin(explicit = false): Promise<Buffer> {
+    if (!explicit) assertStdinNotTty();
     return new Promise((resolve, reject) => {
         const chunks: Buffer[] = [];
         process.stdin.on('data', (chunk: Buffer) => chunks.push(chunk));
@@ -36,10 +53,42 @@ export function readStdin(): Promise<Buffer> {
  */
 export async function readFileOrStdin(filePath: string | undefined): Promise<Buffer> {
     if (filePath === undefined || filePath === '-') {
-        return readStdin();
+        return readStdin(filePath === '-');
     }
     validatePath(filePath);
     return readFile(filePath);
+}
+
+/**
+ * Install the process-wide stdout/stderr guards once: a closed pipe
+ * (`| head`) is routine, so EPIPE ends the process quietly with exit 0
+ * instead of an unhandled 'error' event; every other stream error is
+ * rethrown so it surfaces as before.
+ */
+let _epipeGuardInstalled = false;
+export function installEpipeGuard(): void {
+    if (_epipeGuardInstalled) return;
+    _epipeGuardInstalled = true;
+    const onError = (err: NodeJS.ErrnoException): void => {
+        if (err.code === 'EPIPE') process.exit(0);
+        throw err;
+    };
+    process.stdout.on('error', onError);
+    process.stderr.on('error', onError);
+}
+
+/** Write to stdout, resolving on completion; EPIPE ends the process quietly (exit 0). */
+function writeStdout(data: Uint8Array): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+        process.stdout.write(data, (err) => {
+            if (err) {
+                if ((err as NodeJS.ErrnoException).code === 'EPIPE') process.exit(0);
+                reject(err);
+            } else {
+                resolve();
+            }
+        });
+    });
 }
 
 /**
@@ -57,7 +106,10 @@ export async function readBinaryFile(filePath: string): Promise<Uint8Array> {
  * --stream`, `inflate`, `crc32`) so a large input never materialises in memory.
  */
 export function openInputStream(filePath: string | undefined): Readable {
-    if (filePath === undefined || filePath === '-') return process.stdin;
+    if (filePath === undefined || filePath === '-') {
+        if (filePath === undefined) assertStdinNotTty();
+        return process.stdin;
+    }
     validatePath(filePath);
     return createReadStream(filePath);
 }
@@ -82,12 +134,7 @@ export function assertJsonSizeLimit(buf: Uint8Array): void {
  */
 export async function writeOutput(data: Uint8Array, filePath: string | undefined): Promise<void> {
     if (filePath === undefined || filePath === '-') {
-        await new Promise<void>((resolve, reject) => {
-            process.stdout.write(data, (err) => {
-                if (err) reject(err);
-                else resolve();
-            });
-        });
+        await writeStdout(data);
         return;
     }
     validatePath(filePath);
@@ -106,12 +153,7 @@ export async function writeStreamingOutput(
     if (filePath === undefined || filePath === '-') {
         for await (const chunk of chunks) {
             total += chunk.length;
-            await new Promise<void>((resolve, reject) => {
-                process.stdout.write(chunk, (err) => {
-                    if (err) reject(err);
-                    else resolve();
-                });
-            });
+            await writeStdout(chunk);
         }
         return total;
     }

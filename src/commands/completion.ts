@@ -16,6 +16,8 @@ import type { ParsedArgs } from '../utils/args.js';
 import { CliError } from '../utils/error.js';
 import { LIMIT_FLAG_NAMES } from '../utils/limits.js';
 
+export { BOOLEAN_FLAGS, COMMAND_BOOLEAN_FLAGS, GLOBAL_BOOLEAN_FLAGS, isBooleanFlag } from '../utils/flags.js';
+
 export interface CommandSpec {
     readonly name: string;
     readonly summary: string;
