@@ -228,6 +228,7 @@ describe('inspect', () => {
                 canonicalOrder: true,
                 utf8Flags: true,
                 noDataDescriptors: true,
+                canonicalLayout: true,
                 deterministic: true,
             });
             expect(doc.diagnostics).toEqual([]);
@@ -247,11 +248,14 @@ describe('inspect', () => {
             expect(doc.determinism.epochTimestamps).toBe(true);
         });
 
-        it('a streamed archive counts data descriptors', async () => {
+        it('a streamed archive is reproducible but not canonical (data descriptors)', async () => {
             const doc = await runJson(['--input', await streamedZip()]);
             expect(doc.stats.dataDescriptor).toBe(1);
             expect(doc.determinism.noDataDescriptors).toBe(false);
-            expect(doc.determinism.deterministic).toBe(false);
+            expect(doc.determinism.canonicalLayout).toBe(false);
+            // The data-descriptor layout is byte-stable for identical inputs:
+            // it must not falsify the reproducibility verdict.
+            expect(doc.determinism.deterministic).toBe(true);
         });
 
         it('prependedData is true on a prefixed archive and the diagnostic is reported', async () => {
@@ -299,13 +303,13 @@ describe('inspect', () => {
             expect(err).toBeUndefined();
             expect(text).toContain(`Archive: ${zip}`);
             expect(text).toContain('Contents:');
-            expect(text).toContain('Determinism: deterministic');
+            expect(text).toContain('Determinism: reproducible, layout canonical');
             expect(text).toMatch(/methods {9}(deflate=2, store=1|store=1, deflate=2)/);
             expect(text).toContain('Entries (3):');
             expect(text).toContain('flags 0x0800');
             expect(text).not.toContain('Diagnostics');
             const prefixed = await run(['--input', await prependedZip()]);
-            expect(prefixed.text).toContain('Determinism: deterministic');
+            expect(prefixed.text).toContain('Determinism: reproducible, layout canonical');
             expect(prefixed.text).toContain('prepended data  true');
             expect(prefixed.text).toContain('Diagnostics (1):');
             expect(prefixed.text).toContain('[ZIP_PREPENDED_DATA]');
@@ -322,6 +326,7 @@ describe('inspect', () => {
                 zip64: false,
                 encrypted: 0,
                 deterministic: true,
+                canonicalLayout: true,
                 diagnostics: 0,
             });
             const withCheck = await run(['--input', zip, '--format', 'json', '--summary', '--check', 'deterministic']);
@@ -419,6 +424,15 @@ describe('inspect', () => {
             const r = await check(zip, 'utf8-names');
             expectFail(r, 'utf8-names');
             expect(r.report.stats.cp437Names).toBe(1);
+        });
+
+        it('deterministic passes on a streamed archive (layout is not reproducibility)', async () => {
+            expectPass(await check(await streamedZip(), 'deterministic'));
+        });
+
+        it('canonical-layout is an alias of no-data-descriptor', async () => {
+            expectPass(await check(await deterministicZip(), 'canonical-layout'));
+            expectFail(await check(await streamedZip(), 'canonical-layout'), 'canonical-layout');
         });
 
         it('no-data-descriptor', async () => {

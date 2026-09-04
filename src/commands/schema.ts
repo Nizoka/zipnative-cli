@@ -300,10 +300,12 @@ function inspectSchema(): JsonSchema {
             },
             determinism: {
                 type: 'object',
-                required: ['epochTimestamps', 'canonicalOrder', 'utf8Flags', 'noDataDescriptors', 'deterministic'],
+                required: ['epochTimestamps', 'canonicalOrder', 'utf8Flags', 'noDataDescriptors', 'canonicalLayout', 'deterministic'],
                 properties: {
                     epochTimestamps: { type: 'boolean' }, canonicalOrder: { type: 'boolean' }, utf8Flags: { type: 'boolean' },
-                    noDataDescriptors: { type: 'boolean' }, deterministic: { type: 'boolean' },
+                    noDataDescriptors: { type: 'boolean' },
+                    canonicalLayout: { type: 'boolean', description: 'No data descriptors (buffered layout). A streamed archive is reproducible but not canonical.' },
+                    deterministic: { type: 'boolean', description: 'Reproducible: epoch timestamps AND canonical order AND UTF-8 flags (layout excluded).' },
                 },
             },
             entries: { type: 'array', items: entryRowSchema, description: 'Present with --entries / --entry.' },
@@ -323,11 +325,12 @@ function inspectSummarySchema(): JsonSchema {
         $id: id('inspect-summary'),
         title: 'zipnative-cli inspect --summary output',
         type: 'object',
-        required: ['entries', 'bytes', 'uncompressedSize', 'zip64', 'encrypted', 'deterministic', 'diagnostics'],
+        required: ['entries', 'bytes', 'uncompressedSize', 'zip64', 'encrypted', 'deterministic', 'canonicalLayout', 'diagnostics'],
         additionalProperties: false,
         properties: {
             entries: { type: 'integer' }, bytes: { type: 'integer' }, uncompressedSize: { type: 'integer' },
             zip64: { type: 'boolean' }, encrypted: { type: 'integer' }, deterministic: { type: 'boolean' },
+            canonicalLayout: { type: 'boolean' },
             diagnostics: { type: 'integer' }, checksPassed: { type: 'boolean' },
         },
     };
@@ -542,7 +545,7 @@ function statusSchema(): JsonSchema {
             files: { type: 'integer' },
             directories: { type: 'integer' },
             tier: { enum: ['pure-pinned', 'injected', 'node-zlib', 'pure'] },
-            layout: { enum: ['append-only', 'compact'] },
+            layout: { enum: ['buffered', 'data-descriptor', 'append-only', 'compact'], description: 'create: buffered | data-descriptor (streamed entries); modify: append-only | compact.' },
             trust: { const: 'local-headers-only' },
             skipped: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, reason: { type: 'string' } } } },
             diagnostics: { type: 'array', items: diagnosticSchema },

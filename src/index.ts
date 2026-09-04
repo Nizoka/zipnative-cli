@@ -173,14 +173,17 @@ Options:
   --extra             Include extra-field payloads as hex
   --check <assert>    Assertion (repeatable, comma-separable). Any failure prints
                       the report then exits 1 with E_CHECK_FAILED:
-                        deterministic, epoch-timestamps, canonical-order,
-                        utf8-names, no-data-descriptor, no-zip64, zip64,
-                        no-encryption, no-symlinks, no-duplicates,
+                        deterministic (reproducible: epoch timestamps +
+                        canonical order + UTF-8 flags), epoch-timestamps,
+                        canonical-order, utf8-names, canonical-layout /
+                        no-data-descriptor (buffered layout — a --stream
+                        archive is reproducible but not canonical), no-zip64,
+                        zip64, no-encryption, no-symlinks, no-duplicates,
                         no-diagnostics, store-only, deflate-only,
                         max-entries=N, min-entries=N, max-uncompressed=<size>,
                         max-ratio=N, has=<name>, method=store|deflate|<id>
   --summary           { entries, bytes, uncompressedSize, zip64, encrypted,
-                        deterministic, diagnostics, checksPassed? }
+                        deterministic, canonicalLayout, diagnostics, checksPassed? }
   --fields a,b.c      Dot-path projection
 
 JSON shape: \`zipnative schema inspect\`.

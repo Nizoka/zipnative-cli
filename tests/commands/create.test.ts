@@ -400,12 +400,22 @@ describe('create', () => {
                 deterministic: true,
                 order: 'canonical',
                 stream: false,
+                layout: 'buffered',
                 parallel: false,
                 tier: 'pure-pinned',
                 diagnostics: [],
             });
             expect(env['bytes']).toBe((await stat(out)).size);
             expect(env['bytesIn']).toBe(TEXT.length + 4096 + 5 + 8);
+        });
+
+        it('--stream reports the data-descriptor layout in the envelope', async () => {
+            process.env['ZIPNATIVE_JSON'] = '1';
+            const src = await makeTree();
+            const out = join(tmp, 'streamed.zip');
+            const stderr = captureStderr();
+            await run([src, '-o', out, '--stream', '--json']);
+            expect(lastEnvelope(stderr)).toMatchObject({ stream: true, layout: 'data-descriptor' });
         });
     });
 

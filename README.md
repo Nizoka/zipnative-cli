@@ -153,7 +153,7 @@ Official CLI for the [`zipnative`](https://github.com/Nizoka/zipnative) engine �
 | Canonical entry order, DOS-epoch timestamps, UTF-8 names | ✅ | The engine's defaults — structurally reproducible everywhere |
 | Cross-runtime byte identity | ✅ | `--deterministic` pins the pure-TS encoder (`tier: "pure-pinned"`); default tier is byte-stable per environment |
 | Parallel identity | ✅ | `create --parallel` is byte-identical to the sequential writer (per tier; unconditional with `--deterministic`); `create --stream` yields the same content in the data-descriptor layout (not the same bytes) |
-| Determinism verdict | ✅ | `inspect` reports `determinism.{epochTimestamps, canonicalOrder, utf8Flags, noDataDescriptors, deterministic}`; `--check deterministic` gates it |
+| Determinism verdict | ✅ | `inspect` reports `determinism.{epochTimestamps, canonicalOrder, utf8Flags, noDataDescriptors, canonicalLayout, deterministic}` — `deterministic` is reproducibility (epoch + canonical order + UTF-8 flags), `canonicalLayout` is the buffered layout (a `--stream` archive is reproducible but not canonical); `--check deterministic` / `--check canonical-layout` gate them |
 | **Not supported** | | |
 | Encryption (read or write) | ❌ | Policy of the engine in 1.x (ZipCrypto is broken); encrypted entries are detected, listed and refused with `ZIP_UNSUPPORTED_ENCRYPTION` |
 | Other archive formats / exotic codecs | ❌ | No 7z, RAR, tar, gzip; the read-side codec registry (`--codec`) is the extension point |
@@ -530,7 +530,7 @@ zipnative inspect --input <a.zip> [--format json|text] [--check <assert>]...
 | `--fields a,b.c` | — | Dot-path projection |
 
 Assertions: `deterministic`, `epoch-timestamps`, `canonical-order`, `utf8-names`,
-`no-data-descriptor`, `no-zip64`, `zip64`, `no-encryption`, `no-symlinks`, `no-duplicates`,
+`no-data-descriptor` / `canonical-layout`, `no-zip64`, `zip64`, `no-encryption`, `no-symlinks`, `no-duplicates`,
 `no-diagnostics`, `store-only`, `deflate-only`, `max-entries=N`, `min-entries=N`,
 `max-uncompressed=<size>`, `max-ratio=N`, `has=<name>`, `method=store|deflate|<id>`.
 JSON shape: `zipnative schema inspect`.

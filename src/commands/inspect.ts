@@ -65,7 +65,16 @@ export interface InspectReport {
         readonly epochTimestamps: boolean;
         readonly canonicalOrder: boolean;
         readonly utf8Flags: boolean;
+        /** No entry uses a data descriptor (the buffered / `add()` layout). */
         readonly noDataDescriptors: boolean;
+        /**
+         * Same as `noDataDescriptors`: the archive has the canonical buffered
+         * layout. A streamed archive (`create --stream`, `addStream()`) is
+         * reproducible run-to-run but carries data descriptors, so it is
+         * `deterministic: true` and `canonicalLayout: false`.
+         */
+        readonly canonicalLayout: boolean;
+        /** Reproducible: epoch timestamps + canonical order + UTF-8 flags. */
         readonly deterministic: boolean;
     };
     readonly entries?: readonly EntryRow[];
@@ -161,7 +170,11 @@ function buildReport(entries: readonly ZipEntry[], archive: InspectReport['archi
             canonicalOrder,
             utf8Flags,
             noDataDescriptors,
-            deterministic: epochTimestamps && canonicalOrder && utf8Flags && noDataDescriptors,
+            canonicalLayout: noDataDescriptors,
+            // Reproducibility only: the data-descriptor layout produced by
+            // streamed writers is byte-stable for identical inputs, so it must
+            // not falsify the verdict (see determinism.md in the engine).
+            deterministic: epochTimestamps && canonicalOrder && utf8Flags,
         },
         diagnostics,
     };
@@ -171,8 +184,8 @@ function buildReport(entries: readonly ZipEntry[], archive: InspectReport['archi
 
 const SIMPLE_CHECKS: readonly string[] = [
     'deterministic', 'epoch-timestamps', 'canonical-order', 'utf8-names', 'no-data-descriptor',
-    'no-zip64', 'zip64', 'no-encryption', 'no-symlinks', 'no-duplicates', 'no-diagnostics',
-    'store-only', 'deflate-only',
+    'canonical-layout', 'no-zip64', 'zip64', 'no-encryption', 'no-symlinks', 'no-duplicates',
+    'no-diagnostics', 'store-only', 'deflate-only',
 ];
 const PARAM_CHECKS: readonly string[] = ['max-entries', 'min-entries', 'max-uncompressed', 'max-ratio', 'has', 'method'];
 
@@ -216,7 +229,8 @@ function evaluateChecks(checks: readonly string[], report: Omit<InspectReport, '
             case 'epoch-timestamps': ok = d.epochTimestamps; detail = ok ? 'all entries at the DOS epoch' : 'non-epoch timestamps present'; break;
             case 'canonical-order': ok = d.canonicalOrder; detail = ok ? 'central directory in canonical raw-name order' : 'not in canonical order'; break;
             case 'utf8-names': ok = d.utf8Flags; detail = ok ? 'non-ASCII names carry the UTF-8 flag' : 'non-ASCII name without the UTF-8 flag'; break;
-            case 'no-data-descriptor': ok = s.dataDescriptor === 0; detail = `${s.dataDescriptor} data-descriptor entries`; break;
+            case 'no-data-descriptor':
+            case 'canonical-layout': ok = s.dataDescriptor === 0; detail = `${s.dataDescriptor} data-descriptor entries`; break;
             case 'no-zip64': ok = !report.archive.isZip64 && s.zip64Entries === 0; detail = `zip64 EOCD: ${report.archive.isZip64}, zip64 entries: ${s.zip64Entries}`; break;
             case 'zip64': ok = report.archive.isZip64 || s.zip64Entries > 0; detail = `zip64 EOCD: ${report.archive.isZip64}, zip64 entries: ${s.zip64Entries}`; break;
             case 'no-encryption': ok = s.encrypted === 0; detail = `${s.encrypted} encrypted entries`; break;
@@ -274,7 +288,7 @@ function renderText(report: InspectReport, source: string): string {
     lines.push(`  names           ${s.utf8Names} utf-8, ${s.cp437Names} cp437, ${s.duplicateNames} duplicates`);
     lines.push(`  dates           ${s.earliestDate ?? '-'} .. ${s.latestDate ?? '-'}`);
     lines.push('');
-    lines.push(`Determinism: ${d.deterministic ? 'deterministic' : 'NOT deterministic'}`);
+    lines.push(`Determinism: ${d.deterministic ? 'reproducible' : 'NOT reproducible'}, layout ${d.canonicalLayout ? 'canonical' : 'data-descriptor (streamed)'}`);
     lines.push(`  epoch timestamps    ${d.epochTimestamps}`);
     lines.push(`  canonical order     ${d.canonicalOrder}`);
     lines.push(`  utf-8 flags         ${d.utf8Flags}`);
@@ -316,6 +330,7 @@ export function inspectSummary(report: InspectReport): Record<string, unknown> {
         zip64: report.archive.isZip64,
         encrypted: report.stats.encrypted,
         deterministic: report.determinism.deterministic,
+        canonicalLayout: report.determinism.canonicalLayout,
         diagnostics: report.diagnostics.length,
         ...(report.checks !== undefined ? { checksPassed: report.checks.every((c) => c.ok) } : {}),
     };

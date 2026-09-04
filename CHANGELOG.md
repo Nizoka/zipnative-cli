@@ -49,7 +49,7 @@ socket. Zero extra runtime dependencies. Node.js ≥ 22.
   cross-checked, overlap table built): archive facts, per-method statistics, a determinism
   verdict, every diagnostic; `--entries` / `--entry` / `--extra`; 19 repeatable `--check`
   assertions (`deterministic`, `epoch-timestamps`, `canonical-order`, `utf8-names`,
-  `no-data-descriptor`, `no-zip64`, `zip64`, `no-encryption`, `no-symlinks`, `no-duplicates`,
+  `no-data-descriptor` / `canonical-layout`, `no-zip64`, `zip64`, `no-encryption`, `no-symlinks`, `no-duplicates`,
   `no-diagnostics`, `store-only`, `deflate-only`, `max-entries=N`, `min-entries=N`,
   `max-uncompressed=<size>`, `max-ratio=N`, `has=<name>`, `method=…`) that print the report
   then exit 1 / `E_CHECK_FAILED`; `--summary`, `--fields`.

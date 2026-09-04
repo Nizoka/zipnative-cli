@@ -62,7 +62,7 @@ applyTo: "src/commands/**"
 - `list`: `openZip` lazily — nothing decompressed. `--validate eager` cross-checks every local
   header. Rows come from `utils/entryfmt.ts` (`rowFromEntry`), shared with `inspect`/`stream`.
 - `inspect`: open EAGERLY. `--check` allow-list lives in one table (deterministic,
-  epoch-timestamps, canonical-order, utf8-names, no-data-descriptor, no-zip64, zip64,
+  epoch-timestamps, canonical-order, utf8-names, no-data-descriptor / canonical-layout, no-zip64, zip64,
   no-encryption, no-symlinks, no-duplicates, no-diagnostics, store-only, deflate-only,
   `max-entries=N`, `min-entries=N`, `max-uncompressed=<size>`, `max-ratio=N`, `has=<name>`,
   `method=…`). Print the report FIRST, then exit 1 / `E_CHECK_FAILED`.

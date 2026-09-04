@@ -433,6 +433,9 @@ export async function create(args: ParsedArgs): Promise<void> {
     const level = effectiveCompression?.level ?? 6;
     const deterministic = effectiveCompression?.deterministic === true;
     const skipped = plan.skipped.map((s) => ({ name: s.name, path: s.path, reason: s.reason }));
+    // Any addStream() entry forces the data-descriptor layout for that entry:
+    // same content as the buffered layout, different bytes (engine contract).
+    const layout: 'buffered' | 'data-descriptor' = streaming || hasStdin ? 'data-descriptor' : 'buffered';
     const summary = {
         command: 'create',
         output: outputPath ?? '-',
@@ -445,6 +448,7 @@ export async function create(args: ParsedArgs): Promise<void> {
         deterministic,
         order: effectiveOrder ?? 'canonical',
         stream: streaming,
+        layout,
         parallel: parallel ? { workers: workers ?? 'auto' } : false,
         skipped,
     };
