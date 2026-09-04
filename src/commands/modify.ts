@@ -34,6 +34,7 @@ import {
     parseCompression,
     parseDateFlag,
     parseFromEqualsTo,
+    parseIsoDateUtc,
     parseNameEqualsPath,
     readArchiveBytes,
 } from '../utils/zipops.js';
@@ -142,8 +143,8 @@ async function editsFromManifest(manifestPath: string, stdinUsed: { used: boolea
         }
         let date: Date | undefined;
         if (e['date'] !== undefined) {
-            if (typeof e['date'] !== 'string' || Number.isNaN(new Date(e['date']).getTime())) throw new CliError(`${where}: "date" must be an ISO 8601 string.`, 1, ErrorCode.INPUT);
-            date = new Date(e['date']);
+            if (typeof e['date'] !== 'string') throw new CliError(`${where}: "date" must be an ISO 8601 string.`, 1, ErrorCode.INPUT);
+            date = parseIsoDateUtc(e['date'], where, false);
         }
         const comment = e['comment'];
         if (comment !== undefined && typeof comment !== 'string') throw new CliError(`${where}: "comment" must be a string.`, 1, ErrorCode.INPUT);

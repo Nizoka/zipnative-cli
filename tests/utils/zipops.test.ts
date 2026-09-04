@@ -131,9 +131,11 @@ describe('parseDateFlag', () => {
     });
 
     it('parses an ISO 8601 date', () => {
-        const d = parseDateFlag(parseArgs(['--date', '2024-01-02T03:04:05Z']));
+        const d = parseDateFlag(parseArgs(['--date', '2024-01-02T03:04:05Z'])) as Date;
         expect(d).toBeInstanceOf(Date);
-        expect((d as Date).toISOString()).toBe('2024-01-02T03:04:05.000Z');
+        // UTC wall-clock carried in the LOCAL fields (what the engine encodes).
+        expect([d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes(), d.getSeconds()])
+            .toEqual([2024, 0, 2, 3, 4, 5]);
     });
 
     it('rejects an unparseable date with exit 2', () => {

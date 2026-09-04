@@ -232,12 +232,14 @@ describe('create', () => {
         it('--date <ISO> pins every entry to that timestamp', async () => {
             const src = await makeTree();
             const out = join(tmp, 'out.zip');
-            const when = new Date('2020-01-02T03:04:05Z');
-            await run([src, '--date', when.toISOString(), '-o', out]);
+            await run([src, '--date', '2020-01-02T03:04:05Z', '-o', out]);
             const { entries } = await readZip(out);
             for (const e of entries) {
-                // DOS timestamps have 2-second resolution.
-                expect(Math.abs(e.lastModified.getTime() - when.getTime())).toBeLessThanOrEqual(2000);
+                // The UTC wall-clock is stored in the DOS fields (2-second
+                // resolution, seconds floored) and read back as local fields.
+                const d = e.lastModified;
+                expect([d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes(), d.getSeconds()])
+                    .toEqual([2020, 0, 2, 3, 4, 4]);
             }
         });
 
@@ -448,7 +450,10 @@ describe('create', () => {
             const sh = reader.getEntry('run.sh') as ZipEntry;
             expect(getUnixMode(sh)).toBe(0o100755);
             expect((getUnixMode(sh) as number) & 0o777).toBe(0o755);
-            expect(Math.abs(sh.lastModified.getTime() - Date.parse('2021-05-06T07:08:09Z'))).toBeLessThanOrEqual(2000);
+            // UTC wall-clock stored in the DOS fields (odd second floored), read back as local fields.
+            const d = sh.lastModified;
+            expect([d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes(), d.getSeconds()])
+                .toEqual([2021, 4, 6, 7, 8, 8]);
             expect(new TextDecoder().decode(reader.getEntry('inline.txt')?.comment)).toBe('per-entry');
             expect(new TextDecoder().decode(reader.comment)).toBe('from manifest');
         });

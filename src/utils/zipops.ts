@@ -4,7 +4,7 @@
 
 import { basename } from 'node:path';
 import { type ParsedArgs, getStringFlag, getStringFlagAll, hasFlag } from './args.js';
-import { isStrict } from './agent.js';
+import { isStrict, progress } from './agent.js';
 import type {
     OpenZipOptions,
     ZipCommonOptions,
@@ -51,9 +51,60 @@ export function parseCompression(args: ParsedArgs): ZipCompressionOptions | unde
     return Object.keys(out).length > 0 ? out : undefined;
 }
 
+const DOS_YEAR_MIN = 1980;
+const DOS_YEAR_MAX = 2107;
+const ZONE_RE = /(?:Z|[+-]\d{2}:?\d{2})$/i;
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Parse an ISO 8601 date as **UTC wall-clock time**.
+ *
+ * ZIP stores DOS timestamps: local wall-clock fields, no zone. The engine
+ * encodes a `Date` through its LOCAL getters, so handing it an instant would
+ * make the stored fields depend on the invoking host's TZ — and a
+ * `--deterministic` build would hash differently in CI and on a laptop.
+ * The CLI therefore normalises every explicit date to its UTC components and
+ * builds a local `Date` carrying exactly those fields: the archive stores the
+ * UTC wall-clock on every machine. A string without a zone designator is
+ * read as UTC too (`2020-06-01T12:00:00` ≡ `2020-06-01T12:00:00Z`).
+ *
+ * Warns (stderr, suppressed by --quiet) when the year falls outside the DOS
+ * range 1980–2107 (the engine clamps) or the seconds are odd (2-second
+ * resolution: floored).
+ *
+ * @throws CliError exit 2 (`usage` = true) or E_INPUT (manifest values)
+ */
+export function parseIsoDateUtc(raw: string, where: string, usage = true): Date {
+    let s = raw.trim();
+    if (DATE_ONLY_RE.test(s)) s += 'T00:00:00Z';
+    else if (!ZONE_RE.test(s)) s += 'Z';
+    const instant = new Date(s);
+    if (Number.isNaN(instant.getTime())) {
+        throw usage
+            ? new CliError(`${where} expects "epoch", "now" or an ISO 8601 date, got "${raw}".`, 2)
+            : new CliError(`${where}: "date" must be "epoch", "now" or an ISO 8601 string.`, 1, ErrorCode.INPUT);
+    }
+    const year = instant.getUTCFullYear();
+    if (year < DOS_YEAR_MIN || year > DOS_YEAR_MAX) {
+        progress(`warning: ${where} ${raw} is outside the DOS timestamp range ${DOS_YEAR_MIN}-01-01 .. ${DOS_YEAR_MAX}-12-31 and will be clamped by the engine.`);
+    }
+    if (instant.getUTCSeconds() % 2 === 1) {
+        progress(`warning: ${where} ${raw}: DOS timestamps have 2-second resolution; the odd second is floored.`);
+    }
+    return new Date(
+        year,
+        instant.getUTCMonth(),
+        instant.getUTCDate(),
+        instant.getUTCHours(),
+        instant.getUTCMinutes(),
+        instant.getUTCSeconds(),
+    );
+}
+
 /**
  * `--date epoch|now|<ISO-8601>` → `Date | 'now' | undefined`
- * (`undefined` = omit → the core's DOS-epoch default).
+ * (`undefined` = omit → the core's DOS-epoch default). ISO dates are UTC
+ * wall-clock (see {@link parseIsoDateUtc}).
  */
 export function parseDateFlag(args: ParsedArgs): Date | 'now' | undefined {
     const raw = getStringFlag(args.flags, 'date');
@@ -61,20 +112,22 @@ export function parseDateFlag(args: ParsedArgs): Date | 'now' | undefined {
     const v = raw.trim().toLowerCase();
     if (v === 'epoch') return undefined;
     if (v === 'now') return 'now';
-    const d = new Date(raw);
-    if (Number.isNaN(d.getTime())) {
-        throw new CliError(`--date expects "epoch", "now" or an ISO 8601 date, got "${raw}".`, 2);
-    }
-    return d;
+    return parseIsoDateUtc(raw, '--date');
 }
 
-/** `--chunk-size <size>` (default 65536). */
+const CHUNK_MIN = 1024;
+const CHUNK_MAX = 16 * 1024 * 1024;
+
+/** `--chunk-size <size>` (default 65536; the engine clamps to 1 KiB … 16 MiB — warned). */
 export function parseChunkSize(args: ParsedArgs): number | undefined {
     const raw = getStringFlag(args.flags, 'chunk-size');
     if (raw === undefined) return undefined;
     const n = parseByteSize(raw, 'chunk-size');
     if (!Number.isFinite(n) || n <= 0) {
         throw new CliError(`--chunk-size must be a positive byte size, got "${raw}".`, 2);
+    }
+    if (n < CHUNK_MIN || n > CHUNK_MAX) {
+        progress(`warning: --chunk-size ${raw} is outside 1 KiB .. 16 MiB and will be clamped by the engine.`);
     }
     return n;
 }

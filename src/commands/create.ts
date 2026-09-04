@@ -50,6 +50,7 @@ import {
     parseCompression,
     parseDateFlag,
     parseIntFlag,
+    parseIsoDateUtc,
     parseNameFilter,
 } from '../utils/zipops.js';
 
@@ -127,10 +128,7 @@ function parseManifestDate(raw: unknown, where: string): Date | 'now' | undefine
     if (raw === undefined) return undefined;
     if (raw === 'epoch') return undefined;
     if (raw === 'now') return 'now';
-    if (typeof raw === 'string') {
-        const d = new Date(raw);
-        if (!Number.isNaN(d.getTime())) return d;
-    }
+    if (typeof raw === 'string') return parseIsoDateUtc(raw, where, false);
     throw new CliError(`${where}: "date" must be "epoch", "now" or an ISO 8601 string.`, 1, ErrorCode.INPUT);
 }
 

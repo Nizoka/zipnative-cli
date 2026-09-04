@@ -110,8 +110,13 @@ Compression & determinism:
   --level 0-9              (default 6)
   --deterministic          Pin the pure-TS encoder: identical SHA-256 on every runtime
   --order canonical|insertion   Entry order (default canonical raw-name bytes)
-  --date epoch|now|<ISO>   Timestamp for entries (default: DOS epoch, reproducible)
-  --mtime                  Use each file's modification time (non-reproducible)
+  --date epoch|now|<ISO>   Timestamp for entries (default: DOS epoch,
+                           reproducible). An ISO date is UTC wall-clock time
+                           (a string without a zone is read as UTC), so the
+                           stored DOS fields are identical on every host;
+                           range 1980-2107, 2-second resolution.
+  --mtime                  Use each file's modification time (local time,
+                           non-reproducible)
   --comment <text>         Archive comment
   --entry-comment <name>=<text>   Per-entry comment (repeatable)
   --preserve-mode          Store POSIX mode bits (no setuid/setgid/sticky)
