@@ -225,7 +225,8 @@ Options:
                         canonical-order, utf8-names, canonical-layout /
                         no-data-descriptor (buffered layout — a --stream
                         archive is reproducible but not canonical), no-zip64,
-                        zip64, no-encryption, no-symlinks, no-duplicates,
+                        zip64, no-encryption, no-symlinks, safe-names (every
+                        name passes sanitizeEntryPath), no-duplicates,
                         no-diagnostics, store-only, deflate-only,
                         max-entries=N, min-entries=N, max-uncompressed=<size>,
                         max-ratio=N, has=<name>, method=store|deflate|<id>
@@ -396,6 +397,9 @@ Report = zipnative's ZipVerificationReport ({ ok, error, entryCount, entries[
 plus { failed, skipped, strict, selected? }. Encrypted entries are honestly
 "skipped", never faked as verified. Exit 1 / E_VERIFY_FAILED when ok is false;
 the error envelope carries zipCode = report.error.code for structural refusals.
+verify proves integrity and structure, NOT path safety: a zip-slip archive with
+valid CRCs is "ok". Gate names with \`inspect --check safe-names,no-symlinks\`
+(or \`extract --dry-run\`) before extracting.
 `;
 
 const CRC32_USAGE = `\

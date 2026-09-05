@@ -3,7 +3,7 @@
 # --check turns the report into a gate. Assertions are repeatable and
 # comma-separable: deterministic, epoch-timestamps, canonical-order,
 # utf8-names, no-data-descriptor, no-zip64, no-encryption, no-symlinks,
-# no-duplicates, no-diagnostics, store-only, deflate-only, max-entries=N,
+# safe-names, no-duplicates, no-diagnostics, store-only, deflate-only, max-entries=N,
 # min-entries=N, max-uncompressed=<size>, max-ratio=N, has=<name>,
 # method=store|deflate. Any failure prints the report and exits 1 with
 # E_CHECK_FAILED — the second call below is EXPECTED to fail.
@@ -32,7 +32,7 @@ if (-not (Test-Path $Zip)) {
 
 Write-Host '→ Passing gate (deterministic, no encryption, ≤ 10 entries, has readme):'
 zn inspect --input $Zip `
-    --check deterministic,no-encryption,no-symlinks,max-entries=10 `
+    --check deterministic,no-encryption,no-symlinks,safe-names,max-entries=10 `
     --check has=text/readme.txt `
     --summary --format json | Tee-Object -FilePath (Join-Path $OutputDir '02-check-pass.json')
 Write-Host '  ✓ exit 0 — checksPassed: true'

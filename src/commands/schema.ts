@@ -311,13 +311,14 @@ function inspectSchema(): JsonSchema {
             },
             stats: {
                 type: 'object',
-                required: ['files', 'directories', 'compressedSize', 'uncompressedSize', 'ratio', 'methods', 'encrypted', 'symlinks', 'dataDescriptor', 'zip64Entries', 'utf8Names', 'cp437Names', 'duplicateNames', 'earliestDate', 'latestDate'],
+                required: ['files', 'directories', 'compressedSize', 'uncompressedSize', 'ratio', 'methods', 'encrypted', 'symlinks', 'dataDescriptor', 'zip64Entries', 'utf8Names', 'cp437Names', 'duplicateNames', 'unsafeNames', 'earliestDate', 'latestDate'],
                 properties: {
                     files: { type: 'integer' }, directories: { type: 'integer' },
                     compressedSize: { type: 'integer' }, uncompressedSize: { type: 'integer' }, ratio: { type: 'string' },
                     methods: { type: 'object', additionalProperties: { type: 'integer' }, description: 'method id → entry count' },
                     encrypted: { type: 'integer' }, symlinks: { type: 'integer' }, dataDescriptor: { type: 'integer' },
                     zip64Entries: { type: 'integer' }, utf8Names: { type: 'integer' }, cp437Names: { type: 'integer' },
+                    unsafeNames: { type: 'integer', description: 'Entry names the engine\'s sanitizeEntryPath() refuses (what extract would refuse without --skip-unsafe).' },
                     duplicateNames: { type: 'integer' },
                     earliestDate: { type: ['string', 'null'] }, latestDate: { type: ['string', 'null'] },
                 },

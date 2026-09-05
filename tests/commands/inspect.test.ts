@@ -219,6 +219,7 @@ describe('inspect', () => {
                 utf8Names: 3,
                 cp437Names: 0,
                 duplicateNames: 0,
+                unsafeNames: 0,
             });
             expect(doc.stats.uncompressedSize).toBe(DET_TOTAL);
             expect(doc.stats.ratio).toMatch(/^\d+%$/);

@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in `schema error`, `schema errors` and `docs/data/errors.json` (`cli.remedy`). The engine
   message stays verbatim (it names library options, not flags). (review Q2-F2)
 
+- **`inspect --check safe-names`** and `stats.unsafeNames`: every entry name must pass the
+  engine's `sanitizeEntryPath()` — the pre-extraction gate `verify` cannot give (it proves
+  integrity and structure, not path safety; its help and the docs now say so). (review Q2-F3)
+
 ### Fixed
 
 - `--quiet` now also silences the text diagnostics that `list --format ndjson` and

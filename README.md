@@ -125,7 +125,7 @@ Official CLI for the [`zipnative`](https://github.com/Nizoka/zipnative) engine �
 | `create` deterministic archives | ✅ | Files, directories, stdin, `--from-manifest`; `--method`, `--level`, `--deterministic`, `--order canonical\|insertion`, `--date` (UTC), `--stream`, `--parallel`, `--include`/`--exclude`, `--store-ext`, `--preserve-mode`, `--dir-entries`, `--comment` / `--comment-file`, `--overwrite` |
 | `modify` incremental edits | ✅ | `--add`, `--add-dir`, `--replace`, `--remove`, `--rename`, `--comment` / `--comment-file`, `--from-manifest`; every untouched entry verified before re-emission; append-only `save()` or `--compact`; `--in-place`, `--overwrite` |
 | `list` entries | ✅ | `text` \| `json` \| `ndjson`, `--long` (with `rawNameHex` / `commentHex`), `--validate eager`, globs, `--summary` / `--fields` |
-| `inspect` forensic report | ✅ | Eager open, stats, determinism verdict (`deterministic` = reproducibility, `canonicalLayout` = form), diagnostics, `--entries` / `--entry` / `--extra`, 19 `--check` assertions |
+| `inspect` forensic report | ✅ | Eager open, stats, determinism verdict (`deterministic` = reproducibility, `canonicalLayout` = form), diagnostics, `--entries` / `--entry` / `--extra`, 20 `--check` assertions |
 | `cat` entries to stdout | ✅ | Random access, `--raw` (compressed payload), `--no-verify-crc`, `--output` (+ `--overwrite`) |
 | `extract` to a directory | ✅ | Guards on by default; `--skip-unsafe`, `--skip-unsupported`, `--allow-symlinks`, `--skip-symlinks`, `--on-duplicate`, `--overwrite`, `--flat`, `--buffered`, `--preserve-mode`, `--preserve-mtime` |
 | `stream` forward-only reader | ✅ | stdin/pipes; `--list` (default), `--output-dir`, `--cat`; `trust: "local-headers-only"`; `--skip-unsafe`, `--skip-unsupported` |
@@ -580,7 +580,8 @@ zipnative inspect --input <a.zip> [--format json|text] [--check <assert>]...
 | `--fields a,b.c` | — | Dot-path projection |
 
 Assertions: `deterministic`, `epoch-timestamps`, `canonical-order`, `utf8-names`,
-`no-data-descriptor` / `canonical-layout`, `no-zip64`, `zip64`, `no-encryption`, `no-symlinks`, `no-duplicates`,
+`no-data-descriptor` / `canonical-layout`, `no-zip64`, `zip64`, `no-encryption`, `no-symlinks`, `safe-names`
+(every name passes the engine's `sanitizeEntryPath()` — the pre-extraction gate `verify` does not give), `no-duplicates`,
 `no-diagnostics`, `store-only`, `deflate-only`, `max-entries=N`, `min-entries=N`,
 `max-uncompressed=<size>`, `max-ratio=N`, `has=<name>`, `method=store|deflate|<id>`.
 The `determinism` verdict is `{ epochTimestamps, canonicalOrder, utf8Flags, noDataDescriptors,

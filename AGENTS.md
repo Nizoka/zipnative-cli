@@ -428,7 +428,7 @@ enforces.
    `limits` check's `data` (incl. `maxInputSize`).
 2. `zipnative inspect --input a.zip --json --summary` → cheap facts (entries, bytes,
    encrypted count, reproducibility and layout verdicts, diagnostics count) before
-   touching anything. Add `--check no-encryption,no-symlinks,max-ratio=100` to turn
+   touching anything. Add `--check safe-names,no-encryption,no-symlinks,max-ratio=100` to turn
    policy into an exit code.
 3. `zipnative extract --input a.zip --output-dir out/ --dry-run --json` → the plan:
    every destination proven safe, existing files refused, `skipped` inventory,

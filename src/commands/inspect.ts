@@ -13,6 +13,7 @@ import {
     METHOD_DEFLATE,
     METHOD_STORE,
     isSymlinkEntry,
+    sanitizeEntryPath,
     type ZipEntry,
 } from '../core-bridge/index.js';
 import { createDiagnosticSink, type DiagnosticRow } from '../utils/diagnostics.js';
@@ -61,6 +62,8 @@ export interface InspectReport {
         readonly utf8Names: number;
         readonly cp437Names: number;
         readonly duplicateNames: number;
+        /** Names the engine's sanitizeEntryPath() refuses (traversal, absolute, drive/UNC, NUL, ADS, device names). */
+        readonly unsafeNames: number;
         readonly earliestDate: string | null;
         readonly latestDate: string | null;
     };
@@ -119,6 +122,7 @@ function buildReport(entries: readonly ZipEntry[], archive: InspectReport['archi
     let cp437Names = 0;
     const seen = new Set<string>();
     let duplicateNames = 0;
+    let unsafeNames = 0;
     let earliest: Date | null = null;
     let latest: Date | null = null;
     let epochTimestamps = true;
@@ -141,6 +145,9 @@ function buildReport(entries: readonly ZipEntry[], archive: InspectReport['archi
         else cp437Names++;
         if (seen.has(e.name)) duplicateNames++;
         seen.add(e.name);
+        // Same rule as the extraction sink: a name the engine cannot sanitise
+        // (directory names are checked without their trailing slash).
+        if (sanitizeEntryPath(e.isDirectory && e.name.endsWith('/') ? e.name.slice(0, -1) : e.name) === null) unsafeNames++;
         if (earliest === null || e.lastModified < earliest) earliest = e.lastModified;
         if (latest === null || e.lastModified > latest) latest = e.lastModified;
         if (e.dosDate !== DOS_EPOCH_DATE || e.dosTime !== DOS_EPOCH_TIME) epochTimestamps = false;
@@ -165,6 +172,7 @@ function buildReport(entries: readonly ZipEntry[], archive: InspectReport['archi
             utf8Names,
             cp437Names,
             duplicateNames,
+            unsafeNames,
             earliestDate: earliest === null ? null : (earliest as Date).toISOString(),
             latestDate: latest === null ? null : (latest as Date).toISOString(),
         },
@@ -187,7 +195,7 @@ function buildReport(entries: readonly ZipEntry[], archive: InspectReport['archi
 
 const SIMPLE_CHECKS: readonly string[] = [
     'deterministic', 'epoch-timestamps', 'canonical-order', 'utf8-names', 'no-data-descriptor',
-    'canonical-layout', 'no-zip64', 'zip64', 'no-encryption', 'no-symlinks', 'no-duplicates',
+    'canonical-layout', 'no-zip64', 'zip64', 'no-encryption', 'no-symlinks', 'safe-names', 'no-duplicates',
     'no-diagnostics', 'store-only', 'deflate-only',
 ];
 const PARAM_CHECKS: readonly string[] = ['max-entries', 'min-entries', 'max-uncompressed', 'max-ratio', 'has', 'method'];
@@ -238,6 +246,7 @@ function evaluateChecks(checks: readonly string[], report: Omit<InspectReport, '
             case 'zip64': ok = report.archive.isZip64 || s.zip64Entries > 0; detail = `zip64 EOCD: ${report.archive.isZip64}, zip64 entries: ${s.zip64Entries}`; break;
             case 'no-encryption': ok = s.encrypted === 0; detail = `${s.encrypted} encrypted entries`; break;
             case 'no-symlinks': ok = s.symlinks === 0; detail = `${s.symlinks} symlink entries`; break;
+            case 'safe-names': ok = s.unsafeNames === 0; detail = `${s.unsafeNames} unsafe names (traversal, absolute, drive/UNC, NUL, ADS or reserved device name)`; break;
             case 'no-duplicates': ok = s.duplicateNames === 0; detail = `${s.duplicateNames} duplicate names`; break;
             case 'no-diagnostics': ok = report.diagnostics.length === 0; detail = `${report.diagnostics.length} diagnostics`; break;
             case 'store-only': ok = entries.every((e) => e.compressionMethod === METHOD_STORE); detail = `methods: ${Object.keys(s.methods).join(',') || 'none'}`; break;
@@ -288,7 +297,7 @@ function renderText(report: InspectReport, source: string): string {
     lines.push(`  encrypted       ${s.encrypted}`);
     lines.push(`  symlinks        ${s.symlinks}`);
     lines.push(`  data descriptor ${s.dataDescriptor}`);
-    lines.push(`  names           ${s.utf8Names} utf-8, ${s.cp437Names} cp437, ${s.duplicateNames} duplicates`);
+    lines.push(`  names           ${s.utf8Names} utf-8, ${s.cp437Names} cp437, ${s.duplicateNames} duplicates, ${s.unsafeNames} unsafe`);
     lines.push(`  dates           ${s.earliestDate ?? '-'} .. ${s.latestDate ?? '-'}`);
     lines.push('');
     lines.push(`Determinism: ${d.deterministic ? 'reproducible' : 'NOT reproducible'}, layout ${d.canonicalLayout ? 'canonical' : 'data-descriptor (streamed)'}`);
