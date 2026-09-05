@@ -116,7 +116,7 @@ CLI stays a thin dispatch layer and never re-implements engine logic).
 - **Custom-method entries in `stream`** — the engine's forward pump decodes store and deflate
   only, so `stream --cat` / `--output-dir` on a `--codec` method fails with `E_DATA` after the
   header (listing and skipping work). Waits on the engine using `codec.decompressStream` or
-  refusing before the first byte (upstream draft in `.github/drafts/`); until then use `cat` /
+  refusing before the first byte (engine issue, human-filed); until then use `cat` /
   `extract --codec` on the complete file.
 - **`--explain <ZIP_CODE>`** — print `raisedWhen` / `remedy` / class / CLI mapping for one
   error or diagnostic code from `docs/data/errors.json`, so an agent can resolve a `zipCode`
@@ -140,7 +140,7 @@ CLI stays a thin dispatch layer and never re-implements engine logic).
 - **Positional arguments in manifest tasks** — `batch --manifest` tasks carry only a flat flag
   map today; every whitelisted command accepts its inputs as flags (`input`, `entry`, …), so no
   command is excluded, but a `positionals` array would make manifests read like the shell.
-- **Engine API asks filed as drafts** — `.github/drafts/upstream-node-zlib-inflate-errors.md` (the node-zlib inflate tier should raise `ZIP_DEFLATE_CORRUPT` / `ZIP_DEFLATE_TRUNCATED` like the pure tier; the CLI compensates in `ziperr.ts`) and `upstream-verify-entry-skipped-reason.md` (`verifyEntry()` should report the `skipped` reason `verifyZip()` already knows; the CLI re-derives it in `verify --entry` and `modify`). Both also list `analyzeDeterminism()` and a write-side `unixMode` helper as the remaining places where the CLI projects what the engine could expose. Human-submitted, HITL.
+- **Engine API asks (human-filed upstream, HITL)** — four compensations the CLI carries until the engine changes: the node-zlib inflate tier should raise `ZIP_DEFLATE_CORRUPT` / `ZIP_DEFLATE_TRUNCATED` like the pure tier (the CLI maps raw zlib codes in `ziperr.ts`); `verifyEntry()` should report the `skipped` reason `verifyZip()` already knows (the CLI re-derives it in `verify --entry` and `modify`); DOS time should not be encoded from local getters (the CLI passes UTC wall-clock components); the forward pump should refuse a custom-method entry before the first byte. Two further asks, no compensation needed: an `analyzeDeterminism()` getter and a write-side `unixMode` helper, the remaining places where the CLI projects what the engine could expose. Drafts live in `.github/drafts/` (git-ignored, see its README).
 - **Lazy engine require** — `dist/cli.cjs` requires `zipnative` at bundle top level (≈10 ms of the ≈40 ms `--version` start-up over bare Node); moving the require into the first core call (tsup `splitting` or a lazy getter in the bridge) would make `--help` / `--version` / `schema` engine-free. Measured, not yet worth the bundling risk. (audit A-11)
 - **Fuzz / property tests for the CLI-owned parsers** — a seeded generator (or `fast-check` as a devDependency) over `parseArgs`, `compileGlob`, `parseByteSize` / `parseCount`, `parseManifest` and `selectFields`, run in CI; today the suites are example-based only. (audit A-25)
 - **One ecosystem governance schema** — the engine's `.github/ai-governance.json` (`version: 1`, `issue_drafting`, `compliance_report_fields`) and the CLI's (`1.0.0`, `policy`, `compliance_report`) differ in shape; agreeing one schema upstream and generating the CLI constant from it is an ecosystem decision, not a CLI change. (audit A-36)

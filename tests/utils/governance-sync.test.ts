@@ -40,6 +40,21 @@ describe('governance sync', () => {
         expect(md).toContain('zipnative govern verify-issue');
     });
 
+    it('the draft location is git-ignored except its README and TEMPLATE (drafts are local until a human files them)', () => {
+        const location = AI_GOVERNANCE_POLICY.human_in_the_loop.draft_location; // '.github/drafts/'
+        const ignore = readFileSync(join(ROOT, '.gitignore'), 'utf8').replace(/\r\n/g, '\n').split('\n');
+        expect(ignore).toContain(`${location}*`);
+        expect(ignore).toContain(`!${location}README.md`);
+        expect(ignore).toContain(`!${location}TEMPLATE.md`);
+        const readme = readFileSync(join(ROOT, location, 'README.md'), 'utf8');
+        expect(readme).toContain('git-ignored');
+        expect(readme).toContain('zipnative govern verify-issue');
+        const template = readFileSync(join(ROOT, location, 'TEMPLATE.md'), 'utf8');
+        for (const heading of ['## Reproduction', '## Expected behaviour', '## Compliance report', '## Identity reminder']) {
+            expect(template).toContain(heading);
+        }
+    });
+
     it('the capability manifest names files that exist in this repository', () => {
         for (const source of AI_GOVERNANCE_POLICY.capability_manifest.sources) {
             expect(() => readFileSync(join(ROOT, source)), source).not.toThrow();

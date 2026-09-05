@@ -142,7 +142,7 @@
   counts, `E_*` codes, the `ZIP_*` mapping, the 77-export map, the limits table, the schema
   subjects, USAGE ↔ `COMMANDS` ↔ README / KB tables, status enum ↔ `emitStatus` callers,
   CITATION version, environment variables, tarball paths).
-- **1201 tests, 61 files, all green** (1192 passed + 9 platform-conditional skips).
+- **1202 tests, 61 files, all green** (1193 passed + 9 platform-conditional skips).
   Coverage statements 96.32 / branches 92.52 / functions 97.93 / lines 96.91 against the
   enforced thresholds 93 / 88 / 94 / 93.
 
@@ -197,7 +197,7 @@ Every command below was run on this branch at HEAD and must be green again on th
 
 - `npm run typecheck:all` — clean
 - `npm run lint` — 0 errors (`src/` and `tests/`)
-- `npm run test:coverage` — 1192 passed + 9 skipped across 61 files; statements 96.32 /
+- `npm run test:coverage` — 1193 passed + 9 skipped across 61 files; statements 96.32 /
   branches 92.52 / functions 97.93 / lines 96.91 ≥ thresholds 93 / 88 / 94 / 93
 - `npm run build` — `dist/cli.cjs` only (no `dist/cli.js`, no `.d.ts`, no maps)
 - `npx vitest run tests/integration/built-binary-smoke.test.ts` — post-build spawn suite
@@ -226,11 +226,14 @@ Every command below was run on this branch at HEAD and must be green again on th
 - Enable GitHub Discussions on this repository (SUPPORT.md and `ISSUE_TEMPLATE/config.yml`
   point at the engine's board until then); decide on a `security@zipnative.dev` inbox
   (SECURITY.md names the shared `security@pdfnative.dev` fallback today).
-- File the two upstream notes from `.github/drafts/` under your own identity after review:
-  `upstream-dos-time-local-wallclock.md` (the engine encodes DOS time from local getters —
-  the CLI compensates with UTC wall-clock components) and
-  `upstream-stream-custom-method-refusal.md` (`iterateZipEntries().data()` pumps a registered
-  custom-method entry through the inflater instead of refusing before the first byte).
+- File the four upstream engine notes drafted locally in `.github/drafts/` (git-ignored, on
+  the release machine) under your own identity after review: DOS time encoded from local
+  getters (the CLI compensates with UTC wall-clock components); `iterateZipEntries().data()`
+  pumping a registered custom-method entry through the inflater instead of refusing before
+  the first byte; the node-zlib inflate tier leaking raw `Z_DATA_ERROR` / `Z_BUF_ERROR`
+  instead of `ZIP_DEFLATE_*` (the CLI maps them in `ziperr.ts`); `verifyEntry()` not
+  reporting the `skipped` reason `verifyZip()` knows (the CLI re-derives it). Each passes
+  `govern verify-issue`.
 - Follow-up PR in `zipnative` (ecosystem.json, README, ROADMAP) announcing the CLI.
 
 ## Backward compatibility

@@ -56,7 +56,7 @@ zipnative govern policy                       # print the machine-readable polic
 [Verify zero-dependency + no anti-goal + no weakened default]
             │
             ▼
- [Generate draft markdown in .github/drafts/]
+ [Generate draft markdown in .github/drafts/]   (git-ignored except README/TEMPLATE)
             │
             ▼
 [Present draft + compliance report to user]

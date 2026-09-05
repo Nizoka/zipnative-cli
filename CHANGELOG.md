@@ -42,10 +42,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
-- Two more upstream engine drafts under `.github/drafts/` (human-submitted, HITL): the node-zlib
-  inflate tier leaking raw `Z_DATA_ERROR` / `Z_BUF_ERROR` instead of `ZIP_DEFLATE_*`, and
-  `verifyEntry()` not reporting the `skipped` reason — both pass `govern verify-issue`.
-  (review Q3)
+- Two more upstream engine asks drafted for human filing (HITL): the node-zlib inflate tier
+  leaking raw `Z_DATA_ERROR` / `Z_BUF_ERROR` instead of `ZIP_DEFLATE_*`, and `verifyEntry()`
+  not reporting the `skipped` reason — both pass `govern verify-issue`. (review Q3)
+- `.github/drafts/` is now git-ignored except its `README.md` and a `TEMPLATE.md` whose
+  sections match what `govern verify-issue` and the compliance report expect — the same rule
+  as the engine repository; the four drafts written so far are local files until filed.
 
 - Agent docs (AGENTS.md, llms.txt, README, knowledge base): the two rules an unattended caller
   must encode — hermetic invocation (`--no-config` / `--config`; `.zipnativerc.json` is
@@ -286,8 +288,8 @@ Considerations" (A-11, A-25, A-36, B-21, B-39, B-42) and one was rejected (B-44)
 - **Tests** — in-process vitest suites (stdout / stderr captured) for every command and
   util, an engine-independent raw ZIP builder for adversarial shapes (never committed — see
   `tests/fixtures/README.md`), two foreign-provenance interop fixtures, one spawn smoke test
-  against the built binary, and `tests/docs/consistency.test.ts`. 1201 tests across
-  61 files (1192 passed + 9 platform-conditional skips; statements 96.32 %, branches 92.52 %,
+  against the built binary, and `tests/docs/consistency.test.ts`. 1202 tests across
+  61 files (1193 passed + 9 platform-conditional skips; statements 96.32 %, branches 92.52 %,
   functions 97.93 %, lines 96.91 %).
 - **Package** — the CJS bin only (`dist/cli.cjs`; no ESM build, no `.d.ts`, no source maps):
   7 files, 120.0 kB packed.
@@ -333,9 +335,9 @@ Considerations" (A-11, A-25, A-36, B-21, B-39, B-42) and one was rejected (B-44)
   global USAGE, `raisedBy` per diagnostic, tarball paths in `llms.txt` (audit A-28).
 - `.github/ISSUE_TEMPLATE/config.yml` — blank issues disabled, links to private vulnerability
   reporting, the ecosystem Discussions and the engine tracker (audit A-45).
-- `.github/drafts/` — two human-submittable upstream drafts for the engine: DOS time encoded
-  from local getters (audit A-02) and `stream` custom-method entries pumped through the
-  inflater (audit B-20).
+- Two human-submittable upstream drafts for the engine (local, under `.github/drafts/`): DOS
+  time encoded from local getters (audit A-02) and `stream` custom-method entries pumped
+  through the inflater (audit B-20).
 
 ### Changed
 

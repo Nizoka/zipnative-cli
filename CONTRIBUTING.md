@@ -45,7 +45,7 @@ All new code must include tests. Coverage thresholds (enforced by `vitest.config
 source of truth): **statements 93 %, branches 88 %, functions 94 %, lines 93 %** — ratcheted after
 the 1.0.0 audit pass from the measured 96.32 / 92.52 / 97.93 / 96.91 (2026-09-05), three points
 below the actuals so a legitimate refactor does not flap the gate. Never lower them to make a
-change pass — add tests. The suite is 61 files / 1201 tests (9 are platform-conditional and skip
+change pass — add tests. The suite is 61 files / 1202 tests (9 are platform-conditional and skip
 with a stated reason).
 
 Tests run the command functions **in-process** with `process.stdout` / `process.stderr` captured
