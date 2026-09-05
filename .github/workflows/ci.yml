@@ -14,6 +14,12 @@ on:
       - '.gitignore'
   pull_request:
     branches: [main, master]
+    # `edited` is added to the default types so a PR title change re-runs the
+    # commitlint job (a "Re-run" of an existing run replays the old event
+    # payload, i.e. the old title). The whole matrix runs on that event on
+    # purpose: skipping jobs would report "skipped", which GitHub counts as a
+    # passing required check.
+    types: [opened, synchronize, reopened, edited]
     # Docs are NOT ignored: tests/docs/consistency.test.ts pins README,
     # AGENTS.md, llms.txt and the knowledge base to the code, so a docs-only
     # change can break the suite and must run it.
