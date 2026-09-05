@@ -23,7 +23,7 @@ import {
     type ByteSource,
     type StreamedZipEntry,
 } from '../core-bridge/index.js';
-import { createDiagnosticSink } from '../utils/diagnostics.js';
+import { createDiagnosticSink, formatDiagnosticLine } from '../utils/diagnostics.js';
 import { prepareEngine } from '../utils/engine.js';
 import { rowFromHeader, renderTable, type EntryRow } from '../utils/entryfmt.js';
 import { CliError, ErrorCode } from '../utils/error.js';
@@ -210,9 +210,8 @@ export async function stream(args: ParsedArgs): Promise<void> {
             const report: StreamReport = { mode: 'list', trust: TRUST, entries: rows, diagnostics: sink.diagnostics };
             emitJsonReport(args, report, () => streamSummary(report));
         } else if (isJsonMode()) {
-            for (const d of sink.diagnostics) {
-                process.stderr.write(`${d.severity}: [${d.code}]${d.entryName !== undefined ? ` entry '${d.entryName}':` : ''} ${d.message}\n`);
-            }
+            // NDJSON has no wrapper: diagnostics are stderr progress lines (--quiet suppresses them).
+            for (const d of sink.diagnostics) progress(formatDiagnosticLine(d));
         }
         if (dryRun) emitStatus({ command: 'stream', mode, trust: TRUST, dryRun: true, entries: rows.length, stoppedAt, ...sink.field() });
         return;

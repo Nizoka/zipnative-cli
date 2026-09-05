@@ -7,8 +7,8 @@
 //   ndjson            one EntryRow per line (RAG / streaming consumers)
 
 import { type ParsedArgs, getStringFlag, hasFlag } from '../utils/args.js';
-import { isJsonMode } from '../utils/agent.js';
-import { createDiagnosticSink } from '../utils/diagnostics.js';
+import { isJsonMode, progress } from '../utils/agent.js';
+import { createDiagnosticSink, formatDiagnosticLine } from '../utils/diagnostics.js';
 import { prepareEngine } from '../utils/engine.js';
 import { CliError } from '../utils/error.js';
 import { rowFromEntry, renderTable, type EntryRow } from '../utils/entryfmt.js';
@@ -96,11 +96,10 @@ export async function list(args: ParsedArgs): Promise<void> {
 
     if (format === 'ndjson') {
         for (const row of rows) process.stdout.write(serializeJson(row, false) + '\n');
-        // No wrapper to carry diagnostics: surface them as text on stderr.
+        // No wrapper to carry diagnostics: surface them as text on stderr
+        // (progress lines — suppressed by --quiet like every other text line).
         if (isJsonMode()) {
-            for (const d of sink.diagnostics) {
-                process.stderr.write(`${d.severity}: [${d.code}]${d.entryName !== undefined ? ` entry '${d.entryName}':` : ''} ${d.message}\n`);
-            }
+            for (const d of sink.diagnostics) progress(formatDiagnosticLine(d));
         }
         return;
     }
