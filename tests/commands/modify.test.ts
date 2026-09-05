@@ -488,10 +488,12 @@ describe('modify', () => {
         ['--rename', 'a.txt=../x'],
         ['--add-dir', '../x'],
         ['--add-dir', '/'],
-    ])('%s with an unsafe entry name is a usage error (exit 2)', async (flag, value) => {
+    ])('%s with an unsafe entry name is E_INPUT (exit 1) carrying the name', async (flag, value) => {
         await setup();
         const r = await run(() => modify(parseArgs(['--input', input, '--output', output, flag, value.replace('PAYLOAD', payload)])));
-        expect(r.error).toMatchObject({ exitCode: 2, code: ErrorCode.USAGE });
+        expect(r.error).toMatchObject({ exitCode: 1, code: ErrorCode.INPUT });
+        expect((r.error as { entryName?: string }).entryName).toBeDefined();
+        expect((r.error as Error).message).toMatch(/would not be extractable safely/);
     });
 
     it.each([

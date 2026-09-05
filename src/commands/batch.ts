@@ -15,7 +15,7 @@
 import { readdir, mkdir, readFile, stat } from 'node:fs/promises';
 import { join, basename, dirname, extname, resolve } from 'node:path';
 import { type ParsedArgs, getStringFlag, hasFlag } from '../utils/args.js';
-import { assertJsonSizeLimit } from '../utils/io.js';
+import { assertJsonSizeLimit, captureStdout } from '../utils/io.js';
 import { CliError, ErrorCode, type ErrorCodeValue } from '../utils/error.js';
 import { isJsonMode, isDryRun, progress } from '../utils/agent.js';
 import { selectFields, serializeJson, parseFieldList } from '../utils/projection.js';
@@ -27,6 +27,7 @@ import { guard } from '../utils/ziperr.js';
 import {
     parseManifest,
     assertCodecPolicy,
+    assertJsonStdoutPolicy,
     type ManifestPlan,
     type ManifestTaskPlan,
 } from '../utils/manifest.js';
@@ -114,6 +115,30 @@ interface ManifestTaskResult {
     readonly output?: string;
     readonly error?: { readonly code: ErrorCodeValue; readonly message: string; readonly zipCode?: string };
     readonly skipped?: true;
+    /** JSON mode: the task's stdout, parsed (object, or array of objects for NDJSON). */
+    readonly report?: unknown;
+    /** JSON mode: the task's stdout when it was not JSON. */
+    readonly stdout?: string;
+    /** JSON mode: bytes the task wrote to stdout. */
+    readonly stdoutBytes?: number;
+}
+
+/** Interpret a captured task stdout: one JSON document, NDJSON lines, or text. */
+function describeStdout(bytes: Buffer): { report?: unknown; stdout?: string; stdoutBytes: number } {
+    if (bytes.length === 0) return { stdoutBytes: 0 };
+    const text = bytes.toString('utf8');
+    try {
+        return { report: JSON.parse(text) as unknown, stdoutBytes: bytes.length };
+    } catch {
+        // NDJSON: every non-empty line is a JSON value.
+        const lines = text.split('\n').filter((l) => l.trim().length > 0);
+        try {
+            if (lines.length > 0 && lines.every((l) => l.trimStart().startsWith('{'))) {
+                return { report: lines.map((l) => JSON.parse(l) as unknown), stdoutBytes: bytes.length };
+            }
+        } catch { /* not NDJSON either */ }
+        return { stdout: text, stdoutBytes: bytes.length };
+    }
 }
 
 /** Write the final manifest summary (stdout) honouring the projection flags. */
@@ -180,6 +205,9 @@ async function runManifest(manifestPath: string, args: ParsedArgs): Promise<void
 
     const plan: ManifestPlan = parseManifest(raw, dirname(resolve(manifestPath)));
     assertCodecPolicy(plan, allowCodecLoad);
+    // JSON mode: stdout is ONE batch document; every task's stdout is
+    // captured into tasks[i].report, so artefact-to-stdout tasks are refused.
+    if (format === 'json') assertJsonStdoutPolicy(plan);
     const total = plan.tasks.length;
 
     if (dryRun) {
@@ -226,13 +254,21 @@ async function runManifest(manifestPath: string, args: ParsedArgs): Promise<void
                 await mkdir(task.outputDir, { recursive: true });
             }
             const fn = await loadTaskCommand(task.command);
-            await fn({ flags: { ...task.flags }, positionals: [] });
+            const taskArgs: ParsedArgs = { flags: { ...task.flags }, positionals: [] };
+            let captured: { report?: unknown; stdout?: string; stdoutBytes: number } | undefined;
+            if (format === 'json') {
+                const { bytes } = await captureStdout(() => fn(taskArgs));
+                captured = describeStdout(bytes);
+            } else {
+                await fn(taskArgs);
+            }
             status.set(task.id, 'ok');
             results.push({
                 id: task.id,
                 command: task.command,
                 ok: true,
                 ...(task.output !== undefined ? { output: task.output } : {}),
+                ...(captured !== undefined ? captured : {}),
             });
             progress(`${label} … ${style('ok', 'green')}`);
         } catch (e) {

@@ -338,3 +338,56 @@ export async function* readableToByteSource(stream: Readable): AsyncGenerator<Ui
         yield typeof chunk === 'string' ? new TextEncoder().encode(chunk) : (chunk as Uint8Array);
     }
 }
+
+/** Default cap on a captured task stdout (`batch --manifest --json`): 64 MiB. */
+export const DEFAULT_CAPTURE_BYTES = 64 * 1024 * 1024;
+
+export interface Captured<T> {
+    readonly result: T;
+    readonly bytes: Buffer;
+}
+
+/**
+ * Run `fn` with `process.stdout.write` redirected into a buffer, so a
+ * nested command's artefact never interleaves with the caller's own stdout
+ * document (`batch --manifest --json`). Not re-entrant (batch never nests);
+ * the original writer is restored in `finally`, including when `fn` throws.
+ * Exceeding `maxBytes` aborts with E_LIMIT `{ limit: 'captureBytes' }`.
+ */
+export async function captureStdout<T>(fn: () => Promise<T>, maxBytes: number = DEFAULT_CAPTURE_BYTES): Promise<Captured<T>> {
+    const original = process.stdout.write;
+    const chunks: Buffer[] = [];
+    let total = 0;
+    let overflow: CliError | undefined;
+    const capture = (chunk: unknown, encoding?: unknown, cb?: unknown): boolean => {
+        const buf = typeof chunk === 'string'
+            ? Buffer.from(chunk, typeof encoding === 'string' ? (encoding as BufferEncoding) : 'utf8')
+            : Buffer.from(chunk as Uint8Array);
+        total += buf.length;
+        if (total > maxBytes) {
+            overflow ??= new CliError(
+                `Captured task output exceeds ${maxBytes} bytes; give the task an --output file instead of writing its artefact to stdout.`,
+                1,
+                ErrorCode.LIMIT,
+                { detail: { limit: 'captureBytes', configured: maxBytes, observed: total } },
+            );
+            const done = typeof encoding === 'function' ? encoding : cb;
+            if (typeof done === 'function') (done as (e: Error) => void)(overflow);
+            return false;
+        }
+        chunks.push(buf);
+        const done = typeof encoding === 'function' ? encoding : cb;
+        if (typeof done === 'function') (done as () => void)();
+        return true;
+    };
+    process.stdout.write = capture as typeof process.stdout.write;
+    try {
+        const result = await fn();
+        if (overflow !== undefined) throw overflow;
+        return { result, bytes: Buffer.concat(chunks) };
+    } catch (e) {
+        throw overflow ?? e;
+    } finally {
+        process.stdout.write = original;
+    }
+}

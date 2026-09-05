@@ -58,7 +58,7 @@ export async function cat(args: ParsedArgs): Promise<void> {
             throw mapZipError(e, 'Failed to read the central directory');
         }
         if (entry === null) {
-            throw new CliError(`Entry not found: ${name}`, 1, ErrorCode.NOT_FOUND, { entryName: name });
+            throw new CliError(`Entry not found: ${name} (run \`zipnative list\` for the exact names).`, 1, ErrorCode.NOT_FOUND, { entryName: name, zipCode: 'ZIP_ENTRY_NOT_FOUND' });
         }
         if (entry.isDirectory) {
             throw new CliError(`"${name}" is a directory entry — nothing to output.`, 1, ErrorCode.INPUT, { entryName: name });

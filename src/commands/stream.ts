@@ -44,9 +44,14 @@ export interface StreamReport {
 }
 
 export function streamSummary(report: StreamReport): Record<string, unknown> {
+    // A data-descriptor entry's local header carries zero sizes (they trail
+    // the payload), so `bytes` under-counts by exactly those entries.
+    const descriptorEntries = report.entries.filter((e) => e.usesDataDescriptor).length;
     return {
         entries: report.entries.length,
         bytes: report.entries.reduce((n, e) => n + e.uncompressedSize, 0),
+        descriptorEntries,
+        bytesKnown: descriptorEntries === 0,
         trust: report.trust,
     };
 }
@@ -179,7 +184,10 @@ export async function stream(args: ParsedArgs): Promise<void> {
         stoppedAt = 'central-directory';
     } catch (e) {
         if (e instanceof CliError) throw e;
-        const mapped = mapZipError(e, `Forward read failed at "${current}"`, current);
+        // Before the first local header there is no entry to name.
+        const mapped = current.length > 0
+            ? mapZipError(e, `Forward read failed at "${current}"`, current)
+            : mapZipError(e, 'Forward read failed before the first local header');
         // `iterateZipEntries` ends at the central directory; hitting EOF
         // without one is reported by the core as ZIP_STREAM_TRUNCATED.
         throw mapped;
@@ -187,7 +195,7 @@ export async function stream(args: ParsedArgs): Promise<void> {
 
     if (mode === 'cat' && remainingCat.size > 0) {
         const missing = [...remainingCat];
-        throw new CliError(`Entry not found in stream: ${missing.join(', ')}`, 1, ErrorCode.NOT_FOUND, { entryName: missing[0] as string });
+        throw new CliError(`Entry not found in stream: ${missing.join(', ')} (forward mode sees local headers only; try \`zipnative stream --list\`).`, 1, ErrorCode.NOT_FOUND, { entryName: missing[0] as string, zipCode: 'ZIP_ENTRY_NOT_FOUND' });
     }
 
     for (const s of skipped) progress(`warning: skipped ${s.name} (${s.reason})`);

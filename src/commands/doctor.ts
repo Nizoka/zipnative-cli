@@ -26,8 +26,7 @@ import {
 } from '../core-bridge/index.js';
 import { loadedCodecModules } from '../utils/codecs.js';
 import { prepareEngine, isPureCodecs } from '../utils/engine.js';
-import { LIMIT_FLAGS, effectiveLimits, formatLimitValue } from '../utils/limits.js';
-import { parseLimitFlags } from '../utils/limits.js';
+import { DEFAULT_MAX_INPUT_SIZE, LIMIT_FLAGS, effectiveLimits, formatLimitValue, parseInputSizeFlag, parseLimitFlags } from '../utils/limits.js';
 import { parseFormat } from '../utils/zipops.js';
 
 type CheckStatus = 'ok' | 'warn' | 'error';
@@ -37,6 +36,8 @@ interface Check {
     readonly status: CheckStatus;
     readonly value: string;
     readonly detail: string;
+    /** Machine-readable payload (JSON output only) — `limits` carries the effective bounds. */
+    readonly data?: Readonly<Record<string, unknown>>;
 }
 
 const MIN_NODE_MAJOR = 22;
@@ -139,13 +140,20 @@ function codecsCheck(): Check {
 function limitsCheck(args: ParsedArgs): Check {
     const overrides = parseLimitFlags(args);
     const effective = effectiveLimits(overrides);
+    const maxInputSize = parseInputSizeFlag(args);
     const parts = LIMIT_FLAGS.map((l) => `${l.key}=${formatLimitValue(l, effective[l.key])}`);
-    const custom = overrides !== undefined ? Object.keys(overrides).length : 0;
+    parts.push(`maxInputSize=${Number.isFinite(maxInputSize) ? String(maxInputSize) : 'none'}`);
+    const custom = (overrides !== undefined ? Object.keys(overrides).length : 0) + (maxInputSize !== DEFAULT_MAX_INPUT_SIZE ? 1 : 0);
+    // JSON: numbers agents can compare (Infinity has no JSON form → "none").
+    const data: Record<string, unknown> = {};
+    for (const l of LIMIT_FLAGS) data[l.key] = Number.isFinite(effective[l.key]) ? effective[l.key] : 'none';
+    data['maxInputSize'] = Number.isFinite(maxInputSize) ? maxInputSize : 'none';
     return {
         name: 'limits',
         status: 'ok',
         value: custom > 0 ? `${custom} override(s)` : 'defaults',
         detail: parts.join('; '),
+        data,
     };
 }
 
@@ -176,7 +184,7 @@ export async function doctor(args: ParsedArgs): Promise<void> {
         const pretty = hasFlag(args.flags, 'pretty') || !isJsonMode();
         const payload = {
             ok,
-            checks: checks.map((c) => ({ name: c.name, status: c.status, value: c.value, detail: c.detail })),
+            checks: checks.map((c) => ({ name: c.name, status: c.status, value: c.value, detail: c.detail, ...(c.data !== undefined ? { data: c.data } : {}) })),
         };
         process.stdout.write(serializeJson(payload, pretty) + '\n');
     } else {

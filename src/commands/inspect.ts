@@ -371,7 +371,7 @@ export async function inspect(args: ParsedArgs): Promise<void> {
         for (const name of wantNames) {
             const entry = reader.getEntry(name);
             if (entry === null) {
-                throw new CliError(`Entry not found: ${name}`, 1, ErrorCode.NOT_FOUND, { entryName: name });
+                throw new CliError(`Entry not found: ${name} (run \`zipnative list\` for the exact names).`, 1, ErrorCode.NOT_FOUND, { entryName: name, zipCode: 'ZIP_ENTRY_NOT_FOUND' });
             }
             rows.push(rowFromEntry(entry, { long: true, extraHex }));
         }

@@ -95,7 +95,7 @@ const entryRowSchema: JsonSchema = {
         isEncrypted: { type: 'boolean' },
         usesZip64: { type: ['boolean', 'null'] },
         usesDataDescriptor: { type: 'boolean' },
-        unixMode: { type: ['string', 'null'], description: 'Octal, e.g. "0644"; null when not Unix-authored.' },
+        unixMode: { type: ['string', 'null'], pattern: '^[0-7]{4}$', description: 'Four octal digits — setuid/setgid/sticky digit then permissions, e.g. "0644", "4755"; null when not Unix-authored.' },
         comment: { type: 'string' },
         flags: {
             type: 'object',
@@ -432,9 +432,15 @@ function streamSummarySchema(): JsonSchema {
         $id: id('stream-summary'),
         title: 'zipnative-cli stream --summary output',
         type: 'object',
-        required: ['entries', 'bytes', 'trust'],
+        required: ['entries', 'bytes', 'descriptorEntries', 'bytesKnown', 'trust'],
         additionalProperties: false,
-        properties: { entries: { type: 'integer' }, bytes: { type: 'integer' }, trust: { const: 'local-headers-only' } },
+        properties: {
+            entries: { type: 'integer' },
+            bytes: { type: 'integer', description: 'Sum of the local-header sizes — excludes data-descriptor entries, whose local header carries zeros.' },
+            descriptorEntries: { type: 'integer', description: 'Entries whose sizes trail the payload (flag bit 3); their bytes are not counted.' },
+            bytesKnown: { type: 'boolean', description: 'true when descriptorEntries is 0, i.e. bytes is exact.' },
+            trust: { const: 'local-headers-only' },
+        },
     };
 }
 
@@ -466,6 +472,9 @@ function batchSchema(): JsonSchema {
                         id: { type: 'string' }, command: { type: 'string' }, ok: { type: 'boolean' }, output: { type: 'string' },
                         skipped: { const: true },
                         error: { type: 'object', required: ['code', 'message'], properties: { code: { enum: ERROR_CODES }, message: { type: 'string' }, zipCode: { enum: ZIP_CODES } } },
+                        report: { description: 'JSON mode only: what the task wrote to stdout, parsed (an object, or an array of objects for NDJSON).' },
+                        stdout: { type: 'string', description: 'JSON mode only: the task\'s stdout when it was not JSON (text output).' },
+                        stdoutBytes: { type: 'integer', description: 'JSON mode only: bytes the task wrote to stdout (captured, never interleaved with the batch document).' },
                     },
                 },
             },
@@ -507,6 +516,7 @@ function doctorSchema(): JsonSchema {
                         status: { enum: ['ok', 'warn', 'error'] },
                         value: { type: 'string' },
                         detail: { type: 'string' },
+                        data: { type: 'object', description: 'Machine-readable payload; `limits` carries the effective bounds (ZipLimits keys + maxInputSize; "none" when disabled).' },
                     },
                 },
             },

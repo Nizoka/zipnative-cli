@@ -13,7 +13,8 @@ Global options (any command):
   --config <file>   Use a specific .zipnativerc.json (default: nearest upward)
   --no-config       Ignore any .zipnativerc.json
   --quiet,   -q     Suppress progress output and text diagnostics on stderr
-  --no-color        Disable ANSI colour (also respects NO_COLOR)
+  --no-color        Disable ANSI colour on the stderr progress lines (also
+                    NO_COLOR; FORCE_COLOR turns it on; TERM=dumb turns it off)
   --json            Agent mode: emit a JSON status/error envelope on stderr
                     (data stays on stdout). Errors carry a stable E_* code and
                     zipnative's ZIP_* code verbatim.
@@ -429,6 +430,10 @@ Manifest mode:
                       see \`zipnative schema batch-manifest\`
   --continue-on-error Keep running independent tasks after a failure
   --allow-codec-load  Permit a "codec" flag inside tasks (executes user code)
+  Under --json (or --format json) stdout is ONE batch document: each task's
+  stdout is captured into tasks[i].report (parsed JSON / NDJSON) or .stdout
+  (text) with .stdoutBytes; create/modify/cat/inflate tasks must therefore
+  declare an "output" and stream --cat is refused (exit 2, at validation).
 
 Output:
   --format, -f text|json  (default text; json under --json)

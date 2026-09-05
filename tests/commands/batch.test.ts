@@ -316,13 +316,14 @@ describe('batch --manifest', () => {
         expect(r.error).toBeUndefined();
         const doc = lastJson(r.text) as unknown as ManifestEnvelope;
         expect(doc).toMatchObject({ ok: true, command: 'batch', mode: 'manifest', total: 3, succeeded: 3, failed: 0, skipped: 0 });
-        expect(r.text.trim().split('\n')).toHaveLength(2);
+        // Under --json stdout is ONE document: the tasks' own stdout is captured into tasks[i].report.
+        expect(r.text.trim().split('\n')).toHaveLength(1);
         expect(doc.tasks?.map((t) => t.id)).toEqual(['build', 'check', 'unpack']);
         expect(doc.tasks?.every((t) => t.ok)).toBe(true);
         expect(doc.tasks?.[0]?.output).toBe(join(dir, 'out', 'src.zip'));
-        // The verify task's own JSON report preceded the summary on stdout.
-        const verifyLine = r.text.trim().split('\n')[0] as string;
-        expect(JSON.parse(verifyLine)).toMatchObject({ ok: true, entries: 2, failed: 0 });
+        const check = doc.tasks?.[1] as unknown as { report?: unknown; stdoutBytes?: number };
+        expect(check.report).toMatchObject({ ok: true, entries: 2, failed: 0 });
+        expect(check.stdoutBytes).toBeGreaterThan(0);
         const archive = entriesOf(new Uint8Array(await readFile(join(dir, 'out', 'src.zip'))));
         expect(archive.map((e) => e.name)).toEqual(['src/one.txt', 'src/two.txt']);
         expect(await readFile(join(dir, 'out', 'unpacked', 'src', 'two.txt'), 'utf8')).toBe('two');

@@ -599,12 +599,12 @@ describe('create', () => {
             expect(Buffer.from(reader.readEntry(e)).toString()).toBe('streamed stdin');
         });
 
-        it('rejects unsafe, colliding and double-consumed stdin names (exit 2)', async () => {
+        it('rejects unsafe (E_INPUT), colliding and double-consumed (exit 2) stdin names', async () => {
             const src = await makeTree();
             await expect(run([join(src, 'a.txt'), '--stdin-name', '../x', '-o', join(tmp, 'o.zip')]))
-                .rejects.toMatchObject({ exitCode: 2 });
+                .rejects.toMatchObject({ exitCode: 1, code: 'E_INPUT', entryName: '../x' });
             await expect(run([join(src, 'a.txt'), '--stdin-name', 'dir/', '-o', join(tmp, 'o.zip')]))
-                .rejects.toMatchObject({ exitCode: 2 });
+                .rejects.toMatchObject({ exitCode: 1, code: 'E_INPUT' });
             await expect(run([join(src, 'a.txt'), '--stdin-name', 'a.txt', '-o', join(tmp, 'o.zip')]))
                 .rejects.toMatchObject({ exitCode: 2 });
             await expect(run(['-', '--stdin-name', 'x.txt', '-o', join(tmp, 'o.zip')]))

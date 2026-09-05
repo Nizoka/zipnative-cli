@@ -239,11 +239,11 @@ describe('stream', () => {
         expect(r.text).not.toContain('  ');
     });
 
-    it('--summary reduces the json report to { entries, bytes, trust }', async () => {
+    it('--summary reduces the json report to { entries, bytes, descriptorEntries, bytesKnown, trust }', async () => {
         await setup();
         const r = await run(() => stream(parseArgs(['--input', normalPath, '--format', 'json', '--summary'])));
         expect(r.error).toBeUndefined();
-        expect(JSON.parse(r.text)).toEqual({ entries: 3, bytes: 11, trust: 'local-headers-only' });
+        expect(JSON.parse(r.text)).toEqual({ entries: 3, bytes: 11, descriptorEntries: 0, bytesKnown: true, trust: 'local-headers-only' });
     });
 
     it('--fields projects the json report', async () => {

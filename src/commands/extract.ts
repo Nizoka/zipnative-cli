@@ -26,7 +26,7 @@
 import { chmod, mkdir, utimes } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { type ParsedArgs, getStringFlag, getStringFlagAll, hasFlag } from '../utils/args.js';
-import { emitStatus, isDryRun, progress } from '../utils/agent.js';
+import { emitStatus, isDryRun, isJsonMode, progress } from '../utils/agent.js';
 import {
     METHOD_DEFLATE,
     METHOD_STORE,
@@ -237,7 +237,7 @@ export async function extract(args: ParsedArgs): Promise<void> {
     };
 
     if (dryRun) {
-        if (!hasFlag(args.flags, 'json')) {
+        if (!isJsonMode()) {
             const lines = planned.map((p) => `plan  ${p.relPath}  ${p.entry.uncompressedSize}`);
             for (const s of skipped) lines.push(`skip  ${s.name}  (${s.reason})`);
             process.stdout.write(lines.join('\n') + (lines.length > 0 ? '\n' : ''));

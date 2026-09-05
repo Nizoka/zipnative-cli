@@ -67,10 +67,28 @@ interface Edit {
 
 const ORDER: readonly Op[] = ['remove', 'rename', 'replace', 'add', 'add-dir', 'comment'];
 
+/** An entry NAME is data (E_INPUT), not a mis-typed flag (E_USAGE). */
 function assertSafeName(name: string, flag: string): void {
     const bare = name.endsWith('/') ? name.slice(0, -1) : name;
     if (bare.length === 0 || sanitizeEntryPath(bare) === null) {
-        throw new CliError(`--${flag}: "${name}" is not a safe entry name.`, 2);
+        throw new CliError(
+            `--${flag}: "${name}" would not be extractable safely (traversal, absolute, drive/UNC, reserved device name or empty segment); use a plain relative name.`,
+            1,
+            ErrorCode.INPUT,
+            { entryName: name },
+        );
+    }
+}
+
+/** `--add dir/=payload` is a contradiction: a directory entry carries no payload. */
+function assertFileName(name: string, flag: string): void {
+    if (name.endsWith('/')) {
+        throw new CliError(
+            `--${flag}: "${name}" names a directory (trailing "/") but carries a payload; use --add-dir ${name} for an empty directory entry, or drop the trailing slash.`,
+            1,
+            ErrorCode.INPUT,
+            { entryName: name },
+        );
     }
 }
 
@@ -181,6 +199,9 @@ async function editsFromManifest(manifestPath: string, stdinUsed: { used: boolea
         const options = entryOptions(Object.keys(compression).length > 0 ? compression : undefined, extras);
 
         if (op === 'add' || op === 'replace') {
+            if (name.endsWith('/')) {
+                throw new CliError(`${where}: "${name}" names a directory (trailing "/") but op "${op}" carries a payload; use op "add-dir".`, 1, ErrorCode.INPUT, { entryName: name });
+            }
             const sources = ['path', 'data', 'dataBase64'].filter((k) => e[k] !== undefined);
             if (sources.length !== 1) throw new CliError(`${where}: exactly one of "path", "data" or "dataBase64" is required.`, 1, ErrorCode.INPUT);
             let data: Uint8Array;
@@ -243,11 +264,13 @@ export async function modify(args: ParsedArgs): Promise<void> {
         }
         for (const raw of getStringFlagAll(args.flags, 'replace')) {
             const { name, path } = parseNameEqualsPath(raw, 'replace');
+            assertFileName(name, 'replace');
             edits.push({ op: 'replace', name, path });
         }
         for (const raw of getStringFlagAll(args.flags, 'add')) {
             const { name, path } = parseNameEqualsPath(raw, 'add');
             assertSafeName(name, 'add');
+            assertFileName(name, 'add');
             edits.push({ op: 'add', name, path });
         }
         for (const raw of getStringFlagAll(args.flags, 'add-dir')) {

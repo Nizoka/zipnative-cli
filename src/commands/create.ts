@@ -17,7 +17,7 @@ import { createReadStream } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { dirname, extname, resolve } from 'node:path';
 import { type ParsedArgs, getStringFlag, getStringFlagAll, hasFlag } from '../utils/args.js';
-import { emitStatus, isDryRun, progress } from '../utils/agent.js';
+import { emitStatus, isDryRun, isJsonMode, progress } from '../utils/agent.js';
 import { loadedCodecModules } from '../utils/codecs.js';
 import {
     activeDeflateTier,
@@ -321,7 +321,12 @@ async function planFromPaths(args: ParsedArgs, inputs: readonly string[], stdinN
     if (stdinName !== undefined) {
         const bare = stdinName.replace(/\\/g, '/');
         if (bare.endsWith('/') || sanitizeEntryPath(bare) === null) {
-            throw new CliError(`--stdin-name "${stdinName}" is not a safe entry name.`, 2);
+            throw new CliError(
+                `--stdin-name "${stdinName}" would not be extractable safely (traversal, absolute, reserved device name or empty segment); use a plain relative file name.`,
+                1,
+                ErrorCode.INPUT,
+                { entryName: stdinName },
+            );
         }
         if (entries.some((e) => e.name === bare)) {
             throw new CliError(`--stdin-name "${stdinName}" collides with an input file name.`, 2);
@@ -445,7 +450,9 @@ export async function create(args: ParsedArgs): Promise<void> {
     };
 
     if (dryRun) {
-        if (!hasFlag(args.flags, 'json')) {
+        // Agent mode (global --json or ZIPNATIVE_JSON): the envelope is the
+        // artefact; the text plan would only pollute stdout.
+        if (!isJsonMode()) {
             const lines = plan.entries.map((e) => {
                 const size = e.source.kind === 'file' ? e.source.size : e.source.kind === 'bytes' ? e.source.data.length : '?';
                 const m = e.isDirectory ? 'dir' : (e.options.compression?.method ?? method);

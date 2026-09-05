@@ -289,3 +289,28 @@ export function assertCodecPolicy(plan: ManifestPlan, allowCodecLoad: boolean): 
         }
     }
 }
+
+/** Commands whose stdout IS the artefact unless `output` redirects it. */
+const ARTEFACT_TO_STDOUT: ReadonlySet<string> = new Set(['create', 'modify', 'cat', 'inflate']);
+
+/**
+ * `batch --manifest` in JSON mode owns stdout (one document). A task that
+ * would write its artefact there — `create`/`modify`/`cat`/`inflate` without
+ * `output`, or `stream --cat` — is refused at validation (also under
+ * `--dry-run`) instead of being captured into the document.
+ */
+export function assertJsonStdoutPolicy(plan: ManifestPlan): void {
+    for (const task of plan.tasks) {
+        const catFlag = task.flags['cat'];
+        if (ARTEFACT_TO_STDOUT.has(task.command) && task.output === undefined) {
+            throw usageError(
+                `Task "${task.id}": under --json, "${task.command}" writes its artefact to stdout, which batch reserves for its own document — add an "output" flag to the task.`,
+            );
+        }
+        if (task.command === 'stream' && catFlag !== undefined && catFlag !== false) {
+            throw usageError(
+                `Task "${task.id}": under --json, "stream --cat" writes entry bytes to stdout, which batch reserves for its own document — use "extract" with "output-dir", or "cat" with an "output" file.`,
+            );
+        }
+    }
+}

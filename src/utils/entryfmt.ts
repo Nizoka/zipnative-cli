@@ -119,8 +119,9 @@ export function crcHex(crc: number): string {
     return (crc >>> 0).toString(16).padStart(8, '0');
 }
 
+/** Four octal digits: permission bits plus the setuid/setgid/sticky digit ("0644", "4755", "0000"). */
 function octal(mode: number): string {
-    return '0' + (mode & 0o7777).toString(8);
+    return (mode & 0o7777).toString(8).padStart(4, '0');
 }
 
 function extraRows(fields: readonly ZipExtraField[], withHex: boolean): ExtraFieldRow[] {
