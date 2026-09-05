@@ -240,7 +240,7 @@ describe('parseManifest — structural violations (exit 2, E_USAGE)', () => {
 
     it('rejects a non-finite number (via JSON it cannot occur, but the guard is unreachable only if JSON refuses)', () => {
         // JSON.parse never yields Infinity/NaN; documented guard stays for callers feeding parsed objects.
-        expect(() => parseManifest(manifest([{ id: 'a', command: 'list', flags: { x: 1e999 } }]), DIR)).toThrow(CliError);
+        expect(() => parseManifest(manifest([{ id: 'a', command: 'list', flags: { x: Number.POSITIVE_INFINITY } }]), DIR)).toThrow(CliError);
     });
 });
 

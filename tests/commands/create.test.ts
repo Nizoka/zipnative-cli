@@ -423,7 +423,7 @@ describe('create', () => {
 
     describe('--from-manifest', () => {
         it('builds entries from path, data, dataBase64, directory, mode and comment', async () => {
-            const src = await makeTree();
+            await makeTree();
             const manifestPath = join(tmp, 'manifest.json');
             const b64 = Buffer.from([0, 1, 2, 255]).toString('base64');
             await writeFile(manifestPath, JSON.stringify({

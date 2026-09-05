@@ -3,6 +3,9 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
+    // "dom" only for the global CompressionStream / DecompressionStream and
+    // TextEncoder / TextDecoder typings the engine's streaming API exposes;
+    // nothing here touches a browser.
     "lib": ["ES2022", "dom"],
     "types": ["node"],
     "strict": true,

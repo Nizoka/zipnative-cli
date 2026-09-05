@@ -23,14 +23,14 @@ export default defineConfig({
                 'src/core-bridge/index.ts',
             ],
             thresholds: {
-                // Starting values for 1.0.0 — between pdfnative-cli's
-                // re-baselined 79/68/83/79 and zipnative's 85/78/85/85. The CLI
-                // has no PKI/network engine to exclude, so it should sit near
-                // the core. Never lower them to make a change pass — add tests.
-                statements: 85,
-                branches: 75,
-                functions: 85,
-                lines: 85,
+                // Ratcheted after the 1.0.0 audit pass from the measured
+                // 96.3 / 92.3 / 97.9 / 96.8 (2026-09-05), three points below
+                // the actuals so a legitimate refactor does not flap the gate.
+                // Never lower them to make a change pass — add tests.
+                statements: 93,
+                branches: 88,
+                functions: 94,
+                lines: 93,
             },
         },
     },

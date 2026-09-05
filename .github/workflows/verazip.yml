@@ -37,13 +37,9 @@ name: ISO 21320-1 Validation (veraZIP)
 #   and no level-1 tool usable, or a file produced an INFRA outcome —
 #   not a verdict).
 #
-# NOTE on `paths:` filters vs. required checks: this workflow only triggers
-# when the listed paths change. GitHub reports a path-filtered workflow that
-# did not run as "Expected — Waiting for status" on a PR, which BLOCKS merging
-# forever if the check is marked "required" in branch protection. Before
-# making this job a required check, either drop the `paths:` filters (run it
-# on every PR) or add a companion workflow with `paths-ignore` mirroring this
-# list that reports a passing status of the same name.
+# No `paths:` filter: a path-filtered workflow that does not run reports
+# "Expected — Waiting for status" on a PR and blocks merging when the check is
+# required in branch protection, so this gate runs on every push and PR.
 #
 # Level-1 tools come from the runner images, never from npm — the package
 # keeps its zero-runtime-dependency policy (`zipnative` is the only runtime
@@ -58,24 +54,8 @@ name: ISO 21320-1 Validation (veraZIP)
 on:
   push:
     branches: [main, master]
-    paths:
-      - 'src/**'
-      - 'scripts/**'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'tsup.config.ts'
-      - 'tsconfig.json'
-      - '.github/workflows/verazip.yml'
   pull_request:
     branches: [main, master]
-    paths:
-      - 'src/**'
-      - 'scripts/**'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'tsup.config.ts'
-      - 'tsconfig.json'
-      - '.github/workflows/verazip.yml'
   # Manual runs against any branch from the Actions UI.
   workflow_dispatch:
 

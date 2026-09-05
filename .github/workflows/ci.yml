@@ -3,22 +3,22 @@ name: CI
 on:
   push:
     branches: [main, master]
+    # Docs are NOT ignored: tests/docs/consistency.test.ts pins README,
+    # AGENTS.md, llms.txt and the knowledge base to the code, so a docs-only
+    # change can break the suite and must run it.
     paths-ignore:
-      - '**.md'
-      - 'docs/**'
       - '.github/ISSUE_TEMPLATE/**'
-      - '.github/*.md'
       - '.github/FUNDING.yml'
       - 'LICENSE'
       - '.editorconfig'
       - '.gitignore'
   pull_request:
     branches: [main, master]
+    # Docs are NOT ignored: tests/docs/consistency.test.ts pins README,
+    # AGENTS.md, llms.txt and the knowledge base to the code, so a docs-only
+    # change can break the suite and must run it.
     paths-ignore:
-      - '**.md'
-      - 'docs/**'
       - '.github/ISSUE_TEMPLATE/**'
-      - '.github/*.md'
       - '.github/FUNDING.yml'
       - 'LICENSE'
       - '.editorconfig'
@@ -71,10 +71,12 @@ jobs:
         run: npm run build
 
       - name: Verify dist output
+        # The package ships the CJS bin only (no ESM build, no .d.ts, no maps).
         run: |
           test -f dist/cli.cjs
-          test -f dist/cli.js
-          test -f dist/cli.d.ts
+          test ! -e dist/cli.js
+          test ! -e dist/cli.d.ts
+          test ! -e dist/cli.cjs.map
 
       # The built binary must answer --help / --version and expose the full
       # command surface through `schema manifest` (15 commands in 4 groups —
@@ -103,15 +105,20 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 20
 
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [22, 24]
+
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
-      - name: Setup Node.js 22
+      - name: Setup Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: 22
+          node-version: ${{ matrix.node-version }}
           cache: npm
 
       - name: Install dependencies
@@ -133,8 +140,8 @@ jobs:
         shell: bash
         run: |
           test -f dist/cli.cjs
-          test -f dist/cli.js
-          test -f dist/cli.d.ts
+          test ! -e dist/cli.js
+          test ! -e dist/cli.d.ts
 
       - name: Binary smoke test
         shell: bash
@@ -142,6 +149,38 @@ jobs:
           node dist/cli.cjs --help
           node dist/cli.cjs --version
           node dist/cli.cjs schema manifest | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const m=JSON.parse(s);if(!Array.isArray(m.commands)||m.commands.length!==15){console.error("schema manifest: expected 15 commands, got "+(Array.isArray(m.commands)?m.commands.length:"none"));process.exit(1)}console.log("schema manifest ok: "+m.commands.length+" commands")})'
+
+      - name: Built-binary integration (post-build)
+        run: npx vitest run tests/integration/built-binary-smoke.test.ts
+
+  # macOS is the second case-insensitive filesystem the sink handles
+  # (utils/sink.ts CASE_INSENSITIVE_FS covers win32 AND darwin): the
+  # case-fold collision and --flat duplicate policies must be exercised on
+  # a real APFS volume, not only inferred from the Windows leg. Tests + a
+  # build + the spawn smoke test; the veraZIP corpus stays Linux/Windows.
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test
+        run: npm run test
+
+      - name: Build
+        run: npm run build
 
       - name: Built-binary integration (post-build)
         run: npx vitest run tests/integration/built-binary-smoke.test.ts

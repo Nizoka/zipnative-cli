@@ -7,22 +7,22 @@
     "zipnative": "./dist/cli.cjs"
   },
   "main": "./dist/cli.cjs",
-  "module": "./dist/cli.js",
-  "types": "./dist/cli.d.ts",
   "files": [
     "dist",
+    "!dist/**/*.map",
     "LICENSE",
     "README.md",
-    "llms.txt"
+    "AGENTS.md",
+    "llms.txt",
+    "docs/data/errors.json"
   ],
-  "sideEffects": false,
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "lint": "eslint src/",
+    "lint": "eslint src/ tests/",
     "typecheck": "tsc --noEmit",
     "typecheck:tests": "tsc --project tsconfig.test.json --noEmit",
     "typecheck:all": "npm run typecheck && npm run typecheck:tests",
@@ -78,7 +78,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Nizoka/zipnative-cli.git"
+    "url": "git+https://github.com/Nizoka/zipnative-cli.git"
   },
   "homepage": "https://github.com/Nizoka/zipnative-cli#readme",
   "bugs": {

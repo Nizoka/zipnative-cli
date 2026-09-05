@@ -16,9 +16,10 @@ on:
 #     1. Authorises the `npm publish` HTTP request
 #     2. Signs the provenance attestation (SLSA Level 2+ via Sigstore)
 #   Configure at npmjs.com → package settings → "Configure Trusted Publishing".
+# Least privilege at the top level; the publish job alone requests
+# `id-token: write` (OIDC) and `contents: write` (release asset upload).
 permissions:
   contents: read
-  id-token: write
 
 jobs:
   publish:
@@ -29,6 +30,8 @@ jobs:
     permissions:
       contents: write
       id-token: write
+      # Lets the SBOM attestation below be stored with the repository.
+      attestations: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -67,10 +70,12 @@ jobs:
         run: npm run build
 
       - name: Verify dist output
+        # CJS bin only — no ESM build, no .d.ts, no source maps in the tarball.
         run: |
           test -f dist/cli.cjs
-          test -f dist/cli.js
-          test -f dist/cli.d.ts
+          test ! -e dist/cli.js
+          test ! -e dist/cli.d.ts
+          test ! -e dist/cli.cjs.map
 
       - name: Binary smoke test
         run: |
@@ -116,11 +121,38 @@ jobs:
           path: sbom.cdx.json
           retention-days: 90
 
+      # Signed provenance for the SBOM itself (Sigstore, stored as a GitHub
+      # attestation) — a consumer can verify the SBOM was produced by THIS
+      # workflow run: `gh attestation verify sbom.cdx.json -R Nizoka/zipnative-cli`.
+      - name: Attest SBOM provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: sbom.cdx.json
+
       - name: Attach SBOM to release
         if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ github.event.release.tag_name }}" sbom.cdx.json --clobber
+          # Passed through the environment, never interpolated into the
+          # shell line (a tag name is untrusted input).
+          TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$TAG" sbom.cdx.json --clobber
+
+      - name: Pack tarball (what npm publish will ship)
+        run: npm pack --pack-destination .
+
+      - name: Verify tarball contents
+        # The package must carry exactly the bin, the agent docs and the
+        # error catalogue — never a source map, a test or a workflow.
+        run: |
+          tar -tzf zipnative-cli-*.tgz > tarball.txt
+          cat tarball.txt
+          grep -q 'package/dist/cli.cjs$' tarball.txt
+          grep -q 'package/AGENTS.md$' tarball.txt
+          grep -q 'package/llms.txt$' tarball.txt
+          grep -q 'package/docs/data/errors.json$' tarball.txt
+          ! grep -q '\.map$' tarball.txt
+          ! grep -q 'package/tests/' tarball.txt
 
       - name: Publish
         run: npm publish --provenance --access public

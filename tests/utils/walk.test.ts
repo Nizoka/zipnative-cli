@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { walkPaths } from '../../src/utils/walk.js';
 import { buildFilter } from '../../src/utils/glob.js';
-import { CliError } from '../../src/utils/error.js';
+
 
 const IS_WIN = process.platform === 'win32';
 
