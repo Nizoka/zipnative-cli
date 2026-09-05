@@ -11,6 +11,7 @@
 
 import { type ParsedArgs, getStringFlag, hasFlag } from '../utils/args.js';
 import { readFileOrStdin, assertJsonSizeLimit } from '../utils/io.js';
+import { parseInputSizeFlag } from '../utils/limits.js';
 import { CliError, ErrorCode } from '../utils/error.js';
 import { isJsonMode } from '../utils/agent.js';
 import { serializeJson } from '../utils/projection.js';
@@ -33,7 +34,9 @@ async function verifyIssue(args: ParsedArgs): Promise<void> {
         throw new CliError('Usage: zipnative govern verify-issue <draft.md>', 2);
     }
 
-    const buf = await readFileOrStdin(draftPath);
+    // A draft is a buffered read like any other: --max-input-size applies
+    // (then the 50 MB text cap before the regex pass).
+    const buf = await readFileOrStdin(draftPath, parseInputSizeFlag(args));
     assertJsonSizeLimit(buf);
     const result: GovernanceValidation = validateGovernanceDraft(buf.toString('utf8'));
 

@@ -40,9 +40,9 @@ npm run validate:zip   # build + corpus + veraZIP validation (see below)
 
 All new code must include tests. Coverage thresholds (enforced by `vitest.config.ts`, the single
 source of truth): **statements 93 %, branches 88 %, functions 94 %, lines 93 %** — ratcheted after
-the 1.0.0 audit pass from the measured 96.25 / 92.32 / 97.9 / 96.8 (2026-09-05), three points
+the 1.0.0 audit pass from the measured 96.27 / 92.36 / 97.91 / 96.81 (2026-09-05), three points
 below the actuals so a legitimate refactor does not flap the gate. Never lower them to make a
-change pass — add tests. The suite is 56 files / 1167 tests (9 are platform-conditional and skip
+change pass — add tests. The suite is 57 files / 1184 tests (9 are platform-conditional and skip
 with a stated reason).
 
 Tests run the command functions **in-process** with `process.stdout` / `process.stderr` captured

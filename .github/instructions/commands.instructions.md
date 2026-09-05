@@ -46,7 +46,8 @@ applyTo: "src/commands/**"
 - **Error classes:** an unsafe entry NAME that arrives as data (`--add`, `--rename`,
   `--add-dir`, `--stdin-name`, manifest names) is `E_INPUT` (exit 1) with `entryName`; a
   malformed flag is `E_USAGE`. Every CLI-side `E_NOT_FOUND` carries
-  `zipCode: 'ZIP_ENTRY_NOT_FOUND'` and names the remedy (`zipnative list`).
+  `zipCode: 'ZIP_ENTRY_NOT_FOUND'` and names the remedy (`zipnative list`; `stream --cat` points at
+  `stream --list`; `modify` relays the engine's case-sensitivity note).
 - **`--strict`:** pass `strict: isStrict()` into the core open options; the core escalates the
   first diagnostic (`ZIP_STRICT_DIAGNOSTIC` → `E_CHECK_FAILED`) before any output byte.
 - In `--json` mode, do NOT pre-print a detail to stderr that the envelope already carries.

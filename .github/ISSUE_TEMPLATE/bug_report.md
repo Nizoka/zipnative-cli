@@ -45,7 +45,7 @@ zipnative <command> [...flags]
 
 - **zipnative-cli version:** <!-- zipnative --version -->
 - **zipnative version:** <!-- zipnative doctor --format json  (reports both, plus the active deflate tier) -->
-- **Runtime:** <!-- Node.js 22/24, Bun 1.x, Deno 2.x -->
+- **Runtime:** <!-- Node.js 22 / 24 (node --version) -->
 - **OS:** <!-- incl. filesystem when relevant: NTFS / APFS (case-insensitive) / ext4 -->
 
 ## Minimal Reproduction

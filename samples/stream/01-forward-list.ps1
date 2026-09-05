@@ -44,7 +44,7 @@ Write-Host '→ NDJSON rows as they arrive (saved to 01-forward-list.ndjson):'
 
 Write-Host ''
 Write-Host '→ --json --summary carries the trust marker:'
-& node -e $CatJs $Zip | & $ZnExe @ZnPre stream --json --format json --summary
+& node -e $CatJs $Zip | & $ZnExe @ZnPre stream --json --summary
 
 Write-Host ''
 Write-Host '→ --input reads a file sequentially with the same forward reader:'

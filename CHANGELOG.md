@@ -228,11 +228,11 @@ Considerations" (A-11, A-25, A-36, B-21, B-39, B-42) and one was rejected (B-44)
 - **Tests** — in-process vitest suites (stdout / stderr captured) for every command and
   util, an engine-independent raw ZIP builder for adversarial shapes (never committed — see
   `tests/fixtures/README.md`), two foreign-provenance interop fixtures, one spawn smoke test
-  against the built binary, and `tests/docs/consistency.test.ts`. 1167 tests across
-  56 files (1158 passed + 9 platform-conditional skips; statements 96.25 %, branches 92.32 %,
-  functions 97.9 %, lines 96.8 %).
+  against the built binary, and `tests/docs/consistency.test.ts`. 1184 tests across
+  57 files (1175 passed + 9 platform-conditional skips; statements 96.27 %, branches 92.36 %,
+  functions 97.91 %, lines 96.81 %).
 - **Package** — the CJS bin only (`dist/cli.cjs`; no ESM build, no `.d.ts`, no source maps):
-  7 files, 102.5 kB packed.
+  7 files, 116.7 kB packed.
 - **Samples** — 41 dual-shell demos (`.sh` + `.ps1`) under `samples/`, plus `samples/agent/`
   and `samples/run-all.js` (73 jobs); every sample runs offline.
 
@@ -284,8 +284,8 @@ Considerations" (A-11, A-25, A-36, B-21, B-39, B-42) and one was rejected (B-44)
 - `inspect`'s determinism verdict separates **reproducibility** (`deterministic` = epoch
   timestamps + canonical order + UTF-8 flags) from **form** (`canonicalLayout` = no data
   descriptors): a `create --stream` archive is reproducible run-to-run and no longer fails
-  `--check deterministic`; the text verdict reads "reproducible, layout canonical |
-  data-descriptor".
+  `--check deterministic`; the text verdict reads "reproducible, layout canonical" or
+  "… layout data-descriptor (streamed)".
 - Unknown commands and flags without a command are usage errors: exit 2 / `E_USAGE` (was
   exit 1 / `E_RUNTIME`) (audit A-29).
 - `--help` polish: every USAGE line ≤ 80 columns, `--format, -f` documented on every command

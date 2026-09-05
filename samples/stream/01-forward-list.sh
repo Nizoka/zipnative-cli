@@ -38,4 +38,4 @@ cat "$ZIP" | zn stream --list --format ndjson --quiet | tee "$OUTPUT_DIR/01-forw
 
 echo ""
 echo "→ --json --summary carries the trust marker:"
-cat "$ZIP" | zn stream --json --format json --summary
+cat "$ZIP" | zn stream --json --summary

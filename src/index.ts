@@ -36,7 +36,8 @@ Global options (any command):
   --max-input-size <size>      Bound on a buffered input read — an archive
                     or payload read from stdin or a file into memory (list,
                     inspect, verify, extract, cat, modify, create --stdin-name,
-                    inflate --sync). Default 4 GiB; "none" disables it;
+                    inflate --sync, govern verify-issue). Default 4 GiB;
+                    "none" disables it;
                     exceeding it is E_LIMIT. The streaming commands (stream,
                     crc32, inflate, create --stream) are not bounded by it.
   --pure-codecs     Skip node:zlib and run the pure-TS codec tier
@@ -176,9 +177,9 @@ Output modes:
   --dry-run                Walk inputs, validate names, print the plan;
                            write nothing
 
-Status envelope (--json): { ok, command, output, entries, files, directories,
-bytes, bytesIn, method, level, deterministic, tier, order, stream, parallel,
-skipped, diagnostics }.
+Status envelope (--json): { ok, command, dryRun, output, entries, files,
+directories, bytes, bytesIn, method, level, deterministic, tier, order, stream,
+layout, parallel, skipped, diagnostics }.
 `;
 
 const LIST_USAGE = `\
@@ -305,7 +306,8 @@ Options:
   --list              List entries as they arrive (default mode)
   --output-dir, -d    Extract under <dir> (sanitizeEntryPath + containment)
   --cat <name>        Write the named entry's data to stdout (repeatable)
-  --format, -f text|json|ndjson   (default text; ndjson under --json)
+  --format, -f text|json|ndjson   (default text; ndjson under --json, json
+                      when --summary or --fields is given)
   --long              Add flags, versions and extra fields to the rows
   --include/--exclude <glob>, --overwrite, --on-duplicate, --flat,
   --preserve-mtime    As in \`extract\`

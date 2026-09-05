@@ -70,7 +70,10 @@ export async function stream(args: ParsedArgs): Promise<void> {
         throw new CliError('--output-dir and --cat are mutually exclusive.', 2);
     }
     const mode: 'list' | 'extract' | 'cat' = outputDir !== undefined ? 'extract' : catNames.length > 0 ? 'cat' : 'list';
-    const format = parseFormat(args, ['text', 'json', 'ndjson'] as const, isJsonMode() ? 'ndjson' : 'text');
+    // Under --json the default is NDJSON (rows as they arrive) — unless the
+    // caller asked for a projection, which only the json report can carry.
+    const projecting = hasFlag(args.flags, 'summary') || getStringFlag(args.flags, 'fields') !== undefined;
+    const format = parseFormat(args, ['text', 'json', 'ndjson'] as const, isJsonMode() ? (projecting ? 'json' : 'ndjson') : 'text');
     const long = hasFlag(args.flags, 'long');
     const overwrite = hasFlag(args.flags, 'overwrite');
     const skipUnsafe = hasFlag(args.flags, 'skip-unsafe');

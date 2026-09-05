@@ -2,7 +2,7 @@ name: ISO 21320-1 Validation (veraZIP)
 
 # veraZIP — zipnative-cli's analogue of pdfnative-cli's veraPDF gate.
 #
-# WHAT: the BUILT binary (dist/cli.cjs) writes a corpus of 34 archives
+# WHAT: the BUILT binary (dist/cli.cjs) writes a corpus of 37 archives (33 conformant + 4 negative canaries)
 # (scripts/generate-zip-corpus.mjs → test-output/zip/ + manifest.json)
 # covering a representative sample of the features the CLI exposes:
 # store/deflate, --stream, --parallel, --deterministic, zip64, directory

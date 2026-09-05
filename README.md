@@ -89,7 +89,7 @@ Official CLI for the [`zipnative`](https://github.com/Nizoka/zipnative) engine �
   worker-thread availability for `create --parallel`, registered codecs, the **effective
   security limits** (as numbers under `data`, `--max-input-size` included), and the command
   count. Text or `--format json`; exit 0/1.
-- **`schema`** — 22 versioned JSON Schemas (Draft 2020-12) for every input and output shape
+- **`schema`** — 22 versioned subjects: JSON Schemas (Draft 2020-12) for every input and output shape, the `errors` registry
   plus the machine-readable **capability manifest** (`schema manifest`) and
   [`llms.txt`](llms.txt), so agents can self-validate and discover the tool at runtime.
 - **`completion`** — `bash`, `zsh`, `fish` or `powershell` completion scripts, generated from the
@@ -292,7 +292,7 @@ zipnative inspect --input a.zip --check no-encryption,no-symlinks,max-ratio=100,
 Example `inspect --format json --summary` output:
 
 ```json
-{ "entries": 12, "bytes": 48213, "uncompressedSize": 131072, "zip64": false, "encrypted": 0, "deterministic": true, "diagnostics": 0, "checksPassed": true }
+{ "entries": 12, "bytes": 48213, "uncompressedSize": 131072, "zip64": false, "encrypted": 0, "deterministic": true, "canonicalLayout": true, "diagnostics": 0, "checksPassed": true }
 ```
 
 ### Extract safely
@@ -361,7 +361,7 @@ zipnative crc32 file.bin --expect 1a2b3c4d        # exit 1 / E_CHECK_FAILED on m
 zipnative cat a.zip big.bin | zipnative crc32     # cross-check an entry against `list`
 
 zipnative inflate --input payload.deflate --output payload.bin --max-output 64m
-zipnative cat a.zip big.bin --raw | zipnative inflate > big.bin
+zipnative cat a.zip big.bin --raw | zipnative inflate > big.bin   # deflate entry only: a stored entry's --raw payload is already the plain bytes
 ```
 
 ### Batch and pipelines
@@ -461,7 +461,7 @@ cat file | zipnative create --stdin-name <name> -o <out.zip>
 | `--method store\|deflate` | `deflate` | Compression method |
 | `--level 0-9` | `6` | Deflate level |
 | `--deterministic` | false | Pin the pure-TS encoder: identical SHA-256 on every runtime |
-| `--order canonical\|insertion` | `canonical` | Entry order: `canonical` sorts by raw-name bytes; `insertion` keeps the **argv order** (each directory still walks name-sorted; a manifest keeps its `entries` order) — e.g. `zipnative create mimetype META-INF OEBPS --base book --order insertion` puts an EPUB `mimetype` first |
+| `--order canonical\|insertion` | `canonical` | Entry order: `canonical` sorts by raw-name bytes; `insertion` keeps the **argv order** (each directory still walks name-sorted; a manifest keeps its `entries` order) — e.g. `zipnative create book/mimetype book/META-INF book/OEBPS --base book --order insertion -o book.epub` puts an EPUB `mimetype` first (`--base` rebases the names; inputs are still looked up where they are) |
 | `--date epoch\|now\|<ISO 8601>` | `epoch` | Timestamp for entries. `epoch` = DOS epoch 1980-01-01 (reproducible); an ISO date is **UTC wall-clock** (no zone designator → UTC; 2-second resolution, 1980–2107); `now` is local time and non-reproducible (`ZIP_TIMESTAMP_NOT_PINNED`) |
 | `--mtime` | false | Use each file's modification time (local, non-reproducible) |
 | `--comment <text>` | — | Archive comment |
@@ -586,7 +586,7 @@ Assertions: `deterministic`, `epoch-timestamps`, `canonical-order`, `utf8-names`
 The `determinism` verdict is `{ epochTimestamps, canonicalOrder, utf8Flags, noDataDescriptors,
 canonicalLayout, deterministic }` — `deterministic` (reproducibility) = epoch timestamps +
 canonical order + UTF-8 flags; `canonicalLayout` (form) = no data descriptors. The text report
-prints `Determinism: reproducible, layout canonical|data-descriptor`. JSON shape:
+prints `Determinism: reproducible, layout canonical` or `… layout data-descriptor (streamed)`. JSON shape:
 `zipnative schema inspect`.
 
 ### `zipnative cat`
@@ -667,8 +667,8 @@ cat a.zip | zipnative stream --cat <name>
 | `--list` | default mode | List entries as they arrive |
 | `--output-dir <dir>`, `-d` | — | Extract under `<dir>` (`sanitizeEntryPath` + containment) |
 | `--cat <name>` _(repeatable)_ | — | Write the named entry's data to stdout; mutually exclusive with `--output-dir` |
-| `--format text\|json\|ndjson`, `-f` | `text` (`ndjson` under `--json`) | Listing format |
-| `--long` | false | Add flags, versions and extra fields to the rows (`rawNameHex` / `commentHex` included; no `-l` short form) |
+| `--format text\|json\|ndjson`, `-f` | `text` (`ndjson` under `--json`; `json` when `--summary` / `--fields` is given) | Listing format |
+| `--long` | false | Add flags, versions and extra fields to the rows (`rawNameHex` included; entry comments live only in the central directory, so there is no `commentHex` here; no `-l` short form) |
 | `--include` / `--exclude`, `--overwrite`, `--on-duplicate`, `--flat`, `--preserve-mtime` | as in `extract` | Extraction controls (the same sink: realpath containment, exclusive open) |
 | `--skip-unsafe` | false | Skip unsafe names instead of failing |
 | `--skip-unsupported` | false | Skip encrypted / unknown-method entries instead of failing |
@@ -1059,7 +1059,7 @@ See [SECURITY.md](SECURITY.md) for the full security policy and vulnerability di
 - 📖 Check the [FAQ](docs/KNOWLEDGE_BASE.md#12-frequently-asked-questions) first
 - 🔍 Search the samples: `grep -r "your-keyword" samples/`
 - 📚 Read [KNOWLEDGE_BASE.md](docs/KNOWLEDGE_BASE.md) for technical details
-- 💬 Open a discussion: [GitHub Discussions](https://github.com/Nizoka/zipnative-cli/discussions)
+- 💬 Open a discussion: [the engine's GitHub Discussions](https://github.com/Nizoka/zipnative/discussions) until the CLI tab is enabled (see [SUPPORT.md](SUPPORT.md))
 
 **Found a bug?**
 - 🐛 Open an issue: [GitHub Issues](https://github.com/Nizoka/zipnative-cli/issues)

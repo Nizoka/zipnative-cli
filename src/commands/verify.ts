@@ -127,7 +127,7 @@ function verifySelected(bytes: Uint8Array, args: ParsedArgs, names: readonly str
     for (const name of names) {
         const entry = guard('Failed to read the central directory', () => reader.getEntry(name));
         if (entry === null) {
-            throw new CliError(`Entry not found: ${name}`, 1, ErrorCode.NOT_FOUND, { entryName: name, zipCode: 'ZIP_ENTRY_NOT_FOUND' });
+            throw new CliError(`Entry not found: ${name} (run \`zipnative list\` for the exact names).`, 1, ErrorCode.NOT_FOUND, { entryName: name, zipCode: 'ZIP_ENTRY_NOT_FOUND' });
         }
         const custom = entry.compressionMethod !== METHOD_STORE && entry.compressionMethod !== METHOD_DEFLATE;
         const codec = custom ? getCodec(entry.compressionMethod) : null;

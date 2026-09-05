@@ -106,6 +106,27 @@ const FS_ERROR_CODES = new Set([
     'EMFILE', 'ENFILE', 'EBUSY', 'EROFS', 'ELOOP', 'ENAMETOOLONG', 'EIO', 'EINVAL',
 ]);
 
+/**
+ * node:zlib errors that reach the CLI unwrapped. The engine's `node-zlib`
+ * tier calls `inflateRawSync` directly, so a corrupt or truncated raw
+ * stream on the sync path (`inflate --sync`, `readEntry`) surfaces zlib's
+ * own Error (`code: Z_DATA_ERROR` / `Z_BUF_ERROR`) instead of a `ZipError`.
+ * They are the same two conditions the pure tier reports as
+ * `ZIP_DEFLATE_CORRUPT` / `ZIP_DEFLATE_TRUNCATED`, so map them identically —
+ * the class an agent sees must not depend on the codec tier.
+ */
+const ZLIB_TO_ZIP: Readonly<Record<string, ZipErrorCode>> = {
+    Z_DATA_ERROR: 'ZIP_DEFLATE_CORRUPT',
+    Z_NEED_DICT: 'ZIP_DEFLATE_CORRUPT',
+    Z_BUF_ERROR: 'ZIP_DEFLATE_TRUNCATED',
+};
+
+function zlibCodeOf(err: unknown): ZipErrorCode | undefined {
+    if (!(err instanceof Error)) return undefined;
+    const code = (err as NodeJS.ErrnoException).code;
+    return typeof code === 'string' ? ZLIB_TO_ZIP[code] : undefined;
+}
+
 /** True when `err` is a Node filesystem/stream error (has a known `code`). */
 export function isFsError(err: unknown): err is NodeJS.ErrnoException {
     return (
@@ -164,6 +185,14 @@ export function mapZipError(err: unknown, context: string, entryName?: string): 
     if (isFsError(err)) {
         const path = err.path !== undefined ? ` (${err.path})` : '';
         return new CliError(`${context}: ${err.code}${path}: ${err.message}`, 1, ErrorCode.IO);
+    }
+    const zlibCode = zlibCodeOf(err);
+    if (zlibCode !== undefined) {
+        const [code, exitCode] = ZIP_TO_CLI[zlibCode];
+        return new CliError(`${context}: ${(err as Error).message}`, exitCode, code, {
+            zipCode: zlibCode,
+            ...(entryName !== undefined ? { entryName } : {}),
+        });
     }
     const message = err instanceof Error ? err.message : String(err);
     return new CliError(`${context}: ${message}`, 1, ErrorCode.RUNTIME);

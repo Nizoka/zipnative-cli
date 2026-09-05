@@ -142,7 +142,7 @@ Extract to a directory — zip-slip, symlink, bomb and duplicate guards on by de
 
 | File | Description |
 |------|-------------|
-| [01-cat-entry.sh](cat/01-cat-entry.sh) / [.ps1](cat/01-cat-entry.ps1) | Stream one entry, concatenate two to a file, `--dry-run` sizes, `--raw` compressed payload → `inflate` round trip |
+| [01-cat-entry.sh](cat/01-cat-entry.sh) / [.ps1](cat/01-cat-entry.ps1) | Stream one entry, concatenate two to a file, `--dry-run` sizes, `--raw` compressed payload → `inflate` round trip (deflate entries only — a stored entry's raw payload is already plain) |
 
 ## verify Samples
 
@@ -299,7 +299,8 @@ FROM node:22-alpine
 RUN npm install --global zipnative-cli
 WORKDIR /work
 COPY dist/ ./dist/
-RUN zipnative create dist --deterministic --output /out/release.zip \
+RUN mkdir -p /out \
+ && zipnative create dist --deterministic --output /out/release.zip \
  && zipnative verify --input /out/release.zip --strict
 ```
 

@@ -135,7 +135,7 @@ Command-specific fields (all confirmed against the built binary):
 | `create` | `output`, `entries`, `files`, `directories`, `bytesIn`, `method`, `level`, `deterministic`, `order`, `stream`, `layout: "buffered" \| "data-descriptor"` (streamed entries), `parallel: false \| { workers }`, `skipped: [{ name, path, reason: "symlink" \| "special" \| "filtered" }]`, `tier` and `bytes` (both absent under `--dry-run`; under `--parallel` `tier` is `node-zlib` or `pure-pinned`, never `injected`) |
 | `modify` | `output`, `bytes`, `edits: [{ op, name, to? }]` (a binary comment shows as `"<N bytes>"`), `layout: "append-only" \| "compact"`, `changed` (false when the save returned the same bytes), `verified` (untouched entries verified before re-emission), `verifySkipped` (encrypted / stream-only-codec entries copied as-is), `tier` (deflate tier of new payloads) |
 | `extract` | `outputDir`, `entries`, `files`, `directories`, `bytes`, `skipped: [{ name, reason: "unsafe-path" \| "symlink" \| "filtered" \| "duplicate" \| "unsupported" }]`, `symlinksAsData` |
-| `stream` | `mode`, `trust: "local-headers-only"`, `outputDir?`, `entries`, `bytes`, `skipped: [{ name, reason: "unsafe-path" \| "filtered" \| "duplicate" \| "unsupported" }]`, `stoppedAt: "central-directory" \| "eof"` |
+| `stream` | `mode`, `trust: "local-headers-only"`, `outputDir?`, `entries`, `bytes?` (extract / cat modes), `skipped?: [{ name, reason: "unsafe-path" \| "filtered" \| "duplicate" \| "unsupported" }]`, `stoppedAt: "central-directory" \| "eof"` |
 | `cat` | `output` (`"-"` for stdout), `entries: [names]`, `bytes`, `raw`, `verifyCrc` |
 | `inflate` | `output`, `method`, `methodName`, `bytesIn`, `bytesConsumed` (exact on the streaming path = `bytesIn − leftover`; equals `bytesIn` on `--sync` / codec paths), `bytesOut`, `leftover`, `maxOutput`, `sync`, `tier` (no `diagnostics`) |
 | `crc32` | `files`, `bytes` (no `dryRun`, no `diagnostics`; the report itself is on stdout) |
@@ -188,7 +188,7 @@ on the human message:
 | `E_DATA` | Integrity failure: CRC / size / data-descriptor mismatch (also on an untouched `modify` entry), decompression failure, output overflow | 1 |
 | `E_LIMIT` | A named bound was exceeded — a `ZipLimits` key (reading **or** writing), `maxInputSize` (`--max-input-size`) or `captureBytes` (a `batch --json` task's stdout); `detail: { limit, configured, observed }` | 1 |
 | `E_UNSUPPORTED` | Encryption, unknown method (also an untouched `modify` entry whose method has no registered codec — load its `--codec`), multi-disk, zip64 streaming, CD-less descriptor, codec mode | 1 |
-| `E_NOT_FOUND` | A named entry does not exist in the archive — always with `zipCode: "ZIP_ENTRY_NOT_FOUND"`, `entryName` and a remedy (`cat`, `inspect --entry`, `stream --cat`, `verify --entry`, `modify`) | 1 |
+| `E_NOT_FOUND` | A named entry does not exist in the archive — always with `zipCode: "ZIP_ENTRY_NOT_FOUND"` and `entryName`; `cat`, `inspect --entry` and `verify --entry` point at `zipnative list`, `stream --cat` at `stream --list`, `modify` relays the engine's message (names are case-sensitive) | 1 |
 | `E_VERIFY_FAILED` | `verify` verdict is negative (`zipCode` set for structural refusals; never a `detail` — the engine report carries `{ code, message }` only) | 1 |
 | `E_CHECK_FAILED` | `inspect --check`, `crc32 --expect` (reported once, with both CRCs in `detail`), or a `--strict` diagnostic escalation failed | 1 |
 | `E_POLICY` | `govern verify-issue` found an AI-governance policy violation | 1 |
@@ -288,14 +288,15 @@ the output stays pretty for humans.
 | Command | `--summary` shape |
 |---------|-------------------|
 | `list` | `{ "entries": <int>, "files": <int>, "directories": <int>, "compressedSize": <int>, "uncompressedSize": <int>, "zip64": <bool>, "encrypted": <int> }` |
-| `inspect` | `{ "entries": <int>, "bytes": <int>, "uncompressedSize": <int>, "zip64": <bool>, "encrypted": <int>, "deterministic": <bool>, "canonicalLayout": <bool>, "diagnostics": <int>, "checksPassed"?: <bool> }` — `deterministic` is reproducibility, `canonicalLayout` is the absence of data descriptors (`create --stream` output is `true` / `false`) |
+| `inspect` | `{ "entries": <int>, "bytes": <int>, "uncompressedSize": <int>, "zip64": <bool>, "encrypted": <int>, "deterministic": <bool>, "canonicalLayout": <bool>, "diagnostics": <int>, "checksPassed"?: <bool> }` — `deterministic` is reproducibility, `canonicalLayout` is the absence of data descriptors (`create --stream` output is `true` / `false`); `stream --json --summary` selects the json report (an explicit `--format ndjson` never projects) |
 | `verify` | `{ "ok": <bool>, "entries": <int>, "failed": <int>, "skipped": <int>, "diagnostics": <int>, "selected"?: <int>, "error"?: "ZIP_*" }` — `entries` is the archive total, `selected` the `--entry` count |
 | `stream` | `{ "entries": <int>, "bytes": <int>, "descriptorEntries": <int>, "bytesKnown": <bool>, "trust": "local-headers-only" }` — `bytes` excludes data-descriptor entries (their local headers carry zeros), `descriptorEntries` counts them, `bytesKnown` is `descriptorEntries === 0`; a `create --stream` archive therefore reads `bytes: 0, bytesKnown: false` |
 | `batch` | `{ "ok": <bool>, "command": "batch", "mode": "directory" \| "manifest", "task"?: …, "dryRun"?: <bool>, "total": <int>, "succeeded": <int>, "failed": <int>, "skipped"?: <int> }` (drops `results` / `tasks`) |
 
 **`--fields a,b.c` — dot-path projection.** Keep only the paths you name. A
-segment landing on an array maps over every element; unknown paths are silently
-omitted (so a conditionally-absent field never crashes the run). `--summary` is
+segment landing on an array maps over every element; an unknown top-level path
+is silently omitted (so a conditionally-absent field never crashes the run) and a
+missing leaf under an array segment yields `null` for that element. `--summary` is
 applied first and `--fields` then projects whichever document is being emitted,
 so `--summary --fields ok,failed` is a two-key verdict.
 
