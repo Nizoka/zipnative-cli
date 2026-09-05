@@ -42,6 +42,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- Two more upstream engine drafts under `.github/drafts/` (human-submitted, HITL): the node-zlib
+  inflate tier leaking raw `Z_DATA_ERROR` / `Z_BUF_ERROR` instead of `ZIP_DEFLATE_*`, and
+  `verifyEntry()` not reporting the `skipped` reason — both pass `govern verify-issue`.
+  (review Q3)
+
 - Agent docs (AGENTS.md, llms.txt, README, knowledge base): the two rules an unattended caller
   must encode — hermetic invocation (`--no-config` / `--config`; `.zipnativerc.json` is
   discovered cwd-upward) and line-by-line stderr parsing (the envelope is the last `{` line).
