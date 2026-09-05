@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "comment": "edited via samples/input/manifest/edits.json",
+  "edits": [
+    {
+      "op": "remove",
+      "name": "text/with-dash_and.dots.txt"
+    },
+    {
+      "op": "rename",
+      "name": "text/notes.md",
+      "to": "text/NOTES.md"
+    },
+    {
+      "op": "replace",
+      "name": "text/readme.txt",
+      "data": "replaced by the modify manifest\n"
+    },
+    {
+      "op": "add",
+      "name": "manifest/entries.json",
+      "path": "entries.json",
+      "method": "store",
+      "comment": "path is relative to the manifest directory"
+    },
+    {
+      "op": "add",
+      "name": "extra/inline.txt",
+      "data": "inline data added by the manifest\n"
+    },
+    {
+      "op": "add-dir",
+      "name": "extra/empty"
+    }
+  ]
+}

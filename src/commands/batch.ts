@@ -15,22 +15,27 @@
 import { readdir, mkdir, readFile, stat } from 'node:fs/promises';
 import { join, basename, dirname, extname, resolve } from 'node:path';
 import { type ParsedArgs, getStringFlag, hasFlag } from '../utils/args.js';
-import { validatePath, assertJsonSizeLimit } from '../utils/io.js';
+import { assertJsonSizeLimit, captureStdout } from '../utils/io.js';
 import { CliError, ErrorCode, type ErrorCodeValue } from '../utils/error.js';
-import { isJsonMode, isDryRun, progress } from '../utils/agent.js';
+import { isJsonMode, isDryRun, progress, remedyFor } from '../utils/agent.js';
 import { selectFields, serializeJson, parseFieldList } from '../utils/projection.js';
 import { style } from '../utils/colors.js';
 import { verifyZip } from '../core-bridge/index.js';
 import { prepareEngine } from '../utils/engine.js';
 import { parseLimitFlags } from '../utils/limits.js';
+import { parsePositiveInt } from '../utils/sizes.js';
 import { guard } from '../utils/ziperr.js';
 import {
     parseManifest,
     assertCodecPolicy,
+    assertJsonStdoutPolicy,
     type ManifestPlan,
     type ManifestTaskPlan,
 } from '../utils/manifest.js';
 import { create } from './create.js';
+
+/** Upper bound for `--concurrency` (directory mode): beyond this the pool only burns file descriptors. */
+const MAX_CONCURRENCY = 64;
 
 // Flags consumed by `batch` itself and therefore NOT forwarded to `create`.
 const BATCH_ONLY_FLAGS = new Set([
@@ -112,8 +117,32 @@ interface ManifestTaskResult {
     readonly command: string;
     readonly ok: boolean;
     readonly output?: string;
-    readonly error?: { readonly code: ErrorCodeValue; readonly message: string; readonly zipCode?: string };
+    readonly error?: { readonly code: ErrorCodeValue; readonly message: string; readonly zipCode?: string; readonly remedy?: string };
     readonly skipped?: true;
+    /** JSON mode: the task's stdout, parsed (object, or array of objects for NDJSON). */
+    readonly report?: unknown;
+    /** JSON mode: the task's stdout when it was not JSON. */
+    readonly stdout?: string;
+    /** JSON mode: bytes the task wrote to stdout. */
+    readonly stdoutBytes?: number;
+}
+
+/** Interpret a captured task stdout: one JSON document, NDJSON lines, or text. */
+function describeStdout(bytes: Buffer): { report?: unknown; stdout?: string; stdoutBytes: number } {
+    if (bytes.length === 0) return { stdoutBytes: 0 };
+    const text = bytes.toString('utf8');
+    try {
+        return { report: JSON.parse(text) as unknown, stdoutBytes: bytes.length };
+    } catch {
+        // NDJSON: every non-empty line is a JSON value.
+        const lines = text.split('\n').filter((l) => l.trim().length > 0);
+        try {
+            if (lines.length > 0 && lines.every((l) => l.trimStart().startsWith('{'))) {
+                return { report: lines.map((l) => JSON.parse(l) as unknown), stdoutBytes: bytes.length };
+            }
+        } catch { /* not NDJSON either */ }
+        return { stdout: text, stdoutBytes: bytes.length };
+    }
 }
 
 /** Write the final manifest summary (stdout) honouring the projection flags. */
@@ -169,18 +198,20 @@ async function runManifest(manifestPath: string, args: ParsedArgs): Promise<void
     const continueOnError = hasFlag(args.flags, 'continue-on-error');
     const dryRun = hasFlag(args.flags, 'dry-run') || isDryRun();
 
-    validatePath(manifestPath);
     let rawBuf: Buffer;
     try {
         rawBuf = await readFile(manifestPath);
     } catch {
-        throw new CliError(`Cannot read --manifest: ${manifestPath}`, 1, ErrorCode.IO);
+        throw new CliError(`Cannot read --manifest ${manifestPath}: check the path (relative to the current directory) and its permissions.`, 1, ErrorCode.IO);
     }
     assertJsonSizeLimit(rawBuf);
     const raw = rawBuf.toString('utf8');
 
     const plan: ManifestPlan = parseManifest(raw, dirname(resolve(manifestPath)));
     assertCodecPolicy(plan, allowCodecLoad);
+    // JSON mode: stdout is ONE batch document; every task's stdout is
+    // captured into tasks[i].report, so artefact-to-stdout tasks are refused.
+    if (format === 'json') assertJsonStdoutPolicy(plan);
     const total = plan.tasks.length;
 
     if (dryRun) {
@@ -227,13 +258,21 @@ async function runManifest(manifestPath: string, args: ParsedArgs): Promise<void
                 await mkdir(task.outputDir, { recursive: true });
             }
             const fn = await loadTaskCommand(task.command);
-            await fn({ flags: { ...task.flags }, positionals: [] });
+            const taskArgs: ParsedArgs = { flags: { ...task.flags }, positionals: [] };
+            let captured: { report?: unknown; stdout?: string; stdoutBytes: number } | undefined;
+            if (format === 'json') {
+                const { bytes } = await captureStdout(() => fn(taskArgs));
+                captured = describeStdout(bytes);
+            } else {
+                await fn(taskArgs);
+            }
             status.set(task.id, 'ok');
             results.push({
                 id: task.id,
                 command: task.command,
                 ok: true,
                 ...(task.output !== undefined ? { output: task.output } : {}),
+                ...(captured !== undefined ? captured : {}),
             });
             progress(`${label} … ${style('ok', 'green')}`);
         } catch (e) {
@@ -244,7 +283,12 @@ async function runManifest(manifestPath: string, args: ParsedArgs): Promise<void
                 id: task.id,
                 command: task.command,
                 ok: false,
-                error: { code: cli.code, message: cli.message, ...(cli.zipCode !== undefined ? { zipCode: cli.zipCode } : {}) },
+                error: {
+                    code: cli.code,
+                    message: cli.message,
+                    ...(cli.zipCode !== undefined ? { zipCode: cli.zipCode } : {}),
+                    ...(remedyFor(cli) !== undefined ? { remedy: remedyFor(cli) } : {}),
+                },
             });
             progress(`${label} … ${style('failed', 'red')} (${cli.message})`);
             if (!continueOnError) aborted = true;
@@ -293,24 +337,21 @@ export async function batch(args: ParsedArgs): Promise<void> {
     if (task === 'create' && outputDir === undefined) {
         throw new CliError('batch --task create requires --output-dir <dir>.', 2);
     }
-    validatePath(inputDir);
-    if (outputDir !== undefined) validatePath(outputDir);
 
     const concurrencyRaw = getStringFlag(args.flags, 'concurrency');
     let concurrency = 4;
     if (concurrencyRaw !== undefined) {
-        const n = Number.parseInt(concurrencyRaw, 10);
-        if (!Number.isInteger(n) || n < 1) {
-            throw new CliError('--concurrency must be a positive integer.', 2);
+        concurrency = parsePositiveInt(concurrencyRaw, 'concurrency');
+        if (concurrency > MAX_CONCURRENCY) {
+            throw new CliError(`--concurrency ${concurrencyRaw} exceeds the maximum of ${MAX_CONCURRENCY} (each worker opens one archive; use several batch runs for more).`, 2);
         }
-        concurrency = n;
     }
 
     let names: string[];
     try {
         names = (await readdir(inputDir)).sort();
     } catch {
-        throw new CliError(`Cannot read --input-dir: ${inputDir}`, 1, ErrorCode.IO);
+        throw new CliError(`Cannot read --input-dir ${inputDir}: it must be an existing, readable directory.`, 1, ErrorCode.IO);
     }
 
     const results: FileResult[] = [];
@@ -326,7 +367,7 @@ export async function batch(args: ParsedArgs): Promise<void> {
             }
         }
         if (dirs.length === 0) {
-            throw new CliError(`No subdirectories found in ${inputDir}.`, 1, ErrorCode.INPUT);
+            throw new CliError(`No subdirectories found in ${inputDir}: --task create archives each immediate subdirectory (use \`zipnative create\` for a single tree).`, 1, ErrorCode.INPUT);
         }
         if (!dryRun) await mkdir(outputDir as string, { recursive: true });
 
@@ -349,7 +390,7 @@ export async function batch(args: ParsedArgs): Promise<void> {
         await prepareEngine(args);
         const zips = names.filter((n) => extname(n).toLowerCase() === '.zip');
         if (zips.length === 0) {
-            throw new CliError(`No .zip files found in ${inputDir}.`, 1, ErrorCode.INPUT);
+            throw new CliError(`No .zip files found in ${inputDir}: --task verify checks every *.zip directly inside the directory (not recursively).`, 1, ErrorCode.INPUT);
         }
         const limits = parseLimitFlags(args);
         await runPool(zips, concurrency, async (file) => {

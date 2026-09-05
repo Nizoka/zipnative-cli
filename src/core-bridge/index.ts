@@ -108,6 +108,10 @@ export { VERSION } from 'zipnative';
 
 // ── 10. Parallel writer (zipnative/worker) — lazy, never on the startup path
 export type { ParallelZipOptions, ParallelZipWriter } from 'zipnative/worker';
+// The worker subpath re-declares the two streaming types; aliased so a
+// caller can name the worker-side shape explicitly (structurally identical
+// to the root `ByteSource` / `StreamOptions`).
+export type { ByteSource as WorkerByteSource, StreamOptions as WorkerStreamOptions } from 'zipnative/worker';
 
 /**
  * Memoised engine bootstrap: resolve `node:zlib` once so every sync codec

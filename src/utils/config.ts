@@ -25,7 +25,6 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import type { ParsedArgs } from './args.js';
-import { validatePath } from './io.js';
 import { CliError } from './error.js';
 
 const CONFIG_FILENAME = '.zipnativerc.json';
@@ -57,7 +56,8 @@ function coerce(value: ConfigValue): string | boolean | string[] | null {
     if (typeof value === 'string' || typeof value === 'boolean') return value;
     if (typeof value === 'number') return String(value);
     if (Array.isArray(value)) {
-        return value.map((v) => (typeof v === 'number' ? String(v) : v)) as string[];
+        const items: readonly (string | number)[] = value;
+        return items.map((v) => (typeof v === 'number' ? String(v) : v));
     }
     return null;
 }
@@ -89,7 +89,6 @@ export function loadConfig(
 ): ConfigDefaults {
     let path: string | null;
     if (explicitPath !== undefined) {
-        validatePath(explicitPath);
         path = resolve(explicitPath);
         if (!existsSync(path)) {
             throw new CliError(`Config file not found: ${explicitPath}`, 2);

@@ -17,7 +17,7 @@ import {
     type ZipEntry,
     type ZipExtraField,
 } from '../core-bridge/index.js';
-import { decodeComment } from './zipops.js';
+import { bytesToHex, decodeComment } from './zipops.js';
 import { formatRatio } from './sizes.js';
 
 export interface DecodedFlags {
@@ -64,6 +64,10 @@ export interface EntryRow {
     readonly dosDate?: number;
     readonly dosTime?: number;
     readonly extraFields?: readonly ExtraFieldRow[];
+    /** The stored name bytes, hex (forensics: cp437 / invalid UTF-8 names). */
+    readonly rawNameHex?: string;
+    /** The stored comment bytes, hex (present when the entry has a comment). */
+    readonly commentHex?: string;
 }
 
 const EXTRA_FIELD_NAMES: Readonly<Record<number, string>> = {
@@ -115,8 +119,9 @@ export function crcHex(crc: number): string {
     return (crc >>> 0).toString(16).padStart(8, '0');
 }
 
+/** Four octal digits: permission bits plus the setuid/setgid/sticky digit ("0644", "4755", "0000"). */
 function octal(mode: number): string {
-    return '0' + (mode & 0o7777).toString(8);
+    return (mode & 0o7777).toString(8).padStart(4, '0');
 }
 
 function extraRows(fields: readonly ZipExtraField[], withHex: boolean): ExtraFieldRow[] {
@@ -168,6 +173,8 @@ export function rowFromEntry(entry: ZipEntry, options: RowOptions = {}): EntryRo
         dosDate: entry.dosDate,
         dosTime: entry.dosTime,
         extraFields: extraRows(entry.extraFields, options.extraHex === true),
+        rawNameHex: bytesToHex(entry.rawName),
+        ...(entry.comment.length > 0 ? { commentHex: bytesToHex(entry.comment) } : {}),
     };
 }
 
@@ -198,6 +205,7 @@ export function rowFromHeader(header: StreamedZipHeader, options: RowOptions = {
         dosDate: header.dosDate,
         dosTime: header.dosTime,
         extraFields: extraRows(header.extraFields, options.extraHex === true),
+        rawNameHex: bytesToHex(header.rawName),
     };
 }
 

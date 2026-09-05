@@ -1,0 +1,1 @@
+Entry names are stored as UTF-8 (general-purpose flag bit 11 set).

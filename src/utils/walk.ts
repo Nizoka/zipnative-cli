@@ -3,8 +3,8 @@
 //   • Entry names are `/`-separated paths relative to `--base` (default: each
 //     positional's parent directory, so `create src/` yields `src/a.ts`).
 //   • `readdir` output is sorted by name so the walk order is identical on
-//     every platform (the writer re-sorts canonically anyway; this keeps
-//     `--order insertion` reproducible too).
+//     every platform; the final list is name-sorted too unless
+//     `preserveInputOrder` keeps the argv order (`--order insertion`).
 //   • Symlinks (files and directories, detected with `lstat`) are SKIPPED by
 //     default and reported; `--follow-symlinks` dereferences them with a
 //     realpath cycle guard. No symlink entries are ever written.
@@ -13,11 +13,10 @@
 //     traversal) is refused at creation time.
 
 import { lstat, readdir, realpath, stat } from 'node:fs/promises';
-import { basename, dirname, join, relative, resolve, sep } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { sanitizeEntryPath } from '../core-bridge/index.js';
 import { CliError, ErrorCode } from './error.js';
 import type { NameFilter } from './glob.js';
-import { validatePath } from './io.js';
 import { isFsError } from './ziperr.js';
 
 export interface FileSpec {
@@ -47,6 +46,12 @@ export interface WalkOptions {
     /** Emit explicit directory entries (`dir/`) for every walked directory. */
     readonly dirEntries?: boolean;
     readonly filter?: NameFilter;
+    /**
+     * Keep the argv order of the inputs (each directory still walks in sorted
+     * `readdir` order) instead of the global name sort — `--order insertion`,
+     * e.g. an EPUB whose `mimetype` must be the first entry.
+     */
+    readonly preserveInputOrder?: boolean;
 }
 
 export interface WalkResult {
@@ -89,7 +94,6 @@ export async function walkPaths(inputs: readonly string[], options: WalkOptions 
     const follow = options.followSymlinks === true;
     const visiting = new Set<string>();
     const baseAbs = options.base !== undefined ? resolve(options.base) : undefined;
-    if (options.base !== undefined) validatePath(options.base);
 
     const pushSpec = (spec: FileSpec): void => {
         if (options.filter !== undefined && !options.filter(spec.name)) {
@@ -184,18 +188,15 @@ export async function walkPaths(inputs: readonly string[], options: WalkOptions 
     };
 
     for (const input of inputs) {
-        validatePath(input);
         const abs = resolve(input);
         const rootBase = baseAbs ?? dirname(abs);
         await visit(abs, rootBase);
     }
 
-    // Deterministic output regardless of input order.
-    files.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    // Deterministic output regardless of input order — unless the caller asked
+    // for the argv order (the writer's `order: 'insertion'` then honours it).
+    if (options.preserveInputOrder !== true) {
+        files.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    }
     return { files, skipped };
-}
-
-/** Basename helper (exported for callers building single-entry names). */
-export function entryBasename(path: string): string {
-    return basename(path.replace(/\\/g, '/'));
 }

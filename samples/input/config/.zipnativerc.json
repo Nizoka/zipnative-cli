@@ -1,0 +1,9 @@
+{
+  "create": {
+    "deterministic": true,
+    "level": 9
+  },
+  "extract": {
+    "overwrite": true
+  }
+}

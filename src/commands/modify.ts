@@ -12,28 +12,44 @@
 // does not preserve relative order across flags):
 //     remove → rename → replace → add / add-dir → comment
 
+import { randomBytes } from 'node:crypto';
 import { readFile, rename as fsRename, stat } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { type ParsedArgs, getStringFlag, getStringFlagAll, hasFlag } from '../utils/args.js';
 import { emitStatus, isDryRun, progress } from '../utils/agent.js';
 import {
+    METHOD_DEFLATE,
+    METHOD_STORE,
+    activeDeflateTier,
     createZipModifier,
+    getCodec,
     sanitizeEntryPath,
     type AddEntryOptions,
+    type EntryVerification,
     type ZipCompressionOptions,
+    type ZipEntry,
+    type ZipExtraField,
     type ZipModifierOptions,
+    type ZipReader,
 } from '../core-bridge/index.js';
 import { createDiagnosticSink } from '../utils/diagnostics.js';
 import { prepareEngine } from '../utils/engine.js';
 import { CliError, ErrorCode } from '../utils/error.js';
-import { readJsonInput, readStdin, validatePath, writeOutput } from '../utils/io.js';
+import { readJsonInput, readStdin, unlinkQuiet, validatePath, writeOutput } from '../utils/io.js';
 import { mapZipError } from '../utils/ziperr.js';
 import {
     commonOptions,
+    describeComment,
+    externalAttributesFor,
     openArchive,
+    parseArchiveComment,
     parseCompression,
     parseDateFlag,
+    parseExtraFields,
     parseFromEqualsTo,
+    parseIsoDateUtc,
+    parseManifestComment,
+    parseMode,
     parseNameEqualsPath,
     readArchiveBytes,
 } from '../utils/zipops.js';
@@ -51,10 +67,28 @@ interface Edit {
 
 const ORDER: readonly Op[] = ['remove', 'rename', 'replace', 'add', 'add-dir', 'comment'];
 
+/** An entry NAME is data (E_INPUT), not a mis-typed flag (E_USAGE). */
 function assertSafeName(name: string, flag: string): void {
     const bare = name.endsWith('/') ? name.slice(0, -1) : name;
     if (bare.length === 0 || sanitizeEntryPath(bare) === null) {
-        throw new CliError(`--${flag}: "${name}" is not a safe entry name.`, 2);
+        throw new CliError(
+            `--${flag}: "${name}" would not be extractable safely (traversal, absolute, drive/UNC, reserved device name or empty segment); use a plain relative name.`,
+            1,
+            ErrorCode.INPUT,
+            { entryName: name },
+        );
+    }
+}
+
+/** `--add dir/=payload` is a contradiction: a directory entry carries no payload. */
+function assertFileName(name: string, flag: string): void {
+    if (name.endsWith('/')) {
+        throw new CliError(
+            `--${flag}: "${name}" names a directory (trailing "/") but carries a payload; use --add-dir ${name} for an empty directory entry, or drop the trailing slash.`,
+            1,
+            ErrorCode.INPUT,
+            { entryName: name },
+        );
     }
 }
 
@@ -65,11 +99,12 @@ async function loadPayload(path: string, baseDir: string | undefined, stdinUsed:
         const buf = await readStdin();
         return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
     }
-    validatePath(path);
+    // A manifest-supplied path is data, not the user: traversal-checked.
+    if (baseDir !== undefined) validatePath(path);
     const abs = baseDir !== undefined ? resolve(baseDir, path) : resolve(path);
     try {
         const st = await stat(abs);
-        if (!st.isFile()) throw new CliError(`"${path}" is not a regular file.`, 1, ErrorCode.INPUT);
+        if (!st.isFile()) throw new CliError(`"${path}" is not a regular file; a payload must be a file (use --add-dir for a directory entry).`, 1, ErrorCode.INPUT);
         const buf = await readFile(abs);
         return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
     } catch (e) {
@@ -78,18 +113,27 @@ async function loadPayload(path: string, baseDir: string | undefined, stdinUsed:
     }
 }
 
-function entryOptions(compression: ZipCompressionOptions | undefined, comment?: string, date?: Date): AddEntryOptions | undefined {
+interface EntryExtras {
+    readonly comment?: string;
+    readonly date?: Date;
+    readonly externalAttributes?: number;
+    readonly extraFields?: readonly ZipExtraField[];
+}
+
+function entryOptions(compression: ZipCompressionOptions | undefined, extras: EntryExtras = {}): AddEntryOptions | undefined {
     const out: { -readonly [K in keyof AddEntryOptions]: AddEntryOptions[K] } = {};
     if (compression !== undefined) out.compression = compression;
-    if (comment !== undefined) out.comment = comment;
-    if (date !== undefined) out.date = date;
+    if (extras.comment !== undefined) out.comment = extras.comment;
+    if (extras.date !== undefined) out.date = extras.date;
+    if (extras.externalAttributes !== undefined) out.externalAttributes = extras.externalAttributes;
+    if (extras.extraFields !== undefined) out.extraFields = extras.extraFields;
     return Object.keys(out).length > 0 ? out : undefined;
 }
 
-const MANIFEST_KEYS = new Set(['version', 'comment', 'edits']);
-const EDIT_KEYS = new Set(['op', 'name', 'to', 'path', 'data', 'dataBase64', 'method', 'level', 'deterministic', 'date', 'comment']);
+const MANIFEST_KEYS = new Set(['version', 'comment', 'commentBase64', 'edits']);
+const EDIT_KEYS = new Set(['op', 'name', 'to', 'path', 'data', 'dataBase64', 'method', 'level', 'deterministic', 'date', 'comment', 'mode', 'extraFields']);
 
-async function editsFromManifest(manifestPath: string, stdinUsed: { used: boolean }): Promise<{ edits: Edit[]; comment: string | undefined }> {
+async function editsFromManifest(manifestPath: string, stdinUsed: { used: boolean }): Promise<{ edits: Edit[]; comment: string | Uint8Array | undefined }> {
     const parsed = await readJsonInput(manifestPath, 'manifest');
     if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
         throw new CliError('--from-manifest must be a JSON object: { "edits": [...] }.', 1, ErrorCode.INPUT);
@@ -99,10 +143,10 @@ async function editsFromManifest(manifestPath: string, stdinUsed: { used: boolea
         if (!MANIFEST_KEYS.has(key)) throw new CliError(`Unknown key "${key}" in manifest. Valid: ${[...MANIFEST_KEYS].join(', ')}.`, 1, ErrorCode.INPUT);
     }
     if (m['version'] !== undefined && m['version'] !== 1) {
-        throw new CliError(`Unsupported manifest version ${String(m['version'])} (expected 1).`, 1, ErrorCode.INPUT);
+        throw new CliError(`Unsupported manifest version ${JSON.stringify(m['version'])} (expected 1).`, 1, ErrorCode.INPUT);
     }
     if (!Array.isArray(m['edits'])) throw new CliError('Manifest "edits" must be an array.', 1, ErrorCode.INPUT);
-    if (m['comment'] !== undefined && typeof m['comment'] !== 'string') throw new CliError('Manifest "comment" must be a string.', 1, ErrorCode.INPUT);
+    const archiveComment = parseManifestComment(m, 'manifest');
     const baseDir = manifestPath === '-' ? process.cwd() : dirname(resolve(manifestPath));
 
     const edits: Edit[] = [];
@@ -125,7 +169,7 @@ async function editsFromManifest(manifestPath: string, stdinUsed: { used: boolea
             const target = op === 'rename' ? e['to'] : name;
             if (typeof target !== 'string' || target.length === 0) throw new CliError(`${where}: "to" is required for rename.`, 1, ErrorCode.INPUT);
             const bare = target.endsWith('/') ? target.slice(0, -1) : target;
-            if (sanitizeEntryPath(bare) === null) throw new CliError(`${where}: "${target}" is not a safe entry name.`, 1, ErrorCode.INPUT, { entryName: target });
+            if (sanitizeEntryPath(bare) === null) throw new CliError(`${where}: "${target}" would not be extractable safely (traversal, absolute, drive/UNC, reserved device name or empty segment); use a plain relative name.`, 1, ErrorCode.INPUT, { entryName: target });
         }
         const compression: { method?: 'store' | 'deflate'; level?: number; deterministic?: boolean } = {};
         if (e['method'] !== undefined) {
@@ -142,14 +186,22 @@ async function editsFromManifest(manifestPath: string, stdinUsed: { used: boolea
         }
         let date: Date | undefined;
         if (e['date'] !== undefined) {
-            if (typeof e['date'] !== 'string' || Number.isNaN(new Date(e['date']).getTime())) throw new CliError(`${where}: "date" must be an ISO 8601 string.`, 1, ErrorCode.INPUT);
-            date = new Date(e['date']);
+            if (typeof e['date'] !== 'string') throw new CliError(`${where}: "date" must be an ISO 8601 string.`, 1, ErrorCode.INPUT);
+            date = parseIsoDateUtc(e['date'], where, false);
         }
         const comment = e['comment'];
         if (comment !== undefined && typeof comment !== 'string') throw new CliError(`${where}: "comment" must be a string.`, 1, ErrorCode.INPUT);
-        const options = entryOptions(Object.keys(compression).length > 0 ? compression : undefined, comment as string | undefined, date);
+        const extras: { -readonly [K in keyof EntryExtras]: EntryExtras[K] } = {};
+        if (comment !== undefined) extras.comment = comment;
+        if (date !== undefined) extras.date = date;
+        if (e['mode'] !== undefined) extras.externalAttributes = externalAttributesFor(parseMode(e['mode'], where), op === 'add-dir');
+        if (e['extraFields'] !== undefined) extras.extraFields = parseExtraFields(e['extraFields'], where);
+        const options = entryOptions(Object.keys(compression).length > 0 ? compression : undefined, extras);
 
         if (op === 'add' || op === 'replace') {
+            if (name.endsWith('/')) {
+                throw new CliError(`${where}: "${name}" names a directory (trailing "/") but op "${op}" carries a payload; use op "add-dir".`, 1, ErrorCode.INPUT, { entryName: name });
+            }
             const sources = ['path', 'data', 'dataBase64'].filter((k) => e[k] !== undefined);
             if (sources.length !== 1) throw new CliError(`${where}: exactly one of "path", "data" or "dataBase64" is required.`, 1, ErrorCode.INPUT);
             let data: Uint8Array;
@@ -166,7 +218,7 @@ async function editsFromManifest(manifestPath: string, stdinUsed: { used: boolea
             edits.push({ op, name });
         }
     }
-    return { edits, comment: typeof m['comment'] === 'string' ? m['comment'] : undefined };
+    return { edits, comment: archiveComment };
 }
 
 export async function modify(args: ParsedArgs): Promise<void> {
@@ -185,12 +237,11 @@ export async function modify(args: ParsedArgs): Promise<void> {
     if (inPlace && outputFlag !== undefined) throw new CliError('--in-place and --output are mutually exclusive.', 2);
     if (inPlace && (inputPath === '-')) throw new CliError('--in-place requires a file input, not stdin.', 2);
     const outputPath = inPlace ? inputPath : outputFlag;
-    if (outputPath !== undefined) validatePath(outputPath);
 
     // ── Collect edits (flags), or from the manifest.
     const stdinUsed = { used: inputPath === '-' };
     const edits: Edit[] = [];
-    let comment = getStringFlag(args.flags, 'comment');
+    let comment: string | Uint8Array | undefined = await parseArchiveComment(args);
     const flagEdits =
         getStringFlagAll(args.flags, 'add').length
         + getStringFlagAll(args.flags, 'add-dir').length
@@ -198,7 +249,7 @@ export async function modify(args: ParsedArgs): Promise<void> {
         + getStringFlagAll(args.flags, 'remove').length
         + getStringFlagAll(args.flags, 'rename').length;
     if (manifestPath !== undefined && (flagEdits > 0 || comment !== undefined)) {
-        throw new CliError('--from-manifest is mutually exclusive with --add/--replace/--remove/--rename/--add-dir/--comment.', 2);
+        throw new CliError('--from-manifest is mutually exclusive with --add/--replace/--remove/--rename/--add-dir/--comment/--comment-file.', 2);
     }
     if (manifestPath !== undefined) {
         const m = await editsFromManifest(manifestPath, stdinUsed);
@@ -213,11 +264,13 @@ export async function modify(args: ParsedArgs): Promise<void> {
         }
         for (const raw of getStringFlagAll(args.flags, 'replace')) {
             const { name, path } = parseNameEqualsPath(raw, 'replace');
+            assertFileName(name, 'replace');
             edits.push({ op: 'replace', name, path });
         }
         for (const raw of getStringFlagAll(args.flags, 'add')) {
             const { name, path } = parseNameEqualsPath(raw, 'add');
             assertSafeName(name, 'add');
+            assertFileName(name, 'add');
             edits.push({ op: 'add', name, path });
         }
         for (const raw of getStringFlagAll(args.flags, 'add-dir')) {
@@ -226,13 +279,14 @@ export async function modify(args: ParsedArgs): Promise<void> {
         }
     }
     if (edits.length === 0 && comment === undefined) {
-        throw new CliError('modify requires at least one edit: --add, --replace, --remove, --rename, --add-dir, --comment or --from-manifest.', 2);
+        throw new CliError('modify requires at least one edit: --add, --replace, --remove, --rename, --add-dir, --comment, --comment-file or --from-manifest.', 2);
     }
 
-    // ── Open + wrap.
-    const bytes = await readArchiveBytes(inputPath);
+    // ── Open (eagerly: overlap / CD↔LFH structure is checked before any
+    // edit, since untouched records are re-emitted verbatim) + wrap.
+    const bytes = await readArchiveBytes(inputPath, args);
     const sink = createDiagnosticSink();
-    const reader = openArchive(bytes, commonOptions(args, sink));
+    const reader = openArchive(bytes, { ...commonOptions(args, sink), validate: 'eager' });
     const modifierOptions: ZipModifierOptions = {
         ...commonOptions(args, sink),
         ...(compression !== undefined ? { compression } : {}),
@@ -279,9 +333,23 @@ export async function modify(args: ParsedArgs): Promise<void> {
         applied.push({ op: e.op, name: e.name, ...(e.to !== undefined ? { to: e.to } : {}) });
     }
     if (comment !== undefined) {
-        modifier.setComment(comment);
-        applied.push({ op: 'comment', name: comment });
+        try {
+            modifier.setComment(comment);
+        } catch (e) {
+            throw mapZipError(e, 'Failed to set the archive comment');
+        }
+        applied.push({ op: 'comment', name: describeComment(comment) });
     }
+
+    // ── Verify every entry that will be re-emitted VERBATIM. The modifier
+    // copies untouched records byte for byte, so a CRC lie, a size lie or a
+    // local header that disagrees with the central directory would otherwise
+    // be laundered into a fresh, canonical-looking archive. One decompress
+    // pass over the survivors (never a recompress); no opt-out (an opt-out
+    // would write unverified bytes). Runs under --dry-run too.
+    const gone = new Set(ordered.filter((e) => e.op === 'remove' || e.op === 'replace').map((e) => e.name));
+    const { verified, verifySkipped } = verifySurvivors(reader, gone);
+    const tier = activeDeflateTier(compression?.deterministic === true);
 
     const destructive = ordered.some((e) => e.op === 'remove' || e.op === 'replace' || e.op === 'rename');
     const layout = compact ? 'compact' : 'append-only';
@@ -290,7 +358,7 @@ export async function modify(args: ParsedArgs): Promise<void> {
     }
 
     if (dryRun) {
-        emitStatus({ command: 'modify', dryRun: true, output: outputPath ?? '-', edits: applied, layout, ...sink.field() });
+        emitStatus({ command: 'modify', dryRun: true, output: outputPath ?? '-', edits: applied, layout, verified, verifySkipped, tier, ...sink.field() });
         return;
     }
 
@@ -303,18 +371,20 @@ export async function modify(args: ParsedArgs): Promise<void> {
     const changed = out !== reader.bytes;
 
     if (inPlace) {
-        const tmp = `${outputPath}.tmp-${process.pid}`;
+        // Unpredictable, exclusively-created temp name next to the target, then
+        // an atomic rename: a pre-planted file or symlink at the temp path is
+        // refused (EEXIST) rather than followed.
+        const tmp = `${outputPath}.tmp-${process.pid}-${randomBytes(6).toString('hex')}`;
         try {
-            await writeOutput(out, tmp);
+            await writeOutput(out, tmp, { exclusive: true });
             await fsRename(tmp, outputPath as string);
         } catch (e) {
-            const { unlinkQuiet } = await import('../utils/io.js');
             await unlinkQuiet(tmp);
             throw mapZipError(e, 'Failed to write the modified archive');
         }
     } else {
         try {
-            await writeOutput(out, outputPath);
+            await writeOutput(out, outputPath, { exclusive: !hasFlag(args.flags, 'overwrite') });
         } catch (e) {
             throw mapZipError(e, 'Failed to write the modified archive');
         }
@@ -328,6 +398,71 @@ export async function modify(args: ParsedArgs): Promise<void> {
         edits: applied,
         layout,
         changed,
+        verified,
+        verifySkipped,
+        tier,
         ...sink.field(),
     });
+}
+
+/**
+ * Cross-check (CRC, sizes, local header) every central-directory entry the
+ * save will copy verbatim. Encrypted entries and entries whose registered
+ * codec has no sync decompressor cannot be verified and are counted as
+ * skipped — exactly the two `skipped` reasons of `verifyZip`. An entry with
+ * no registered codec at all is refused (E_UNSUPPORTED via the engine).
+ */
+function verifySurvivors(reader: ZipReader, gone: ReadonlySet<string>): { verified: number; verifySkipped: number } {
+    let verified = 0;
+    let verifySkipped = 0;
+    let entries: ZipEntry[];
+    try {
+        entries = [...reader.entries()];
+    } catch (e) {
+        throw mapZipError(e, 'Failed to read the central directory');
+    }
+    for (const entry of entries) {
+        if (gone.has(entry.name)) continue;
+        const custom = entry.compressionMethod !== METHOD_STORE && entry.compressionMethod !== METHOD_DEFLATE;
+        const codec = custom ? getCodec(entry.compressionMethod) : null;
+        if (entry.isEncrypted || (custom && codec !== null && codec.decompressSync === undefined)) {
+            verifySkipped++;
+            continue;
+        }
+        let v: EntryVerification;
+        try {
+            v = reader.verifyEntry(entry);
+        } catch (e) {
+            throw mapZipError(e, `Cannot verify entry "${entry.name}" before re-emitting it`, entry.name);
+        }
+        if (!v.ok) throw survivorFailure(entry, v);
+        verified++;
+    }
+    return { verified, verifySkipped };
+}
+
+function survivorFailure(entry: ZipEntry, v: EntryVerification): CliError {
+    const tail = 'it would be re-emitted verbatim — refusing to launder it. Run `zipnative verify` for the full report, or --remove/--replace the entry.';
+    if (!v.localHeaderMatch) {
+        return new CliError(
+            `Entry "${entry.name}": local header disagrees with the central directory; ${tail}`,
+            1,
+            ErrorCode.SECURITY,
+            { entryName: entry.name, zipCode: 'ZIP_CD_LFH_MISMATCH' },
+        );
+    }
+    if (!v.crcMatch) {
+        return new CliError(
+            `Entry "${entry.name}": CRC-32 does not match its central-directory record; ${tail}`,
+            1,
+            ErrorCode.DATA,
+            { entryName: entry.name, zipCode: 'ZIP_CRC_MISMATCH' },
+        );
+    }
+    return new CliError(
+        `Entry "${entry.name}": decompressed size does not match its central-directory record; ${tail}`,
+        1,
+        ErrorCode.DATA,
+        { entryName: entry.name, zipCode: 'ZIP_SIZE_MISMATCH' },
+    );
 }

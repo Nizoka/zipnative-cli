@@ -1,0 +1,27 @@
+# CODEOWNERS — GitHub auto-assigns reviewers for pull requests
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for everything
+* @Nizoka
+
+# CLI commands
+src/commands/ @Nizoka
+
+# Utilities and core bridge
+src/utils/ @Nizoka
+src/core-bridge/ @Nizoka
+
+# Public entry point
+src/index.ts @Nizoka
+
+# Corpus generator + vendored veraZIP validator (raw bytes live here)
+scripts/ @Nizoka
+
+# Documentation and samples (counts are pinned by tests/docs/)
+docs/ @Nizoka
+samples/ @Nizoka
+
+# CI/CD and release
+.github/workflows/ @Nizoka
+package.json @Nizoka
+tsup.config.ts @Nizoka

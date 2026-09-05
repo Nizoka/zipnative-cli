@@ -14,7 +14,10 @@
 
 import type { ParsedArgs } from '../utils/args.js';
 import { CliError } from '../utils/error.js';
+import { isBooleanFlag } from '../utils/flags.js';
 import { LIMIT_FLAG_NAMES } from '../utils/limits.js';
+
+export { BOOLEAN_FLAGS, COMMAND_BOOLEAN_FLAGS, GLOBAL_BOOLEAN_FLAGS, isBooleanFlag } from '../utils/flags.js';
 
 export interface CommandSpec {
     readonly name: string;
@@ -26,7 +29,7 @@ export interface CommandSpec {
 
 export const GLOBAL_FLAGS: readonly string[] = [
     '--help', '--version', '--json', '--dry-run', '--quiet', '--no-color', '--config', '--no-config', '--pretty',
-    '--strict', '--pure-codecs', '--codec',
+    '--strict', '--pure-codecs', '--codec', '--max-input-size',
     ...LIMIT_FLAG_NAMES,
 ];
 
@@ -45,8 +48,8 @@ export const COMMANDS: readonly CommandSpec[] = [
         flags: [
             '--input', '--output', '--stdin-name', '--from-manifest', '--base', '--prefix', '--dir-entries',
             ...FILTER_FLAGS, '--follow-symlinks', ...COMPRESSION_FLAGS, '--order', '--date', '--mtime',
-            '--comment', '--entry-comment', '--preserve-mode', '--store-ext', '--stream', '--chunk-size',
-            '--parallel', '--workers', '--min-job-size', '--job-timeout',
+            '--comment', '--comment-file', '--entry-comment', '--preserve-mode', '--store-ext', '--stream', '--chunk-size',
+            '--parallel', '--workers', '--min-job-size', '--job-timeout', '--overwrite',
         ],
     },
     {
@@ -54,8 +57,8 @@ export const COMMANDS: readonly CommandSpec[] = [
         group: 'Create & modify',
         summary: 'Incremental edits: add/replace/remove/rename/comment, append-only or compact',
         flags: [
-            '--input', '--output', '--add', '--add-dir', '--replace', '--remove', '--rename', '--comment',
-            ...COMPRESSION_FLAGS, '--date', '--compact', '--in-place', '--from-manifest',
+            '--input', '--output', '--add', '--add-dir', '--replace', '--remove', '--rename', '--comment', '--comment-file',
+            ...COMPRESSION_FLAGS, '--date', '--compact', '--in-place', '--from-manifest', '--overwrite',
         ],
     },
     {
@@ -74,7 +77,7 @@ export const COMMANDS: readonly CommandSpec[] = [
         name: 'cat',
         group: 'Read & extract',
         summary: 'Stream one or more entries to stdout',
-        flags: ['--input', '--entry', '--output', '--raw', '--no-verify-crc'],
+        flags: ['--input', '--entry', '--output', '--raw', '--no-verify-crc', '--overwrite'],
     },
     {
         name: 'extract',
@@ -82,7 +85,7 @@ export const COMMANDS: readonly CommandSpec[] = [
         summary: 'Extract to a directory (zip-slip, symlink, bomb and duplicate guards on by default)',
         flags: [
             '--input', '--output-dir', ...FILTER_FLAGS, '--entry', '--overwrite', '--on-duplicate',
-            '--skip-unsafe', '--allow-symlinks', '--skip-symlinks', '--flat', '--buffered',
+            '--skip-unsafe', '--skip-unsupported', '--allow-symlinks', '--skip-symlinks', '--flat', '--buffered',
             '--preserve-mode', '--preserve-mtime',
         ],
     },
@@ -100,7 +103,7 @@ export const COMMANDS: readonly CommandSpec[] = [
         name: 'verify',
         group: 'Integrity & codecs',
         summary: 'Deep integrity verification (CRC, sizes, local headers, diagnostics)',
-        flags: ['--input', '--format', ...PROJECTION_FLAGS],
+        flags: ['--input', '--entry', '--format', ...PROJECTION_FLAGS],
     },
     {
         name: 'crc32',
@@ -112,7 +115,7 @@ export const COMMANDS: readonly CommandSpec[] = [
         name: 'inflate',
         group: 'Integrity & codecs',
         summary: 'Decompress a raw DEFLATE (or registered-codec) stream',
-        flags: ['--input', '--output', '--method', '--max-output', '--sync', '--allow-trailing'],
+        flags: ['--input', '--output', '--method', '--max-output', '--sync', '--allow-trailing', '--overwrite'],
     },
     {
         name: 'batch',
@@ -121,7 +124,7 @@ export const COMMANDS: readonly CommandSpec[] = [
         flags: [
             '--input-dir', '--output-dir', '--task', '--concurrency', '--fail-fast', '--manifest',
             '--continue-on-error', '--allow-codec-load', '--format', ...PROJECTION_FLAGS,
-            ...COMPRESSION_FLAGS, '--order', '--date', '--comment',
+            ...COMPRESSION_FLAGS, '--order', '--date', '--comment', '--overwrite',
         ],
     },
     {
@@ -152,22 +155,44 @@ export const COMMANDS: readonly CommandSpec[] = [
 
 export const COMMAND_NAMES: readonly string[] = COMMANDS.map((c) => c.name);
 
+/**
+ * Value flags whose argument is a filesystem path — the shells complete
+ * files after them (`_filedir`, `_files`, fish `-F`). Every other value flag
+ * takes free text / a number / an enum and gets no argument completion.
+ */
+export const PATH_FLAGS: readonly string[] = [
+    '--input', '--output', '--output-dir', '--input-dir', '--base', '--from-manifest', '--manifest',
+    '--config', '--codec', '--comment-file',
+];
+
+/** True when `flag` (dashed) takes a value (derived from the boolean table). */
+function takesValue(flag: string): boolean {
+    return !isBooleanFlag(flag.replace(/^--/, ''));
+}
+
 function bashScript(): string {
     const cmds = COMMAND_NAMES.join(' ');
     const cases = COMMANDS.map(
         (c) => `        ${c.name}) opts="${[...c.flags, ...GLOBAL_FLAGS].join(' ')}" ;;`,
     ).join('\n');
+    const pathFlags = PATH_FLAGS.join('|');
     return `\
 # bash completion for zipnative
 _zipnative() {
     local cur prev words cword
-    _init_completion 2>/dev/null || { cur="\${COMP_WORDS[COMP_CWORD]}"; }
+    _init_completion 2>/dev/null || { cur="\${COMP_WORDS[COMP_CWORD]}"; prev="\${COMP_WORDS[COMP_CWORD-1]}"; }
     local cmd="\${COMP_WORDS[1]}"
     local opts="${GLOBAL_FLAGS.join(' ')}"
     if [[ \${COMP_CWORD} -eq 1 ]]; then
         COMPREPLY=( $(compgen -W "${cmds}" -- "\${cur}") )
         return 0
     fi
+    # A path flag completes files/directories for its argument.
+    case "\${prev}" in
+        ${pathFlags})
+            if declare -F _filedir >/dev/null 2>&1; then _filedir; else COMPREPLY=( $(compgen -f -- "\${cur}") ); fi
+            return 0 ;;
+    esac
     case "\${cmd}" in
 ${cases}
     esac
@@ -186,6 +211,7 @@ function zshScript(): string {
                 .map((f) => `'${f}'`)
                 .join(' ')} ;;`,
     ).join('\n');
+    const pathFlags = PATH_FLAGS.join('|');
     return `\
 #compdef zipnative
 # zsh completion for zipnative
@@ -198,6 +224,10 @@ ${cmdLines}
         _describe 'command' commands
         return
     fi
+    # A path flag completes files/directories for its argument.
+    case "\${words[CURRENT-1]}" in
+        ${pathFlags}) _files; return ;;
+    esac
     case "\${words[2]}" in
 ${cases}
     esac
@@ -216,8 +246,10 @@ function fishScript(): string {
     }
     for (const c of COMMANDS) {
         for (const flag of [...c.flags, ...GLOBAL_FLAGS]) {
+            // -r: the flag requires an argument; -F: complete files for it.
+            const arg = PATH_FLAGS.includes(flag) ? ' -r -F' : takesValue(flag) ? ' -r' : '';
             lines.push(
-                `complete -c zipnative -n '__fish_seen_subcommand_from ${c.name}' -l ${flag.replace(/^--/, '')}`,
+                `complete -c zipnative -n '__fish_seen_subcommand_from ${c.name}' -l ${flag.replace(/^--/, '')}${arg}`,
             );
         }
     }

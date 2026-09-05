@@ -13,6 +13,7 @@ import {
     METHOD_DEFLATE,
     METHOD_STORE,
     isSymlinkEntry,
+    sanitizeEntryPath,
     type ZipEntry,
 } from '../core-bridge/index.js';
 import { createDiagnosticSink, type DiagnosticRow } from '../utils/diagnostics.js';
@@ -24,6 +25,7 @@ import { formatBytes, parseByteSize, parseCount } from '../utils/sizes.js';
 import { guard } from '../utils/ziperr.js';
 import {
     commonOptions,
+    bytesToHex,
     decodeComment,
     openArchive,
     parseFormat,
@@ -41,6 +43,8 @@ export interface InspectReport {
         readonly isZip64: boolean;
         readonly comment: string;
         readonly commentBytes: number;
+        /** Raw comment bytes, hex — present when the archive has a comment. */
+        readonly commentHex?: string;
         readonly prependedData: boolean;
         readonly multipleEocd: boolean;
     };
@@ -58,6 +62,8 @@ export interface InspectReport {
         readonly utf8Names: number;
         readonly cp437Names: number;
         readonly duplicateNames: number;
+        /** Names the engine's sanitizeEntryPath() refuses (traversal, absolute, drive/UNC, NUL, ADS, device names). */
+        readonly unsafeNames: number;
         readonly earliestDate: string | null;
         readonly latestDate: string | null;
     };
@@ -65,7 +71,16 @@ export interface InspectReport {
         readonly epochTimestamps: boolean;
         readonly canonicalOrder: boolean;
         readonly utf8Flags: boolean;
+        /** No entry uses a data descriptor (the buffered / `add()` layout). */
         readonly noDataDescriptors: boolean;
+        /**
+         * Same as `noDataDescriptors`: the archive has the canonical buffered
+         * layout. A streamed archive (`create --stream`, `addStream()`) is
+         * reproducible run-to-run but carries data descriptors, so it is
+         * `deterministic: true` and `canonicalLayout: false`.
+         */
+        readonly canonicalLayout: boolean;
+        /** Reproducible: epoch timestamps + canonical order + UTF-8 flags. */
         readonly deterministic: boolean;
     };
     readonly entries?: readonly EntryRow[];
@@ -107,6 +122,7 @@ function buildReport(entries: readonly ZipEntry[], archive: InspectReport['archi
     let cp437Names = 0;
     const seen = new Set<string>();
     let duplicateNames = 0;
+    let unsafeNames = 0;
     let earliest: Date | null = null;
     let latest: Date | null = null;
     let epochTimestamps = true;
@@ -129,6 +145,9 @@ function buildReport(entries: readonly ZipEntry[], archive: InspectReport['archi
         else cp437Names++;
         if (seen.has(e.name)) duplicateNames++;
         seen.add(e.name);
+        // Same rule as the extraction sink: a name the engine cannot sanitise
+        // (directory names are checked without their trailing slash).
+        if (sanitizeEntryPath(e.isDirectory && e.name.endsWith('/') ? e.name.slice(0, -1) : e.name) === null) unsafeNames++;
         if (earliest === null || e.lastModified < earliest) earliest = e.lastModified;
         if (latest === null || e.lastModified > latest) latest = e.lastModified;
         if (e.dosDate !== DOS_EPOCH_DATE || e.dosTime !== DOS_EPOCH_TIME) epochTimestamps = false;
@@ -153,15 +172,20 @@ function buildReport(entries: readonly ZipEntry[], archive: InspectReport['archi
             utf8Names,
             cp437Names,
             duplicateNames,
-            earliestDate: earliest === null ? null : (earliest as Date).toISOString(),
-            latestDate: latest === null ? null : (latest as Date).toISOString(),
+            unsafeNames,
+            earliestDate: earliest === null ? null : earliest.toISOString(),
+            latestDate: latest === null ? null : latest.toISOString(),
         },
         determinism: {
             epochTimestamps,
             canonicalOrder,
             utf8Flags,
             noDataDescriptors,
-            deterministic: epochTimestamps && canonicalOrder && utf8Flags && noDataDescriptors,
+            canonicalLayout: noDataDescriptors,
+            // Reproducibility only: the data-descriptor layout produced by
+            // streamed writers is byte-stable for identical inputs, so it must
+            // not falsify the verdict (see determinism.md in the engine).
+            deterministic: epochTimestamps && canonicalOrder && utf8Flags,
         },
         diagnostics,
     };
@@ -171,8 +195,8 @@ function buildReport(entries: readonly ZipEntry[], archive: InspectReport['archi
 
 const SIMPLE_CHECKS: readonly string[] = [
     'deterministic', 'epoch-timestamps', 'canonical-order', 'utf8-names', 'no-data-descriptor',
-    'no-zip64', 'zip64', 'no-encryption', 'no-symlinks', 'no-duplicates', 'no-diagnostics',
-    'store-only', 'deflate-only',
+    'canonical-layout', 'no-zip64', 'zip64', 'no-encryption', 'no-symlinks', 'safe-names', 'no-duplicates',
+    'no-diagnostics', 'store-only', 'deflate-only',
 ];
 const PARAM_CHECKS: readonly string[] = ['max-entries', 'min-entries', 'max-uncompressed', 'max-ratio', 'has', 'method'];
 
@@ -216,11 +240,13 @@ function evaluateChecks(checks: readonly string[], report: Omit<InspectReport, '
             case 'epoch-timestamps': ok = d.epochTimestamps; detail = ok ? 'all entries at the DOS epoch' : 'non-epoch timestamps present'; break;
             case 'canonical-order': ok = d.canonicalOrder; detail = ok ? 'central directory in canonical raw-name order' : 'not in canonical order'; break;
             case 'utf8-names': ok = d.utf8Flags; detail = ok ? 'non-ASCII names carry the UTF-8 flag' : 'non-ASCII name without the UTF-8 flag'; break;
-            case 'no-data-descriptor': ok = s.dataDescriptor === 0; detail = `${s.dataDescriptor} data-descriptor entries`; break;
+            case 'no-data-descriptor':
+            case 'canonical-layout': ok = s.dataDescriptor === 0; detail = `${s.dataDescriptor} data-descriptor entries`; break;
             case 'no-zip64': ok = !report.archive.isZip64 && s.zip64Entries === 0; detail = `zip64 EOCD: ${report.archive.isZip64}, zip64 entries: ${s.zip64Entries}`; break;
             case 'zip64': ok = report.archive.isZip64 || s.zip64Entries > 0; detail = `zip64 EOCD: ${report.archive.isZip64}, zip64 entries: ${s.zip64Entries}`; break;
             case 'no-encryption': ok = s.encrypted === 0; detail = `${s.encrypted} encrypted entries`; break;
             case 'no-symlinks': ok = s.symlinks === 0; detail = `${s.symlinks} symlink entries`; break;
+            case 'safe-names': ok = s.unsafeNames === 0; detail = `${s.unsafeNames} unsafe names (traversal, absolute, drive/UNC, NUL, ADS or reserved device name)`; break;
             case 'no-duplicates': ok = s.duplicateNames === 0; detail = `${s.duplicateNames} duplicate names`; break;
             case 'no-diagnostics': ok = report.diagnostics.length === 0; detail = `${report.diagnostics.length} diagnostics`; break;
             case 'store-only': ok = entries.every((e) => e.compressionMethod === METHOD_STORE); detail = `methods: ${Object.keys(s.methods).join(',') || 'none'}`; break;
@@ -271,10 +297,10 @@ function renderText(report: InspectReport, source: string): string {
     lines.push(`  encrypted       ${s.encrypted}`);
     lines.push(`  symlinks        ${s.symlinks}`);
     lines.push(`  data descriptor ${s.dataDescriptor}`);
-    lines.push(`  names           ${s.utf8Names} utf-8, ${s.cp437Names} cp437, ${s.duplicateNames} duplicates`);
+    lines.push(`  names           ${s.utf8Names} utf-8, ${s.cp437Names} cp437, ${s.duplicateNames} duplicates, ${s.unsafeNames} unsafe`);
     lines.push(`  dates           ${s.earliestDate ?? '-'} .. ${s.latestDate ?? '-'}`);
     lines.push('');
-    lines.push(`Determinism: ${d.deterministic ? 'deterministic' : 'NOT deterministic'}`);
+    lines.push(`Determinism: ${d.deterministic ? 'reproducible' : 'NOT reproducible'}, layout ${d.canonicalLayout ? 'canonical' : 'data-descriptor (streamed)'}`);
     lines.push(`  epoch timestamps    ${d.epochTimestamps}`);
     lines.push(`  canonical order     ${d.canonicalOrder}`);
     lines.push(`  utf-8 flags         ${d.utf8Flags}`);
@@ -316,6 +342,7 @@ export function inspectSummary(report: InspectReport): Record<string, unknown> {
         zip64: report.archive.isZip64,
         encrypted: report.stats.encrypted,
         deterministic: report.determinism.deterministic,
+        canonicalLayout: report.determinism.canonicalLayout,
         diagnostics: report.diagnostics.length,
         ...(report.checks !== undefined ? { checksPassed: report.checks.every((c) => c.ok) } : {}),
     };
@@ -330,7 +357,7 @@ export async function inspect(args: ParsedArgs): Promise<void> {
     const extraHex = hasFlag(args.flags, 'extra');
 
     const inputPath = resolveInputPath(args);
-    const bytes = await readArchiveBytes(inputPath);
+    const bytes = await readArchiveBytes(inputPath, args);
     const sink = createDiagnosticSink(true);
     const reader = openArchive(bytes, { ...commonOptions(args, sink), validate: 'eager' });
     const entries: ZipEntry[] = guard('Failed to read the central directory', () => [...reader.entries()]);
@@ -341,6 +368,7 @@ export async function inspect(args: ParsedArgs): Promise<void> {
         isZip64: reader.isZip64,
         comment: decodeComment(reader.comment),
         commentBytes: reader.comment.length,
+        ...(reader.comment.length > 0 ? { commentHex: bytesToHex(reader.comment) } : {}),
         prependedData: sink.diagnostics.some((d) => d.code === 'ZIP_PREPENDED_DATA'),
         multipleEocd: sink.diagnostics.some((d) => d.code === 'ZIP_MULTIPLE_EOCD'),
     };
@@ -352,7 +380,7 @@ export async function inspect(args: ParsedArgs): Promise<void> {
         for (const name of wantNames) {
             const entry = reader.getEntry(name);
             if (entry === null) {
-                throw new CliError(`Entry not found: ${name}`, 1, ErrorCode.NOT_FOUND, { entryName: name });
+                throw new CliError(`Entry not found: ${name} (run \`zipnative list\` for the exact names).`, 1, ErrorCode.NOT_FOUND, { entryName: name, zipCode: 'ZIP_ENTRY_NOT_FOUND' });
             }
             rows.push(rowFromEntry(entry, { long: true, extraHex }));
         }

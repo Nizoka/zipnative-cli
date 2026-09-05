@@ -1,0 +1,186 @@
+name: Publish
+
+# Prerequisite: configure Trusted Publishing for zipnative-cli on npmjs.com
+# (repository Nizoka/zipnative-cli, workflow publish.yml) — the 0.0.1
+# placeholder was token-published, so the package settings do not yet carry
+# the OIDC trust relationship this workflow relies on.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+# Trusted Publishing (npmjs.com OIDC):
+#   This workflow uses npm Trusted Publishing — no long-lived NPM_TOKEN secret.
+#   The OIDC id-token permission mints a short-lived token that:
+#     1. Authorises the `npm publish` HTTP request
+#     2. Signs the provenance attestation (SLSA Level 2+ via Sigstore)
+#   Configure at npmjs.com → package settings → "Configure Trusted Publishing".
+# Least privilege at the top level; the publish job alone requests
+# `id-token: write` (OIDC) and `contents: write` (release asset upload).
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    # `id-token: write` mints the OIDC token for Trusted Publishing + provenance.
+    # `contents: write` lets the workflow attach the generated SBOM to the release.
+    permissions:
+      contents: write
+      id-token: write
+      # Lets the SBOM attestation below be stored with the repository.
+      attestations: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          # A range resolves to the NEWEST available Node (currently 24.x),
+          # whose bundled npm >= 11.5.1 is required by npm Trusted Publishing
+          # (token-less OIDC). A '22.x' pin would ship npm 10.9 and break the
+          # publish. The floor mirrors the engines >= 22 support policy and
+          # the sibling zipnative / pdfnative-cli workflows.
+          node-version: '>=22.14.0'
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      # The publish re-runs the ENTIRE gate — a release that skips a check
+      # is a release that can ship a regression. Same steps as ci.yml.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Audit dependencies
+        run: npm audit --audit-level=moderate
+
+      - name: Type check
+        run: npm run typecheck:all
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test with coverage
+        run: npm run test:coverage
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify dist output
+        # CJS bin only — no ESM build, no .d.ts, no source maps in the tarball.
+        run: |
+          test -f dist/cli.cjs
+          test ! -e dist/cli.js
+          test ! -e dist/cli.d.ts
+          test ! -e dist/cli.cjs.map
+
+      - name: Binary smoke test
+        run: |
+          node dist/cli.cjs --help
+          node dist/cli.cjs --version
+          node dist/cli.cjs schema manifest | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const m=JSON.parse(s);if(!Array.isArray(m.commands)||m.commands.length!==15){console.error("schema manifest: expected 15 commands, got "+(Array.isArray(m.commands)?m.commands.length:"none"));process.exit(1)}console.log("schema manifest ok: "+m.commands.length+" commands")})'
+
+      # Spawns the built dist/cli.cjs as a child process — self-skips when
+      # dist/ is absent, so it must run post-build.
+      - name: Built-binary integration (post-build)
+        run: npx vitest run tests/integration/built-binary-smoke.test.ts tests/integration/startup-budget.test.ts
+
+      # veraZIP gate: the release must never publish a CLI whose archives the
+      # ISO/IEC 21320-1 reference validator rejects. Same corpus generator +
+      # vendored validator as .github/workflows/verazip.yml — BLOCKING, no
+      # continue-on-error. Level-1 tools come from the ubuntu-latest image
+      # (unzip, 7z, python3, jar); nothing is downloaded. The Windows leg
+      # (bsdtar / tar.exe, 7-Zip, python, jar) is enforced per-PR by
+      # verazip.yml, so every commit that can reach a release has already
+      # passed it.
+      - name: Generate ZIP corpus
+        # dist/ is already built by the Build step above.
+        run: npm run corpus:zip
+
+      - name: Validate ZIP corpus (blocking)
+        env:
+          # Fail-closed: zero usable level-1 integrity tools is an INFRA
+          # failure (exit 3), never a silent skip.
+          VERAZIP_REQUIRED: '1'
+          VERAZIP_REPORT_DIR: test-output/zip/reports
+        run: node scripts/validate-zip.mjs
+
+      - name: Generate SBOM (CycloneDX)
+        # Software Bill of Materials for supply-chain transparency. The
+        # generator is an EXACT-pinned devDependency installed by npm ci from
+        # the lockfile (integrity-checked) — never fetched by npx at publish
+        # time inside a job that holds the OIDC token. Build-time only: ZERO
+        # runtime dependencies are added to the package.
+        # --omit dev: the SBOM describes the shipped tree (zipnative only).
+        run: npx cyclonedx-npm --omit dev --output-format JSON --output-file sbom.cdx.json
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sbom-cyclonedx
+          path: sbom.cdx.json
+          retention-days: 90
+
+      # Signed provenance for the SBOM itself (Sigstore, stored as a GitHub
+      # attestation) — a consumer can verify the SBOM was produced by THIS
+      # workflow run: `gh attestation verify sbom.cdx.json -R Nizoka/zipnative-cli`.
+      - name: Attest SBOM provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: sbom.cdx.json
+
+      - name: Attach SBOM to release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Passed through the environment, never interpolated into the
+          # shell line (a tag name is untrusted input).
+          TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$TAG" sbom.cdx.json --clobber
+
+      - name: Pack tarball (the bytes that will be published)
+        run: |
+          npm pack --pack-destination .
+          sha256sum zipnative-cli-*.tgz | tee tarball.sha256
+          {
+            echo '## Published tarball'
+            echo
+            echo '```'
+            cat tarball.sha256
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify tarball contents
+        # The package must carry exactly the bin, the agent docs and the
+        # error catalogue — never a source map, a test or a workflow.
+        run: |
+          tar -tzf zipnative-cli-*.tgz > tarball.txt
+          cat tarball.txt
+          grep -q 'package/dist/cli.cjs$' tarball.txt
+          grep -q 'package/AGENTS.md$' tarball.txt
+          grep -q 'package/llms.txt$' tarball.txt
+          grep -q 'package/docs/data/errors.json$' tarball.txt
+          ! grep -q '\.map$' tarball.txt
+          ! grep -q 'package/tests/' tarball.txt
+
+      # Signed provenance for the tarball itself (Sigstore, stored as a GitHub
+      # attestation): gh attestation verify zipnative-cli-<v>.tgz -R Nizoka/zipnative-cli
+      - name: Attest tarball provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: zipnative-cli-*.tgz
+
+      - name: Attach tarball to release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$TAG" zipnative-cli-*.tgz tarball.sha256 --clobber
+
+      # Publish the PACKED file, so the attested bytes are the published bytes
+      # (a bare npm publish would re-pack).
+      - name: Publish
+        run: npm publish ./zipnative-cli-*.tgz --provenance --access public

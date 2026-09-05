@@ -7,34 +7,50 @@
 //
 //   1. PLAN  — drain the (lazy) extraction generator into a plan: nothing is
 //      decompressed yet (the `stream()` thunks are deferred). Every path is
-//      then re-checked with `safeJoin(root, path)` (containment), existing
-//      files are refused unless `--overwrite`, and on case-insensitive
-//      filesystems (win32/darwin) case-folded collisions are refused.
-//   2. WRITE — each entry streams into its file with backpressure; a CRC /
-//      size failure removes the partial file. Optional `--preserve-mode`
-//      (POSIX only, never setuid/setgid/sticky) and `--preserve-mtime`.
+//      then re-checked with `safeJoin(root, path)` (lexical containment),
+//      existing files are refused unless `--overwrite`, and on
+//      case-insensitive filesystems (win32/darwin) case-folded collisions
+//      follow `--on-duplicate`.
+//   2. WRITE — through utils/sink.ts: the parent's realpath must stay under
+//      the root (no symlink/junction redirection), files are opened
+//      exclusively unless `--overwrite` (no check-then-write window), each
+//      entry streams with backpressure, and a CRC / size failure removes the
+//      partial file. Optional `--preserve-mode` (POSIX only, never
+//      setuid/setgid/sticky) and `--preserve-mtime`.
 //
 // Security defaults are the core's (zip-slip, symlinks, duplicates, bombs
 // refused). Opt-outs are skip-not-write: `--skip-unsafe` drops unsafe names,
 // `--allow-symlinks` writes the link TARGET TEXT as a regular file (a symlink
 // is never materialised), `--skip-symlinks` drops them.
 
-import { chmod, mkdir, stat, utimes } from 'node:fs/promises';
-import { basename, dirname, resolve } from 'node:path';
+import { chmod, mkdir, utimes } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { type ParsedArgs, getStringFlag, getStringFlagAll, hasFlag } from '../utils/args.js';
-import { emitStatus, isDryRun, progress } from '../utils/agent.js';
+import { emitStatus, isDryRun, isJsonMode, progress } from '../utils/agent.js';
 import {
+    METHOD_DEFLATE,
+    METHOD_STORE,
     extractZip,
     extractZipStream,
+    getCodec,
     getUnixMode,
     isSymlinkEntry,
+    sanitizeEntryPath,
     type ExtractOptions,
     type ZipEntry,
 } from '../core-bridge/index.js';
 import { createDiagnosticSink } from '../utils/diagnostics.js';
 import { prepareEngine } from '../utils/engine.js';
 import { CliError, ErrorCode } from '../utils/error.js';
-import { safeJoin, unlinkQuiet, validatePath, writeFileStream } from '../utils/io.js';
+import { overwriteRefused, safeJoin } from '../utils/io.js';
+import {
+    duplicatePolicy,
+    ensureSinkDir,
+    ensureSinkParent,
+    findExistingTarget,
+    resolveSinkTarget,
+    writeSinkFile,
+} from '../utils/sink.js';
 import { mapZipError } from '../utils/ziperr.js';
 import {
     commonOptions,
@@ -51,15 +67,22 @@ interface PlannedFile {
     readonly relPath: string;
     /** Absolute destination. */
     readonly target: string;
+    /** Platform collision key of `target` (see utils/sink.ts). */
+    readonly key: string;
     readonly stream: () => AsyncGenerator<Uint8Array, void, undefined>;
 }
 
 interface Skipped {
     readonly name: string;
-    readonly reason: 'unsafe-path' | 'symlink' | 'filtered' | 'duplicate';
+    readonly reason: 'unsafe-path' | 'symlink' | 'filtered' | 'duplicate' | 'unsupported';
 }
 
-const CASE_INSENSITIVE_FS = process.platform === 'win32' || process.platform === 'darwin';
+/** Encrypted, or a compression method the engine has no codec for. */
+function isUndecodable(entry: ZipEntry): boolean {
+    if (entry.isEncrypted) return true;
+    const m = entry.compressionMethod;
+    return m !== METHOD_STORE && m !== METHOD_DEFLATE && getCodec(m) === null;
+}
 
 export async function extract(args: ParsedArgs): Promise<void> {
     await prepareEngine(args);
@@ -68,9 +91,9 @@ export async function extract(args: ParsedArgs): Promise<void> {
     if (outputDir === undefined) {
         throw new CliError('extract requires --output-dir <dir> (use "-d ." to extract into the current directory).', 2);
     }
-    validatePath(outputDir);
     const overwrite = hasFlag(args.flags, 'overwrite');
     const skipUnsafe = hasFlag(args.flags, 'skip-unsafe');
+    const skipUnsupported = hasFlag(args.flags, 'skip-unsupported');
     const allowSymlinks = hasFlag(args.flags, 'allow-symlinks');
     const skipSymlinks = hasFlag(args.flags, 'skip-symlinks');
     const flat = hasFlag(args.flags, 'flat');
@@ -86,7 +109,7 @@ export async function extract(args: ParsedArgs): Promise<void> {
     const wanted = new Set(getStringFlagAll(args.flags, 'entry', 'e'));
 
     const inputPath = resolveInputPath(args);
-    const bytes = await readArchiveBytes(inputPath);
+    const bytes = await readArchiveBytes(inputPath, args);
     const sink = createDiagnosticSink();
     const common = commonOptions(args, sink);
 
@@ -111,6 +134,12 @@ export async function extract(args: ParsedArgs): Promise<void> {
             skipped.push({ name: entry.name, reason: 'symlink' });
             return false;
         }
+        if (skipUnsupported && !entry.isDirectory && isUndecodable(entry)) {
+            // Skip-not-write: an encrypted payload or a method with no
+            // registered codec would otherwise abort the whole extraction.
+            skipped.push({ name: entry.name, reason: 'unsupported' });
+            return false;
+        }
         return true;
     };
     const options: ExtractOptions = {
@@ -126,30 +155,21 @@ export async function extract(args: ParsedArgs): Promise<void> {
     const planned: PlannedFile[] = [];
     const seenTargets = new Map<string, string>();
     const planOne = (entry: ZipEntry, sanitised: string, stream: () => AsyncGenerator<Uint8Array, void, undefined>): void => {
-        const relPath = flat ? basename(sanitised) : sanitised;
-        const target = safeJoin(root, relPath);
-        const key = CASE_INSENSITIVE_FS ? target.toLowerCase() : target;
-        const prior = seenTargets.get(key);
-        if (prior !== undefined) {
-            // Reached only under --flat or a case-fold collision (the core
-            // already applied onDuplicate to identical sanitised paths).
-            if (onDuplicate === 'error') {
-                throw new CliError(
-                    `Entries "${prior}" and "${entry.name}" would extract to the same file ${target}${flat ? ' (--flat)' : ' (case-insensitive filesystem)'}.`,
-                    1,
-                    ErrorCode.SECURITY,
-                    { entryName: entry.name, zipCode: 'ZIP_EXTRACT_DUPLICATE_PATH' },
-                );
-            }
-            if (onDuplicate === 'first') {
-                skipped.push({ name: entry.name, reason: 'duplicate' });
-                return;
-            }
-            const idx = planned.findIndex((p) => (CASE_INSENSITIVE_FS ? p.target.toLowerCase() : p.target) === key);
+        const { relPath, target, key } = resolveSinkTarget(root, sanitised, flat);
+        // A collision here is reached only under --flat or a case-fold on a
+        // case-insensitive filesystem (the core already applied onDuplicate
+        // to identical sanitised paths).
+        const verdict = duplicatePolicy(seenTargets.get(key), entry.name, target, onDuplicate, flat ? '--flat' : 'case-insensitive filesystem');
+        if (verdict === 'skip') {
+            skipped.push({ name: entry.name, reason: 'duplicate' });
+            return;
+        }
+        if (verdict === 'replace') {
+            const idx = planned.findIndex((p) => p.key === key);
             if (idx !== -1) planned.splice(idx, 1);
         }
         seenTargets.set(key, entry.name);
-        planned.push({ entry, relPath, target, stream });
+        planned.push({ entry, relPath, target, key, stream });
     };
 
     try {
@@ -160,7 +180,7 @@ export async function extract(args: ParsedArgs): Promise<void> {
             }
         } else {
             for await (const item of extractZipStream(bytes, options)) {
-                planOne(item.entry, item.path, item.stream);
+                planOne(item.entry, item.path, () => item.stream());
             }
         }
     } catch (e) {
@@ -177,31 +197,29 @@ export async function extract(args: ParsedArgs): Promise<void> {
     }
 
     // Directory entries (create even when empty) — through the same guards.
-    const dirTargets: string[] = [];
+    const dirTargets: { readonly name: string; readonly target: string }[] = [];
     if (!flat) {
         for (const e of allEntries) {
             if (!e.isDirectory) continue;
             if (wanted.size > 0 && !wanted.has(e.name)) continue;
             if (nameFilter !== undefined && !nameFilter(e.name)) continue;
-            const { sanitizeEntryPath } = await import('../core-bridge/index.js');
             const safe = sanitizeEntryPath(e.name);
             if (safe === null) {
                 if (skipUnsafe) { skipped.push({ name: e.name, reason: 'unsafe-path' }); continue; }
-                throw new CliError(`Directory entry "${e.name}" is not a safe path.`, 1, ErrorCode.SECURITY, { entryName: e.name, zipCode: 'ZIP_PATH_TRAVERSAL' });
+                throw new CliError(`Directory entry "${e.name}" is not a safe path (traversal, absolute, drive/UNC, NUL, ADS or reserved device name); pass --skip-unsafe to drop such entries.`, 1, ErrorCode.SECURITY, { entryName: e.name, zipCode: 'ZIP_PATH_TRAVERSAL' });
             }
-            dirTargets.push(safeJoin(root, safe));
+            dirTargets.push({ name: e.name, target: safeJoin(root, safe) });
         }
     }
 
-    // ── Phase 2a: filesystem validation (before writing anything)
+    // ── Phase 2a: whole-plan refusal before writing anything (the exclusive
+    // open in phase 2b is the authoritative guard; this keeps a refused run
+    // from producing a partial tree).
     if (!overwrite) {
-        for (const p of planned) {
-            try {
-                await stat(p.target);
-            } catch {
-                continue;
-            }
-            throw new CliError(`Refusing to overwrite existing file ${p.target} (pass --overwrite).`, 1, ErrorCode.IO, { entryName: p.entry.name });
+        const existing = await findExistingTarget(planned.map((p) => p.target));
+        if (existing !== undefined) {
+            const hit = planned.find((p) => p.target === existing) as PlannedFile;
+            throw overwriteRefused(existing, hit.entry.name);
         }
     }
 
@@ -219,7 +237,7 @@ export async function extract(args: ParsedArgs): Promise<void> {
     };
 
     if (dryRun) {
-        if (!hasFlag(args.flags, 'json')) {
+        if (!isJsonMode()) {
             const lines = planned.map((p) => `plan  ${p.relPath}  ${p.entry.uncompressedSize}`);
             for (const s of skipped) lines.push(`skip  ${s.name}  (${s.reason})`);
             process.stdout.write(lines.join('\n') + (lines.length > 0 ? '\n' : ''));
@@ -233,16 +251,15 @@ export async function extract(args: ParsedArgs): Promise<void> {
     }
     for (const s of skipped) progress(`warning: skipped ${s.name} (${s.reason})`);
 
-    // ── Phase 2b: write
+    // ── Phase 2b: write (utils/sink.ts: realpath containment + exclusive open)
     await mkdir(root, { recursive: true });
-    for (const d of dirTargets) await mkdir(d, { recursive: true });
+    for (const d of dirTargets) await ensureSinkDir(root, d.target, d.name);
     let written = 0;
     for (const p of planned) {
-        await mkdir(dirname(p.target), { recursive: true });
+        await ensureSinkParent(root, p.target, p.entry.name);
         try {
-            await writeFileStream(p.target, p.stream(), (n) => { written += n; });
+            written += await writeSinkFile(p.target, p.stream(), { overwrite });
         } catch (e) {
-            await unlinkQuiet(p.target);
             throw mapZipError(e, `Failed to extract "${p.entry.name}"`, p.entry.name);
         }
         if (preserveMode && process.platform !== 'win32') {

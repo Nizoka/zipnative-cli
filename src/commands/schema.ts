@@ -13,6 +13,7 @@ import type { ParsedArgs } from '../utils/args.js';
 import { CliError, ErrorCode } from '../utils/error.js';
 import { cliVersion, engineVersion } from '../utils/version.js';
 import { LIMIT_FLAGS } from '../utils/limits.js';
+import { ZIP_REMEDY } from '../utils/agent.js';
 import { ZIP_DIAGNOSTIC_CODES, ZIP_TO_CLI } from '../utils/ziperr.js';
 import { MANIFEST_COMMANDS } from '../utils/manifest.js';
 import { PROJECTED_COMMANDS } from '../utils/projection.js';
@@ -95,7 +96,7 @@ const entryRowSchema: JsonSchema = {
         isEncrypted: { type: 'boolean' },
         usesZip64: { type: ['boolean', 'null'] },
         usesDataDescriptor: { type: 'boolean' },
-        unixMode: { type: ['string', 'null'], description: 'Octal, e.g. "0644"; null when not Unix-authored.' },
+        unixMode: { type: ['string', 'null'], pattern: '^[0-7]{4}$', description: 'Four octal digits — setuid/setgid/sticky digit then permissions, e.g. "0644", "4755"; null when not Unix-authored.' },
         comment: { type: 'string' },
         flags: {
             type: 'object',
@@ -113,6 +114,24 @@ const entryRowSchema: JsonSchema = {
             type: 'array',
             items: { type: 'object', properties: { id: { type: 'integer' }, idHex: { type: 'string' }, name: { type: ['string', 'null'] }, length: { type: 'integer' }, hex: { type: 'string' } } },
         },
+        rawNameHex: { type: 'string', pattern: '^([0-9a-f]{2})*$', description: 'Present with --long: the stored name bytes (cp437 / invalid-UTF-8 forensics).' },
+        commentHex: { type: 'string', pattern: '^([0-9a-f]{2})*$', description: 'Present with --long when the entry has a comment: its raw bytes.' },
+    },
+};
+
+/** Manifest `extraFields` item: `{ id, hex | base64 }` (create entries, modify add/replace/add-dir). */
+const extraFieldsInputSchema: JsonSchema = {
+    type: 'array',
+    description: 'Raw extra fields written verbatim: id (0-65535 or "0x5455") plus exactly one of hex / base64 (at most 65531 bytes each).',
+    items: {
+        type: 'object',
+        required: ['id'],
+        additionalProperties: false,
+        properties: {
+            id: { anyOf: [{ type: 'integer', minimum: 0, maximum: 65535 }, { type: 'string', pattern: '^0x[0-9a-fA-F]{1,4}$' }] },
+            hex: { type: 'string', pattern: '^([0-9a-fA-F]{2})*$' },
+            base64: { type: 'string' },
+        },
     },
 };
 
@@ -128,8 +147,9 @@ function createManifestSchema(): JsonSchema {
         properties: {
             version: { const: 1 },
             comment: { type: 'string' },
-            order: { enum: ['canonical', 'insertion'] },
-            date: { type: 'string', description: '"epoch" (default), "now", or an ISO 8601 date.' },
+            commentBase64: { type: 'string', description: 'Raw archive comment bytes (exclusive with comment; at most 65535 bytes).' },
+            order: { enum: ['canonical', 'insertion'], description: 'insertion = the manifest order (first entry first, e.g. an EPUB mimetype).' },
+            date: { type: 'string', description: '"epoch" (default), "now", or an ISO 8601 date (UTC wall-clock).' },
             compression: { type: 'object', additionalProperties: false, properties: compressionProps },
             entries: {
                 type: 'array',
@@ -147,6 +167,7 @@ function createManifestSchema(): JsonSchema {
                         date: { type: 'string' },
                         comment: { type: 'string' },
                         mode: { type: 'string', pattern: '^0?[0-7]{3,4}$', description: 'POSIX mode, octal (e.g. "0755").' },
+                        extraFields: extraFieldsInputSchema,
                     },
                 },
             },
@@ -166,6 +187,7 @@ function modifyManifestSchema(): JsonSchema {
         properties: {
             version: { const: 1 },
             comment: { type: 'string' },
+            commentBase64: { type: 'string', description: 'Raw archive comment bytes (exclusive with comment; at most 65535 bytes).' },
             edits: {
                 type: 'array',
                 items: {
@@ -182,6 +204,8 @@ function modifyManifestSchema(): JsonSchema {
                         ...compressionProps,
                         date: { type: 'string', format: 'date-time' },
                         comment: { type: 'string' },
+                        mode: { type: 'string', pattern: '^0?[0-7]{3,4}$', description: 'POSIX mode, octal (add / replace / add-dir).' },
+                        extraFields: extraFieldsInputSchema,
                     },
                 },
             },
@@ -242,7 +266,7 @@ function entriesSchema(): JsonSchema {
             archive: {
                 type: 'object',
                 required: ['bytes', 'entryCount', 'isZip64', 'comment', 'commentBytes'],
-                properties: { bytes: { type: 'integer' }, entryCount: { type: 'integer' }, isZip64: { type: 'boolean' }, comment: { type: 'string' }, commentBytes: { type: 'integer' } },
+                properties: { bytes: { type: 'integer' }, entryCount: { type: 'integer' }, isZip64: { type: 'boolean' }, comment: { type: 'string' }, commentBytes: { type: 'integer' }, commentHex: { type: 'string', description: 'Present when commentBytes > 0: the raw comment bytes.' } },
             },
             entries: { type: 'array', items: entryRowSchema },
             diagnostics: { type: 'array', items: diagnosticSchema },
@@ -287,23 +311,26 @@ function inspectSchema(): JsonSchema {
             },
             stats: {
                 type: 'object',
-                required: ['files', 'directories', 'compressedSize', 'uncompressedSize', 'ratio', 'methods', 'encrypted', 'symlinks', 'dataDescriptor', 'zip64Entries', 'utf8Names', 'cp437Names', 'duplicateNames', 'earliestDate', 'latestDate'],
+                required: ['files', 'directories', 'compressedSize', 'uncompressedSize', 'ratio', 'methods', 'encrypted', 'symlinks', 'dataDescriptor', 'zip64Entries', 'utf8Names', 'cp437Names', 'duplicateNames', 'unsafeNames', 'earliestDate', 'latestDate'],
                 properties: {
                     files: { type: 'integer' }, directories: { type: 'integer' },
                     compressedSize: { type: 'integer' }, uncompressedSize: { type: 'integer' }, ratio: { type: 'string' },
                     methods: { type: 'object', additionalProperties: { type: 'integer' }, description: 'method id → entry count' },
                     encrypted: { type: 'integer' }, symlinks: { type: 'integer' }, dataDescriptor: { type: 'integer' },
                     zip64Entries: { type: 'integer' }, utf8Names: { type: 'integer' }, cp437Names: { type: 'integer' },
+                    unsafeNames: { type: 'integer', description: 'Entry names the engine\'s sanitizeEntryPath() refuses (what extract would refuse without --skip-unsafe).' },
                     duplicateNames: { type: 'integer' },
                     earliestDate: { type: ['string', 'null'] }, latestDate: { type: ['string', 'null'] },
                 },
             },
             determinism: {
                 type: 'object',
-                required: ['epochTimestamps', 'canonicalOrder', 'utf8Flags', 'noDataDescriptors', 'deterministic'],
+                required: ['epochTimestamps', 'canonicalOrder', 'utf8Flags', 'noDataDescriptors', 'canonicalLayout', 'deterministic'],
                 properties: {
                     epochTimestamps: { type: 'boolean' }, canonicalOrder: { type: 'boolean' }, utf8Flags: { type: 'boolean' },
-                    noDataDescriptors: { type: 'boolean' }, deterministic: { type: 'boolean' },
+                    noDataDescriptors: { type: 'boolean' },
+                    canonicalLayout: { type: 'boolean', description: 'No data descriptors (buffered layout). A streamed archive is reproducible but not canonical.' },
+                    deterministic: { type: 'boolean', description: 'Reproducible: epoch timestamps AND canonical order AND UTF-8 flags (layout excluded).' },
                 },
             },
             entries: { type: 'array', items: entryRowSchema, description: 'Present with --entries / --entry.' },
@@ -323,11 +350,12 @@ function inspectSummarySchema(): JsonSchema {
         $id: id('inspect-summary'),
         title: 'zipnative-cli inspect --summary output',
         type: 'object',
-        required: ['entries', 'bytes', 'uncompressedSize', 'zip64', 'encrypted', 'deterministic', 'diagnostics'],
+        required: ['entries', 'bytes', 'uncompressedSize', 'zip64', 'encrypted', 'deterministic', 'canonicalLayout', 'diagnostics'],
         additionalProperties: false,
         properties: {
             entries: { type: 'integer' }, bytes: { type: 'integer' }, uncompressedSize: { type: 'integer' },
             zip64: { type: 'boolean' }, encrypted: { type: 'integer' }, deterministic: { type: 'boolean' },
+            canonicalLayout: { type: 'boolean' },
             diagnostics: { type: 'integer' }, checksPassed: { type: 'boolean' },
         },
     };
@@ -362,6 +390,7 @@ function verifySchema(): JsonSchema {
             failed: { type: 'integer' },
             skipped: { type: 'integer' },
             strict: { type: 'boolean' },
+            selected: { type: 'array', items: { type: 'string' }, description: 'Present under --entry: the names verified; entries lists only those.' },
         },
     };
 }
@@ -376,7 +405,7 @@ function verifySummarySchema(): JsonSchema {
         additionalProperties: false,
         properties: {
             ok: { type: 'boolean' }, entries: { type: 'integer' }, failed: { type: 'integer' },
-            skipped: { type: 'integer' }, diagnostics: { type: 'integer' }, error: { enum: ZIP_CODES },
+            skipped: { type: 'integer' }, diagnostics: { type: 'integer' }, selected: { type: 'integer' }, error: { enum: ZIP_CODES },
         },
     };
 }
@@ -405,9 +434,15 @@ function streamSummarySchema(): JsonSchema {
         $id: id('stream-summary'),
         title: 'zipnative-cli stream --summary output',
         type: 'object',
-        required: ['entries', 'bytes', 'trust'],
+        required: ['entries', 'bytes', 'descriptorEntries', 'bytesKnown', 'trust'],
         additionalProperties: false,
-        properties: { entries: { type: 'integer' }, bytes: { type: 'integer' }, trust: { const: 'local-headers-only' } },
+        properties: {
+            entries: { type: 'integer' },
+            bytes: { type: 'integer', description: 'Sum of the local-header sizes — excludes data-descriptor entries, whose local header carries zeros.' },
+            descriptorEntries: { type: 'integer', description: 'Entries whose sizes trail the payload (flag bit 3); their bytes are not counted.' },
+            bytesKnown: { type: 'boolean', description: 'true when descriptorEntries is 0, i.e. bytes is exact.' },
+            trust: { const: 'local-headers-only' },
+        },
     };
 }
 
@@ -438,7 +473,10 @@ function batchSchema(): JsonSchema {
                     properties: {
                         id: { type: 'string' }, command: { type: 'string' }, ok: { type: 'boolean' }, output: { type: 'string' },
                         skipped: { const: true },
-                        error: { type: 'object', required: ['code', 'message'], properties: { code: { enum: ERROR_CODES }, message: { type: 'string' }, zipCode: { enum: ZIP_CODES } } },
+                        error: { type: 'object', required: ['code', 'message'], properties: { code: { enum: ERROR_CODES }, message: { type: 'string' }, zipCode: { enum: ZIP_CODES }, remedy: { type: 'string' } } },
+                        report: { description: 'JSON mode only: what the task wrote to stdout, parsed (an object, or an array of objects for NDJSON).' },
+                        stdout: { type: 'string', description: 'JSON mode only: the task\'s stdout when it was not JSON (text output).' },
+                        stdoutBytes: { type: 'integer', description: 'JSON mode only: bytes the task wrote to stdout (captured, never interleaved with the batch document).' },
                     },
                 },
             },
@@ -480,6 +518,7 @@ function doctorSchema(): JsonSchema {
                         status: { enum: ['ok', 'warn', 'error'] },
                         value: { type: 'string' },
                         detail: { type: 'string' },
+                        data: { type: 'object', description: 'Machine-readable payload; `limits` carries the effective bounds (ZipLimits keys + maxInputSize; "none" when disabled).' },
                     },
                 },
             },
@@ -526,7 +565,7 @@ function statusSchema(): JsonSchema {
         $schema: DRAFT,
         $id: id('status'),
         title: 'zipnative-cli --json success status envelope',
-        description: 'One JSON line on stderr after a successful write / dry-run of create, modify, extract, stream, cat, inflate, crc32. Fields beyond the required ones are command-specific (documented in AGENTS.md).',
+        description: 'One JSON line on stderr after a successful run (or --dry-run) of create, modify, extract, stream, cat, inflate, or after crc32. Fields beyond the required ones are command-specific (documented in AGENTS.md).',
         type: 'object',
         required: ['ok', 'command'],
         properties: {
@@ -537,12 +576,16 @@ function statusSchema(): JsonSchema {
             outputDir: { type: 'string' },
             bytes: { type: 'integer' },
             bytesIn: { type: 'integer' },
+            bytesConsumed: { type: 'integer', description: 'inflate: compressed bytes the stream occupied (bytesIn minus leftover on the streaming path).' },
             bytesOut: { type: 'integer' },
             entries: { anyOf: [{ type: 'integer' }, { type: 'array', items: { type: 'string' } }] },
             files: { type: 'integer' },
             directories: { type: 'integer' },
             tier: { enum: ['pure-pinned', 'injected', 'node-zlib', 'pure'] },
-            layout: { enum: ['append-only', 'compact'] },
+            layout: { enum: ['buffered', 'data-descriptor', 'append-only', 'compact'], description: 'create: buffered | data-descriptor (streamed entries); modify: append-only | compact.' },
+            verified: { type: 'integer', description: 'modify: untouched entries verified (CRC, sizes, local header) before being re-emitted verbatim.' },
+            verifySkipped: { type: 'integer', description: 'modify: untouched entries that could not be verified (encrypted, or a stream-only codec) and were re-emitted as-is.' },
+            changed: { type: 'boolean' },
             trust: { const: 'local-headers-only' },
             skipped: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, reason: { type: 'string' } } } },
             diagnostics: { type: 'array', items: diagnosticSchema },
@@ -576,6 +619,10 @@ function errorSchema(): JsonSchema {
                         description: 'Code-specific: { limit, configured, observed } (E_LIMIT), { feature } (E_UNSUPPORTED), { expectedCrc, actualCrc } (E_DATA / E_CHECK_FAILED).',
                         additionalProperties: { type: ['string', 'number', 'boolean', 'null'] },
                     },
+                    remedy: {
+                        type: 'string',
+                        description: 'The CLI flag(s) or command that lift this refusal (e.g. "--skip-unsafe (extract, stream)", "--overwrite"); absent when nothing does. Apply it only for trusted input.',
+                    },
                 },
             },
         },
@@ -583,8 +630,11 @@ function errorSchema(): JsonSchema {
 }
 
 function errorsDocument(): JsonSchema {
-    const zip: Record<string, { code: string; exitCode: number }> = {};
-    for (const [k, [code, exitCode]] of Object.entries(ZIP_TO_CLI)) zip[k] = { code, exitCode };
+    const zip: Record<string, { code: string; exitCode: number; remedy?: string }> = {};
+    for (const [k, [code, exitCode]] of Object.entries(ZIP_TO_CLI)) {
+        const remedy = Object.hasOwn(ZIP_REMEDY, k) ? ZIP_REMEDY[k as keyof typeof ZIP_REMEDY] : undefined;
+        zip[k] = { code, exitCode, ...(remedy !== undefined ? { remedy } : {}) };
+    }
     return {
         $id: `${ID_BASE}/${cliVersion()}/errors.json`,
         kind: 'error-codes',

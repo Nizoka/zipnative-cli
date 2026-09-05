@@ -9,13 +9,20 @@
 
 import { type ParsedArgs, getStringFlag, getStringFlagAll, hasFlag } from '../utils/args.js';
 import { emitStatus, isDryRun } from '../utils/agent.js';
-import type { ZipEntry } from '../core-bridge/index.js';
+import { METHOD_DEFLATE, METHOD_STORE, getCodec, type ZipEntry } from '../core-bridge/index.js';
 import { createDiagnosticSink } from '../utils/diagnostics.js';
 import { prepareEngine } from '../utils/engine.js';
 import { CliError, ErrorCode } from '../utils/error.js';
-import { unlinkQuiet, validatePath, writeStreamingOutput } from '../utils/io.js';
+import { unlinkQuiet, writeStreamingOutput } from '../utils/io.js';
 import { mapZipError } from '../utils/ziperr.js';
 import { commonOptions, openArchive, readArchiveBytes } from '../utils/zipops.js';
+
+/** True for a `--codec` method that decompresses synchronously only. */
+function isSyncOnlyCodec(method: number): boolean {
+    if (method === METHOD_STORE || method === METHOD_DEFLATE) return false;
+    const codec = getCodec(method);
+    return codec !== null && codec.decompressStream === undefined && codec.decompressSync !== undefined;
+}
 
 export async function cat(args: ParsedArgs): Promise<void> {
     await prepareEngine(args);
@@ -34,12 +41,11 @@ export async function cat(args: ParsedArgs): Promise<void> {
         throw new CliError('cat requires at least one entry name: --entry <name> (or positionals after the archive).', 2);
     }
     const outputPath = getStringFlag(args.flags, 'output', 'o');
-    if (outputPath !== undefined) validatePath(outputPath);
     const raw = hasFlag(args.flags, 'raw');
     const verifyCrc = !hasFlag(args.flags, 'no-verify-crc');
     const dryRun = hasFlag(args.flags, 'dry-run') || isDryRun();
 
-    const bytes = await readArchiveBytes(inputPath);
+    const bytes = await readArchiveBytes(inputPath, args);
     const sink = createDiagnosticSink();
     const reader = openArchive(bytes, commonOptions(args, sink));
 
@@ -52,10 +58,10 @@ export async function cat(args: ParsedArgs): Promise<void> {
             throw mapZipError(e, 'Failed to read the central directory');
         }
         if (entry === null) {
-            throw new CliError(`Entry not found: ${name}`, 1, ErrorCode.NOT_FOUND, { entryName: name });
+            throw new CliError(`Entry not found: ${name} (run \`zipnative list\` for the exact names).`, 1, ErrorCode.NOT_FOUND, { entryName: name, zipCode: 'ZIP_ENTRY_NOT_FOUND' });
         }
         if (entry.isDirectory) {
-            throw new CliError(`"${name}" is a directory entry — nothing to output.`, 1, ErrorCode.INPUT, { entryName: name });
+            throw new CliError(`"${name}" is a directory entry — nothing to output; name a file entry, or use \`zipnative extract\` to materialise the directory.`, 1, ErrorCode.INPUT, { entryName: name });
         }
         entries.push(entry);
     }
@@ -79,6 +85,10 @@ export async function cat(args: ParsedArgs): Promise<void> {
             current = entry.name;
             if (raw) {
                 yield reader.readEntryRaw(entry);
+            } else if (isSyncOnlyCodec(entry.compressionMethod)) {
+                // A registered codec with decompressSync but no decompressStream
+                // cannot feed readEntryStream(); readEntry() buffers this one entry.
+                yield reader.readEntry(entry, { verifyCrc });
             } else {
                 for await (const chunk of reader.readEntryStream(entry, { verifyCrc })) yield chunk;
             }
@@ -87,8 +97,9 @@ export async function cat(args: ParsedArgs): Promise<void> {
 
     let written = 0;
     try {
-        written = await writeStreamingOutput(chunks(), outputPath);
+        written = await writeStreamingOutput(chunks(), outputPath, { exclusive: !hasFlag(args.flags, 'overwrite') });
     } catch (e) {
+        if (e instanceof CliError && e.code === ErrorCode.IO) throw e; // overwrite refusal: the existing file is untouched
         if (outputPath !== undefined) await unlinkQuiet(outputPath);
         throw mapZipError(e, `Failed to read entry "${current}"`, current);
     }

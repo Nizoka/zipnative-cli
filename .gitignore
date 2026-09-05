@@ -14,6 +14,12 @@ test-output/
 samples/output/
 *.tsbuildinfo
 
+# AI-agent issue drafts are local until a human files them upstream
+# (same rule as the engine repository) — only the README and the template are tracked
+.github/drafts/*
+!.github/drafts/README.md
+!.github/drafts/TEMPLATE.md
+
 # Local Claude Code state
 .claude/
 

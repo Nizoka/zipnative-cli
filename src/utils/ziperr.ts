@@ -20,6 +20,7 @@ import {
     type ZipErrorCode,
 } from '../core-bridge/index.js';
 import { CliError, ErrorCode, type ErrorCodeValue, type ErrorDetail } from './error.js';
+import { LIMIT_FLAGS } from './limits.js';
 
 type Mapping = readonly [code: ErrorCodeValue, exitCode: number];
 
@@ -106,6 +107,27 @@ const FS_ERROR_CODES = new Set([
     'EMFILE', 'ENFILE', 'EBUSY', 'EROFS', 'ELOOP', 'ENAMETOOLONG', 'EIO', 'EINVAL',
 ]);
 
+/**
+ * node:zlib errors that reach the CLI unwrapped. The engine's `node-zlib`
+ * tier calls `inflateRawSync` directly, so a corrupt or truncated raw
+ * stream on the sync path (`inflate --sync`, `readEntry`) surfaces zlib's
+ * own Error (`code: Z_DATA_ERROR` / `Z_BUF_ERROR`) instead of a `ZipError`.
+ * They are the same two conditions the pure tier reports as
+ * `ZIP_DEFLATE_CORRUPT` / `ZIP_DEFLATE_TRUNCATED`, so map them identically —
+ * the class an agent sees must not depend on the codec tier.
+ */
+const ZLIB_TO_ZIP: Readonly<Record<string, ZipErrorCode>> = {
+    Z_DATA_ERROR: 'ZIP_DEFLATE_CORRUPT',
+    Z_NEED_DICT: 'ZIP_DEFLATE_CORRUPT',
+    Z_BUF_ERROR: 'ZIP_DEFLATE_TRUNCATED',
+};
+
+function zlibCodeOf(err: unknown): ZipErrorCode | undefined {
+    if (!(err instanceof Error)) return undefined;
+    const code = (err as NodeJS.ErrnoException).code;
+    return typeof code === 'string' ? ZLIB_TO_ZIP[code] : undefined;
+}
+
 /** True when `err` is a Node filesystem/stream error (has a known `code`). */
 export function isFsError(err: unknown): err is NodeJS.ErrnoException {
     return (
@@ -152,18 +174,32 @@ function entryNameOf(err: ZipError): string | undefined {
 export function mapZipError(err: unknown, context: string, entryName?: string): CliError {
     if (err instanceof CliError) return err;
     if (err instanceof ZipError) {
+        // `satisfies Record<ZipErrorCode, …>` makes the fallback unreachable for a
+        // 1.0.0 engine; it stays for a code a NEWER engine may add at runtime.
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
         const [code, exitCode] = ZIP_TO_CLI[err.code] ?? RUNTIME;
         const name = entryNameOf(err) ?? entryName;
         const detail = detailOf(err);
+        // A limit refusal names its bound: the remedy is the exact --max-* flag.
+        const limitFlag = err instanceof ZipLimitError ? LIMIT_FLAGS.find((l) => l.key === String(err.limit)) : undefined;
         return new CliError(`${context}: ${err.message}`, exitCode, code, {
             zipCode: err.code,
             ...(name !== undefined ? { entryName: name } : {}),
             ...(detail !== undefined ? { detail } : {}),
+            ...(limitFlag !== undefined ? { remedy: `--${limitFlag.flag} <value> (raise the bound for trusted input only; "none" disables it)` } : {}),
         });
     }
     if (isFsError(err)) {
         const path = err.path !== undefined ? ` (${err.path})` : '';
         return new CliError(`${context}: ${err.code}${path}: ${err.message}`, 1, ErrorCode.IO);
+    }
+    const zlibCode = zlibCodeOf(err);
+    if (zlibCode !== undefined) {
+        const [code, exitCode] = ZIP_TO_CLI[zlibCode];
+        return new CliError(`${context}: ${(err as Error).message}`, exitCode, code, {
+            zipCode: zlibCode,
+            ...(entryName !== undefined ? { entryName } : {}),
+        });
     }
     const message = err instanceof Error ? err.message : String(err);
     return new CliError(`${context}: ${message}`, 1, ErrorCode.RUNTIME);
@@ -173,15 +209,6 @@ export function mapZipError(err: unknown, context: string, entryName?: string): 
 export function guard<T>(context: string, fn: () => T, entryName?: string): T {
     try {
         return fn();
-    } catch (e) {
-        throw mapZipError(e, context, entryName);
-    }
-}
-
-/** Async variant of {@link guard}. */
-export async function guardAsync<T>(context: string, fn: () => Promise<T>, entryName?: string): Promise<T> {
-    try {
-        return await fn();
     } catch (e) {
         throw mapZipError(e, context, entryName);
     }

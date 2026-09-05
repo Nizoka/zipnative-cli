@@ -47,6 +47,11 @@ export interface CliErrorOptions {
     readonly entryName?: string;
     /** Code-specific structured detail (limit/configured/observed, feature, CRCs…). */
     readonly detail?: ErrorDetail;
+    /**
+     * The CLI flag(s) or command that lift this refusal (e.g. `--overwrite`),
+     * for refusals that have no `zipCode` to look up in the remedy table.
+     */
+    readonly remedy?: string;
 }
 
 /**
@@ -66,6 +71,7 @@ export class CliError extends Error {
     public readonly zipCode: string | undefined;
     public readonly entryName: string | undefined;
     public readonly detail: ErrorDetail | undefined;
+    public readonly remedy: string | undefined;
 
     constructor(message: string, exitCode = 1, code?: ErrorCodeValue, options?: CliErrorOptions) {
         super(message);
@@ -75,21 +81,15 @@ export class CliError extends Error {
         this.zipCode = options?.zipCode;
         this.entryName = options?.entryName;
         this.detail = options?.detail;
+        this.remedy = options?.remedy;
     }
-}
-
-/**
- * Print a message to stderr and terminate the process.
- * Never returns — declared as `never` for type narrowing.
- */
-export function die(message: string, exitCode = 1): never {
-    process.stderr.write(message + '\n');
-    process.exit(exitCode);
 }
 
 /**
  * Emit a single deprecation warning to stderr.
  * Idempotent per (name) within a process — repeated calls produce one line.
+ * Unused in 1.0.0 (no flag has been renamed yet); kept as the one sanctioned
+ * way to retire a flag name in a minor release.
  */
 const _deprecateSeen = new Set<string>();
 export function deprecate(name: string, replacement: string): void {

@@ -13,7 +13,11 @@
 // reviews and submits it. The validation logic is a pure, zero-dependency
 // port of zipnative's `scripts/verify-issue.mjs`.
 
-/** Machine-readable governance policy (mirrors `.github/ai-governance.json`). */
+/**
+ * Machine-readable governance policy — a byte-for-byte mirror of
+ * `.github/ai-governance.json` (tests/utils/governance-sync.test.ts deep-equals
+ * the two; edit the JSON first, then this constant).
+ */
 export const AI_GOVERNANCE_POLICY = Object.freeze({
     $schema: 'https://json-schema.org/draft/2020-12/schema',
     title: 'zipnative AI Governance Configuration',
@@ -22,6 +26,7 @@ export const AI_GOVERNANCE_POLICY = Object.freeze({
         + 'contributions, and changes across the zipnative ecosystem. Agents that scan '
         + 'repository configuration on initialization MUST honour this file.',
     version: '1.0.0',
+    spec_updated: '2026-09-03',
     applies_to: ['zipnative', 'zipnative-cli', 'zipnative-mcp'],
     policy: {
         automatic_issue_reporting: false,
@@ -61,6 +66,7 @@ export const AI_GOVERNANCE_POLICY = Object.freeze({
         'environment_captured',
     ],
     compliance_report: {
+        description: 'The structured summary an agent MUST present to the user alongside every draft.',
         required_fields: [
             'zero_dependency_confirmed',
             'reproduction_command',
@@ -70,13 +76,37 @@ export const AI_GOVERNANCE_POLICY = Object.freeze({
             'identity_reminder_shown',
         ],
     },
+    capability_manifest: {
+        description: 'Authoritative project context an agent SHOULD load before proposing changes.',
+        sources: [
+            'AGENTS.md',
+            '.github/copilot-instructions.md',
+            '.github/AGENT_RULES.md',
+            'ROADMAP.md',
+            'SECURITY.md',
+            'docs/KNOWLEDGE_BASE.md',
+            'llms.txt',
+        ],
+    },
     verification: {
         command: 'zipnative govern verify-issue <draft.md>',
+        advisory_in_ci: true,
         blocks_submission_on_failure: true,
+    },
+    references: {
+        zero_dependency_policy: 'README.md#zero-dependency',
+        anti_goals: 'https://github.com/Nizoka/zipnative#what-zipnative-will-not-do',
+        security_defaults: 'SECURITY.md',
+        issue_templates: ['.github/ISSUE_TEMPLATE'],
     },
 } as const);
 
-/** Human-and-agent-readable protocol (mirrors `.github/AGENT_RULES.md`). */
+/**
+ * Human-and-agent-readable protocol. The numbered rules and the "must NOT"
+ * list are the same lines as `.github/AGENT_RULES.md` (the sync test checks
+ * every line verbatim); the markdown file adds the workflow diagram and the
+ * compliance-report section around them.
+ */
 export const AGENT_RULES_TEXT = `\
 # AI Agent Rules for the zipnative ecosystem
 

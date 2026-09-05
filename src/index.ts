@@ -1,7 +1,9 @@
 import { parseArgs, hasFlag, getStringFlag } from './utils/args.js';
-import { CliError } from './utils/error.js';
-import { isJsonMode, emitJsonError } from './utils/agent.js';
+import { CliError, ErrorCode } from './utils/error.js';
+import { isJsonMode, emitJsonError, remedyFor } from './utils/agent.js';
 import { loadConfig, applyConfigDefaults } from './utils/config.js';
+import { installSignalCleanup } from './utils/inflight.js';
+import { installEpipeGuard } from './utils/io.js';
 import { cliVersion, engineVersion } from './utils/version.js';
 
 // Lazy-import commands to keep startup fast for --help / --version
@@ -12,7 +14,8 @@ Global options (any command):
   --config <file>   Use a specific .zipnativerc.json (default: nearest upward)
   --no-config       Ignore any .zipnativerc.json
   --quiet,   -q     Suppress progress output and text diagnostics on stderr
-  --no-color        Disable ANSI colour (also respects NO_COLOR)
+  --no-color        Disable ANSI colour on the stderr progress lines (also
+                    NO_COLOR; FORCE_COLOR turns it on; TERM=dumb turns it off)
   --json            Agent mode: emit a JSON status/error envelope on stderr
                     (data stays on stdout). Errors carry a stable E_* code and
                     zipnative's ZIP_* code verbatim.
@@ -20,7 +23,8 @@ Global options (any command):
   --dry-run         Validate inputs and plan without writing output (create,
                     extract, modify, stream, cat, inflate, batch)
   --strict          Escalate the first engine diagnostic into E_CHECK_FAILED
-                    before any output byte
+                    before any output byte (verify: the report is printed and
+                    the verdict becomes E_VERIFY_FAILED)
   --max-entries <n>            Security bounds (zipnative ZipLimits); "none"
   --max-entry-size <size>      disables a bound. Defaults: 100000 entries,
   --max-total-size <size>      1 GiB per entry, 8 GiB total, ratio 1024:1,
@@ -29,10 +33,31 @@ Global options (any command):
   --max-extra-bytes <size>     <size> accepts 65536, 512k, 1m, 8g, 1GiB.
   --max-comment-bytes <size>
   --max-cd-bytes <size>
+  --max-input-size <size>      Bound on a buffered input read — an archive
+                    or payload read from stdin or a file into memory (list,
+                    inspect, verify, extract, cat, modify, create --stdin-name,
+                    inflate --sync, govern verify-issue). Default 4 GiB;
+                    "none" disables it;
+                    exceeding it is E_LIMIT. The streaming commands (stream,
+                    crc32, inflate, create --stream) are not bounded by it.
   --pure-codecs     Skip node:zlib and run the pure-TS codec tier
   --codec <module>  Load an ESM module exporting { codecs: ZipCodec[] } and
-                    register it (read-side only). Executes user code: only
-                    accepted on the command line, never from a config file.
+                    register it. A codec for method 0/8 (or a deflateImpl)
+                    also drives the writer — reported in the envelope tier
+                    and a warning; refused by create --parallel. Executes
+                    user code: only accepted on the command line, never
+                    from a config file.
+
+Exit codes:
+  0  success              1  failure (any E_* class but usage)
+  2  usage error          130 / 143  interrupted by SIGINT / SIGTERM (the file
+                             being written is removed; finished outputs stay)
+
+Environment:
+  ZIPNATIVE_JSON=1         same as --json         ZIPNATIVE_DRY_RUN=1  --dry-run
+  ZIPNATIVE_QUIET=1        same as --quiet        ZIPNATIVE_STRICT=1   --strict
+  ZIPNATIVE_PURE_CODECS=1  same as --pure-codecs  ZIPNATIVE_DEBUG=1    traces
+  NO_COLOR / FORCE_COLOR / TERM=dumb              colour of the stderr lines
 `;
 
 const USAGE = `\
@@ -44,23 +69,26 @@ Usage:
 Commands (15):
 
  Create & modify
-  create      Build a deterministic ZIP from files, directories, stdin or a manifest
-  modify      Incremental edits: add/replace/remove/rename/comment (append-only or --compact)
+  create      Build a deterministic ZIP from files, dirs, stdin or a manifest
+  modify      Incremental edits: add/replace/remove/rename/comment (append-only
+              or --compact)
 
  Read & extract
   list        List archive entries (text | json | ndjson)
-  inspect     Forensic archive report with determinism/security --check assertions
+  inspect     Forensic report with determinism/security --check assertions
   cat         Stream one or more entries to stdout
-  extract     Extract to a directory (zip-slip, symlink, bomb, duplicate guards on by default)
+  extract     Extract to a directory (zip-slip, symlink, bomb and duplicate
+              guards on by default)
   stream      Forward-only reader over stdin/pipes (no central directory)
 
  Integrity & codecs
-  verify      Deep integrity verification (CRC, sizes, local headers, diagnostics)
+  verify      Deep integrity verification (CRC, sizes, local headers, diags)
   crc32       CRC-32 of files or stdin
   inflate     Decompress a raw DEFLATE (or registered-codec) stream
 
  Automation & meta
-  batch       Archive subfolders, verify a folder of archives, or run a manifest pipeline
+  batch       Archive subfolders, verify a folder of archives, or run a
+              manifest pipeline
   doctor      Environment / capability preflight (text or --json)
   schema      Print a JSON Schema / capability manifest for agents
   completion  Emit a shell completion script (bash|zsh|fish|powershell)
@@ -88,10 +116,13 @@ Inputs:
   <path>...           Files and directories (directories are walked recursively)
   --input,   -i       Same as a positional (repeatable; useful in manifests)
   --stdin-name <n>    Read stdin as one entry named <n>
-  --from-manifest <f> JSON manifest ({ entries: [{ name, path|data|dataBase64|
-                      directory, method, level, date, comment, mode }] }) —
+  --from-manifest <f> JSON manifest ({ comment|commentBase64, order, date,
+                      compression, entries: [{ name, path|data|dataBase64|
+                      directory, method, level, date, comment, mode,
+                      extraFields }] }) —
                       see \`zipnative schema create-manifest\`
   --output,  -o       Output path (default: stdout)
+  --overwrite         Replace an existing output file (default: refuse, E_IO)
 
 Naming:
   --base <dir>        Entry names are relative to <dir> (default: each input's
@@ -106,31 +137,49 @@ Naming:
 Compression & determinism:
   --method store|deflate   (default deflate)
   --level 0-9              (default 6)
-  --deterministic          Pin the pure-TS encoder: identical SHA-256 on every runtime
-  --order canonical|insertion   Entry order (default canonical raw-name bytes)
-  --date epoch|now|<ISO>   Timestamp for entries (default: DOS epoch, reproducible)
-  --mtime                  Use each file's modification time (non-reproducible)
+  --deterministic          Pin the pure-TS encoder: identical SHA-256 on
+                           every runtime
+  --order canonical|insertion   Entry order (default canonical raw-name bytes;
+                           insertion = argv order, directories walked name-
+                           sorted — e.g. an EPUB "mimetype" first)
+  --date epoch|now|<ISO>   Timestamp for entries (default: DOS epoch,
+                           reproducible). An ISO date is UTC wall-clock time
+                           (a string without a zone is read as UTC), so the
+                           stored DOS fields are identical on every host;
+                           range 1980-2107, 2-second resolution.
+  --mtime                  Use each file's modification time (local time,
+                           non-reproducible)
   --comment <text>         Archive comment
+  --comment-file <path>    Archive comment from a file, raw bytes ("-" = stdin;
+                           exclusive with --comment; at most 65535 bytes)
   --entry-comment <name>=<text>   Per-entry comment (repeatable)
   --preserve-mode          Store POSIX mode bits (no setuid/setgid/sticky)
   --store-ext png,jpg,zip  Store (no deflate) entries with these extensions
 
 Output modes:
-  --stream                 Constant-memory writer (data-descriptor layout,
-                           byte-identical to buffered output); entries > 4 GiB
-                           are refused (ZIP_UNSUPPORTED_ZIP64_STREAMING)
-  --chunk-size <size>      Chunk size for --stream (default 65536)
+  --stream                 Constant-memory writer: file inputs are streamed
+                           (data-descriptor layout, so the bytes differ from
+                           the buffered layout — the content is identical);
+                           entries > 4 GiB are refused
+                           (ZIP_UNSUPPORTED_ZIP64_STREAMING)
+  --chunk-size <size>      Output chunk size for the chunked writer (--stream
+                           or --stdin-name; default 65536)
   --parallel               Deflate across a worker pool (zipnative/worker);
-                           byte-identical to the sequential writer per tier
-  --workers <n>            Worker count (default: cores-1, max 8; 0 = main thread)
-  --min-job-size <size>    Minimum entry size dispatched to a worker (default 32k)
+                           byte-identical to the sequential writer per tier.
+                           Refused (exit 2) with a --codec module registering
+                           method 0/8, or a deflateImpl without --deterministic:
+                           workers never see the module
+  --workers <n>            Worker count (default cores-1, max 8; 0 = main
+                           thread)
+  --min-job-size <size>    Minimum entry size sent to a worker (default 32k)
   --job-timeout <ms>       Per-job cap before inline fallback (default 60000)
 
-  --dry-run                Walk inputs, validate names, print the plan; write nothing
+  --dry-run                Walk inputs, validate names, print the plan;
+                           write nothing
 
-Status envelope (--json): { ok, command, output, entries, files, directories,
-bytes, bytesIn, method, level, deterministic, tier, order, stream, parallel,
-skipped, diagnostics }.
+Status envelope (--json): { ok, command, dryRun, output, entries, files,
+directories, bytes, bytesIn, method, level, deterministic, tier, order, stream,
+layout, parallel, skipped, diagnostics }.
 `;
 
 const LIST_USAGE = `\
@@ -142,8 +191,8 @@ Usage:
 
 Options:
   --input,   -i       Archive path (default: stdin)
-  --format text|json|ndjson   (default text; json under --json)
-  --long,    -l       Add mode, flags, versions, offsets and extra fields
+  --format, -f text|json|ndjson   (default text; json under --json)
+  --long              Add mode, flags, versions, offsets and extra fields
   --validate lazy|eager       Cross-check every local header up front (eager)
   --include <glob>    Keep only matching names (repeatable)
   --exclude <glob>    Drop matching names (repeatable)
@@ -159,24 +208,31 @@ zipnative inspect — Forensic archive report with CI assertions
 
 Usage:
   zipnative inspect --input <a.zip> [--format json|text] [--check <assert>]...
+  zipnative inspect <a.zip> [options]
 
 Options:
   --input,   -i       Archive path (default: stdin). Opened EAGERLY: every local
                       header cross-checked, overlap table built up front.
-  --format text|json  (default text; json under --json)
+  --format, -f text|json  (default text; json under --json)
   --entries           Include every entry (long form) in the report
   --entry <name>      Include only the named entries (repeatable)
   --extra             Include extra-field payloads as hex
-  --check <assert>    Assertion (repeatable, comma-separable). Any failure prints
+  --check <assert>    Assertion (repeatable, comma-separable). Any failure
+                      prints
                       the report then exits 1 with E_CHECK_FAILED:
-                        deterministic, epoch-timestamps, canonical-order,
-                        utf8-names, no-data-descriptor, no-zip64, zip64,
-                        no-encryption, no-symlinks, no-duplicates,
+                        deterministic (reproducible: epoch timestamps +
+                        canonical order + UTF-8 flags), epoch-timestamps,
+                        canonical-order, utf8-names, canonical-layout /
+                        no-data-descriptor (buffered layout — a --stream
+                        archive is reproducible but not canonical), no-zip64,
+                        zip64, no-encryption, no-symlinks, safe-names (every
+                        name passes sanitizeEntryPath), no-duplicates,
                         no-diagnostics, store-only, deflate-only,
                         max-entries=N, min-entries=N, max-uncompressed=<size>,
                         max-ratio=N, has=<name>, method=store|deflate|<id>
   --summary           { entries, bytes, uncompressedSize, zip64, encrypted,
-                        deterministic, diagnostics, checksPassed? }
+                        deterministic, canonicalLayout, diagnostics,
+                        checksPassed? }
   --fields a,b.c      Dot-path projection
 
 JSON shape: \`zipnative schema inspect\`.
@@ -193,12 +249,14 @@ Options:
   --input,   -i       Archive path
   --entry,   -e       Entry name (repeatable); entries are concatenated in order
   --output,  -o       Write to a file instead of stdout
+  --overwrite         Replace an existing --output file (default: refuse, E_IO)
   --raw               Output the COMPRESSED payload (zero-copy), no decoding
   --no-verify-crc     Skip the CRC-32 check at the end of the stream
   --dry-run           Resolve the entries and report their sizes; output nothing
 
-Note: the CRC is verified at the END of the stream (like \`unzip -p\`), so stdout
-may already carry bytes when E_DATA fires; with --output the partial file is removed.
+Note: the CRC is verified at the END of the stream (like \`unzip -p\`), so
+stdout may already carry bytes when E_DATA fires; with --output the partial
+file is removed.
 `;
 
 const EXTRACT_USAGE = `\
@@ -220,6 +278,8 @@ Options:
   --skip-unsafe       SKIP entries whose names cannot be made safe instead of
                       failing (zip-slip, absolute, drive/UNC, NUL, ADS, device
                       names). Nothing unsafe is ever written.
+  --skip-unsupported  SKIP encrypted entries and methods with no registered
+                      codec (reason "unsupported") instead of failing
   --allow-symlinks    Write a symlink entry's TARGET TEXT as a regular file
                       (a symlink is never materialised). Default: refuse.
   --skip-symlinks     Drop symlink entries silently
@@ -247,8 +307,9 @@ Options:
   --list              List entries as they arrive (default mode)
   --output-dir, -d    Extract under <dir> (sanitizeEntryPath + containment)
   --cat <name>        Write the named entry's data to stdout (repeatable)
-  --format text|json|ndjson   (default text; ndjson under --json)
-  --long,    -l       Add flags, versions and extra fields to the rows
+  --format, -f text|json|ndjson   (default text; ndjson under --json, json
+                      when --summary or --fields is given)
+  --long              Add flags, versions and extra fields to the rows
   --include/--exclude <glob>, --overwrite, --on-duplicate, --flat,
   --preserve-mtime    As in \`extract\`
   --skip-unsafe       Skip unsafe names instead of failing
@@ -274,24 +335,42 @@ Usage:
 Edits (applied in this fixed order regardless of argv order):
   --remove <name>            Remove an entry (repeatable)
   --rename <from>=<to>       Rename an entry (repeatable)
-  --replace <name>=<path>    Replace an entry's content (repeatable; path "-" = stdin)
-  --add <name>=<path>        Add a new entry (repeatable; a bare <path> uses its basename)
+  --replace <name>=<path>    Replace an entry's content (repeatable; path "-"
+                             = stdin)
+  --add <name>=<path>        Add a new entry (repeatable; a bare <path> uses
+                             its basename)
   --add-dir <name>           Add an explicit directory entry (repeatable)
   --comment <text>           Set the archive comment ("" clears it)
-  --from-manifest <f>        JSON edits — see \`zipnative schema modify-manifest\`
+  --comment-file <path>      Set the archive comment from a file, raw bytes
+                             ("-" = stdin; exclusive with --comment)
+  --from-manifest <f>        JSON edits ({ comment|commentBase64, edits: [{ op,
+                             name, to, path|data|dataBase64, method, level,
+                             date, comment, mode, extraFields }] }) —
+                             see \`zipnative schema modify-manifest\`
 
 Options:
   --method/--level/--deterministic   Compression for NEW payloads
   --date epoch|now|<ISO>     Timestamp for new payloads (default: DOS epoch)
   --compact                  Canonical rewrite (saveCompact): removed data is
                              truly gone, still no recompression
-  --in-place                 Write back to the input path (tmp file + rename)
+  --in-place                 Write back to the input path (exclusive temp
+                             file + atomic rename)
   --output,  -o              Output path (default: stdout)
+  --overwrite                Replace an existing --output file (default:
+                             refuse, E_IO)
   --dry-run                  Validate edits against the archive; write nothing
 
 Default save is APPEND-ONLY: original bytes verbatim + appended entries + a new
 central directory. Removed/replaced content REMAINS RECOVERABLE (data remanence)
-and 7-Zip's CLI is known to mis-read this layout — pass --compact when either matters.
+and 7-Zip's CLI is known to mis-read this layout — pass --compact when either
+matters.
+
+Every untouched entry is VERIFIED before it is re-emitted verbatim (CRC-32,
+sizes, local header vs central directory — one decompress pass, never a
+recompress): a lying record is refused (E_DATA / E_SECURITY with the entry
+name) instead of being laundered into a clean-looking archive. Encrypted
+entries and entries whose codec has no sync decompressor are copied as-is and
+counted in verifySkipped.
 `;
 
 const VERIFY_USAGE = `\
@@ -299,38 +378,48 @@ zipnative verify — Deep integrity verification in one call
 
 Usage:
   zipnative verify --input <a.zip> [--format json|text] [--strict]
+  zipnative verify <a.zip> [options]
 
 Options:
   --input,   -i       Archive path (default: stdin)
-  --format text|json  (default text; json under --json)
+  --entry,   -e       Verify only the named entries (repeatable): CRC-32, sizes
+                      and local header of each, after the eager structural
+                      check; the report lists them under "selected". An unknown
+                      name is E_NOT_FOUND before any output.
+  --format, -f text|json  (default text; json under --json)
   --strict            Also fail when any diagnostic was emitted
-  --summary           { ok, entries, failed, skipped, diagnostics, error? }
+  --summary           { ok, entries, failed, skipped, diagnostics, selected?,
+                        error? }
   --fields a,b.c      Dot-path projection
 
 Report = zipnative's ZipVerificationReport ({ ok, error, entryCount, entries[
 { name, ok, crcMatch, sizeMatch, localHeaderMatch, skipped? }], diagnostics })
-plus { failed, skipped, strict }. Encrypted entries are honestly "skipped",
-never faked as verified. Exit 1 / E_VERIFY_FAILED when ok is false; the error
-envelope carries zipCode = report.error.code for structural refusals.
+plus { failed, skipped, strict, selected? }. Encrypted entries are honestly
+"skipped", never faked as verified. Exit 1 / E_VERIFY_FAILED when ok is false;
+the error envelope carries zipCode = report.error.code for structural refusals.
+verify proves integrity and structure, NOT path safety: a zip-slip archive with
+valid CRCs is "ok". Gate names with \`inspect --check safe-names,no-symlinks\`
+(or \`extract --dry-run\`) before extracting.
 `;
 
 const CRC32_USAGE = `\
 zipnative crc32 — CRC-32 (IEEE, the ZIP checksum) of files or stdin
 
 Usage:
-  zipnative crc32 [<file>...] [--seed <hex>] [--expect <hex>] [--format text|json]
+  zipnative crc32 [<file>...] [--seed <hex>] [--expect <hex>]
+                  [--format text|json]
 
 Options:
   --input,   -i       File (repeatable); default stdin
   --seed <hex>        Continue a running checksum from this value
   --expect <hex>      Single input: exit 1 / E_CHECK_FAILED on mismatch
-  --format text|json  (default text: "<crc>  <bytes>  <file>")
+  --format, -f text|json  (default text: "<crc>  <bytes>  <file>")
 
 Streams input in 64 KiB chunks — constant memory for any size.
 `;
 
 const INFLATE_USAGE = `\
-zipnative inflate — Decompress a raw DEFLATE (RFC 1951) or registered-codec stream
+zipnative inflate — Decompress a raw DEFLATE (RFC 1951) or codec stream
 
 Usage:
   zipnative inflate [--input <file>] [--output <file>] [--max-output <size>]
@@ -338,6 +427,7 @@ Usage:
 Options:
   --input,   -i       Compressed input (default: stdin)
   --output,  -o       Decompressed output (default: stdout)
+  --overwrite         Replace an existing --output file (default: refuse, E_IO)
   --max-output <size> Hard output bound (default: the effective
                       --max-entry-size, 1 GiB); "none" only for trusted input
   --method deflate|store|<id>   Codec (default deflate; ids via --codec)
@@ -355,18 +445,25 @@ const BATCH_USAGE = `\
 zipnative batch — Batch orchestration
 
 Usage:
-  zipnative batch --input-dir <dir> --output-dir <dir> [--task create] [create flags]
+  zipnative batch --input-dir <dir> --output-dir <dir> [--task create]
+                  [create flags]
   zipnative batch --input-dir <dir> --task verify
-  zipnative batch --manifest <tasks.json> [--continue-on-error] [--allow-codec-load]
+  zipnative batch --manifest <tasks.json> [--continue-on-error]
+                  [--allow-codec-load]
 
 Directory mode:
   --input-dir <dir>   --task create: each immediate subdirectory becomes
-                      <output-dir>/<name>.zip through the full \`create\` command
+                      <output-dir>/<name>.zip through the full \`create\`
+                      command
                       (every create flag is honoured); --task verify: every
                       *.zip in the directory is verified
   --output-dir <dir>  Destination for --task create
-  --concurrency <n>   Parallel workers (default 4)
+  --overwrite         Replace existing <name>.zip files (default: refuse, E_IO)
+  --concurrency <n>   Parallel workers (default 4, max 64)
   --fail-fast         Stop scheduling after the first failure
+  --method/--level/--deterministic/--order/--date/--comment
+                      Forwarded to every create task (see create --help);
+                      any other create flag is forwarded too
 
 Manifest mode:
   --manifest <file>   Ordered pipeline of whitelisted commands (create, list,
@@ -376,9 +473,13 @@ Manifest mode:
                       see \`zipnative schema batch-manifest\`
   --continue-on-error Keep running independent tasks after a failure
   --allow-codec-load  Permit a "codec" flag inside tasks (executes user code)
+  Under --json (or --format json) stdout is ONE batch document: each task's
+  stdout is captured into tasks[i].report (parsed JSON / NDJSON) or .stdout
+  (text) with .stdoutBytes; create/modify/cat/inflate tasks must therefore
+  declare an "output" and stream --cat is refused (exit 2, at validation).
 
 Output:
-  --format text|json  (default text; json under --json)
+  --format, -f text|json  (default text; json under --json)
   --summary           { ok, command, mode, total, succeeded, failed, skipped }
   --fields a,b.c      Dot-path projection
   --dry-run           Validate and print the plan; execute nothing
@@ -401,7 +502,8 @@ Exit 0 when every check passes, 1 otherwise. Always offline.
 `;
 
 const SCHEMA_USAGE = `\
-zipnative schema — Print a JSON Schema (draft 2020-12) or the capability manifest
+zipnative schema — Print a JSON Schema (draft 2020-12) or the capability
+manifest
 
 Usage:
   zipnative schema [<subject>]
@@ -436,13 +538,13 @@ zipnative govern — AI-governance / Human-in-the-Loop (HITL) contract
 
 Usage:
   zipnative govern rules                    Print the human/agent protocol
-  zipnative govern policy [--pretty]        Print the machine-readable policy (JSON)
+  zipnative govern policy [--pretty]        Print the machine-readable policy
   zipnative govern verify-issue <draft.md>  Validate an issue/PR draft
                                             (exit 1 / E_POLICY on violation)
 
 Options (verify-issue):
   --input, -i         Draft path (alternative to the positional; "-" = stdin)
-  --format json|text  Report format (json under --json)
+  --format, -f json|text  Report format (json under --json)
 
 Agents are draftsmen, never autonomous submitters: no runtime dependencies, no
 anti-goals (encryption, other formats, multi-disk, repair, I/O in the engine),
@@ -487,7 +589,7 @@ async function loadCommand(name: string): Promise<CommandFn> {
         case 'govern': return (await import('./commands/govern.js')).govern;
         default:
             return Promise.reject(
-                new CliError(`Unknown command: ${name}. Run zipnative --help for usage.`, 1),
+                new CliError(`Unknown command: ${name}. Run zipnative --help for usage.`, 2, ErrorCode.USAGE),
             );
     }
 }
@@ -496,6 +598,8 @@ async function loadCommand(name: string): Promise<CommandFn> {
 let activeCommand: string | null = null;
 
 async function main(): Promise<void> {
+    installEpipeGuard();
+    installSignalCleanup();
     const argv = process.argv.slice(2);
     const args = parseArgs(argv);
 
@@ -537,8 +641,16 @@ async function main(): Promise<void> {
     const commandName = args.positionals[0];
 
     if (commandName === undefined) {
-        process.stdout.write(USAGE);
-        process.exit(0);
+        if (argv.length === 0) {
+            process.stdout.write(USAGE);
+            process.exit(0);
+        }
+        // Flags but no command (`zipnative --frob`, `zipnative --json`): a usage
+        // error, never the help text with exit 0.
+        throw new CliError(
+            `No command given (got: ${argv.join(' ')}). Run zipnative --help for usage.`,
+            2,
+        );
     }
 
     activeCommand = commandName;
@@ -546,8 +658,7 @@ async function main(): Promise<void> {
     if (hasFlag(args.flags, 'help', 'h')) {
         const usage = COMMAND_USAGE[commandName];
         if (usage === undefined) {
-            process.stderr.write(`Unknown command: ${commandName}. Run zipnative --help for usage.\n`);
-            process.exit(1);
+            throw new CliError(`Unknown command: ${commandName}. Run zipnative --help for usage.`, 2);
         }
         process.stdout.write(usage);
         process.exit(0);
@@ -590,6 +701,10 @@ main().catch((e: unknown) => {
         if (e.message.length > 0) {
             process.stderr.write(e.message + '\n');
         }
+        // The machine-actionable counterpart of the message (same text as the
+        // --json envelope's error.remedy); part of the error, never suppressed.
+        const remedy = remedyFor(e);
+        if (remedy !== undefined) process.stderr.write(`remedy: ${remedy}\n`);
         process.exit(e.exitCode);
     }
     const message = e instanceof Error ? e.message : String(e);

@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "comment": "built from samples/input/manifest/entries.json",
+  "entries": [
+    {
+      "name": "meta/empty.json",
+      "path": "empty.json",
+      "comment": "path is relative to the manifest directory"
+    },
+    {
+      "name": "generated/hello.txt",
+      "data": "hello from inline manifest data\n"
+    },
+    {
+      "name": "generated/pattern-head.bin",
+      "dataBase64": "ByZFZIOiweD/Hj1ce5q52PcWNVRzkrHQ7w4tTGuKqcjnBiVEY4KhwN/+HTxbepm41/YVNFNykbDP7g0sS2qJqA==",
+      "method": "store"
+    },
+    {
+      "name": "bin/run.sh",
+      "data": "#!/bin/sh\necho hi\n",
+      "mode": "0755"
+    },
+    {
+      "name": "empty-dir",
+      "directory": true
+    }
+  ]
+}

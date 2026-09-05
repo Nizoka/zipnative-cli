@@ -8,7 +8,14 @@
 //       type `zipnative list` inside it;
 //   (b) a batch manifest task carrying `codec` is refused unless the batch
 //       invocation itself passes `--allow-codec-load`;
-//   (c) registered codecs are READ-SIDE only — the writer knows store/deflate.
+//   (c) registered codecs serve BOTH sides: the reader for any method, and
+//       the writer for the methods it resolves through the registry (store 0
+//       and deflate 8). A module that registers method 8 therefore replaces
+//       the built-in compressor for `create`/`modify` — even under
+//       `--deterministic`, which pins only the engine's own encoder — and a
+//       `deflateImpl` replaces the sync deflate tier (`tier: "injected"`)
+//       unless `--deterministic` pins the pure encoder. `create --parallel`
+//       workers never see a loaded module (see create.ts).
 //
 // Module contract:
 //   export const codecs: ZipCodec[]            (or `export default ZipCodec[]`)
@@ -24,14 +31,18 @@ import {
     type ZipCodec,
 } from '../core-bridge/index.js';
 import { CliError, ErrorCode } from './error.js';
-import { validatePath } from './io.js';
 
 export interface LoadedCodecModule {
     readonly path: string;
     readonly codecs: readonly { readonly method: number; readonly name: string }[];
     readonly inflateImpl: boolean;
     readonly deflateImpl: boolean;
+    /** Methods the module registers that the WRITER resolves through the registry (0 store, 8 deflate). */
+    readonly overridesBuiltin: readonly number[];
 }
+
+/** Compression methods `createZip` / `createZipModifier` resolve through the codec registry. */
+const WRITER_METHODS: readonly number[] = [0, 8];
 
 const _loaded: LoadedCodecModule[] = [];
 
@@ -56,7 +67,6 @@ function isCodec(value: unknown): value is ZipCodec {
  * declares. Throws `E_INPUT` when the module does not honour the contract.
  */
 export async function loadCodecModule(modulePath: string): Promise<LoadedCodecModule> {
-    validatePath(modulePath);
     const abs = resolve(modulePath);
     let mod: Record<string, unknown>;
     try {
@@ -109,7 +119,8 @@ export async function loadCodecModule(modulePath: string): Promise<LoadedCodecMo
         );
     }
 
-    const loaded: LoadedCodecModule = { path: abs, codecs, inflateImpl, deflateImpl };
+    const overridesBuiltin = codecs.map((c) => c.method).filter((m) => WRITER_METHODS.includes(m));
+    const loaded: LoadedCodecModule = { path: abs, codecs, inflateImpl, deflateImpl, overridesBuiltin };
     _loaded.push(loaded);
     return loaded;
 }

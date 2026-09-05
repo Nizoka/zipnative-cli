@@ -14,10 +14,11 @@
 // encoder so the SHA-256 is identical on every runtime.
 
 import { createReadStream } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { dirname, extname, resolve } from 'node:path';
 import { type ParsedArgs, getStringFlag, getStringFlagAll, hasFlag } from '../utils/args.js';
-import { emitStatus, isDryRun } from '../utils/agent.js';
+import { emitStatus, isDryRun, isJsonMode, progress } from '../utils/agent.js';
+import { loadedCodecModules } from '../utils/codecs.js';
 import {
     activeDeflateTier,
     createZip,
@@ -37,19 +38,27 @@ import {
     readJsonInput,
     readStdin,
     readableToByteSource,
+    unlinkQuiet,
     validatePath,
     writeOutput,
     writeStreamingOutput,
 } from '../utils/io.js';
+import { parseInputSizeFlag } from '../utils/limits.js';
 import { parseByteSize } from '../utils/sizes.js';
 import { walkPaths, type SkippedPath } from '../utils/walk.js';
 import { mapZipError } from '../utils/ziperr.js';
 import {
     commonOptions,
+    externalAttributesFor,
+    parseArchiveComment,
     parseChunkSize,
     parseCompression,
     parseDateFlag,
+    parseExtraFields,
     parseIntFlag,
+    parseIsoDateUtc,
+    parseManifestComment,
+    parseMode,
     parseNameFilter,
 } from '../utils/zipops.js';
 
@@ -74,19 +83,8 @@ interface Plan {
         readonly order?: 'canonical' | 'insertion';
         readonly defaultDate?: Date | 'now';
         readonly compression?: ZipCompressionOptions;
-        readonly comment?: string;
+        readonly comment?: string | Uint8Array;
     };
-}
-
-const S_IFREG = 0o100000;
-const S_IFDIR = 0o040000;
-const DOS_ATTR_DIRECTORY = 0x10;
-
-function externalAttributesFor(mode: number, isDirectory: boolean): number {
-    // setuid / setgid / sticky are never propagated into an archive.
-    const perm = mode & 0o777;
-    if (isDirectory) return (((S_IFDIR | perm) << 16) >>> 0) | DOS_ATTR_DIRECTORY;
-    return ((S_IFREG | perm) << 16) >>> 0;
 }
 
 function parseOrder(args: ParsedArgs): 'canonical' | 'insertion' | undefined {
@@ -117,20 +115,11 @@ function parseStoreExt(args: ParsedArgs): Set<string> {
     return out;
 }
 
-function parseMode(raw: unknown, where: string): number {
-    if (typeof raw === 'number' && Number.isInteger(raw) && raw >= 0 && raw <= 0o7777) return raw;
-    if (typeof raw === 'string' && /^0?[0-7]{3,4}$/.test(raw)) return Number.parseInt(raw, 8);
-    throw new CliError(`${where}: "mode" must be an octal string like "0644" or "0755".`, 1, ErrorCode.INPUT);
-}
-
 function parseManifestDate(raw: unknown, where: string): Date | 'now' | undefined {
     if (raw === undefined) return undefined;
     if (raw === 'epoch') return undefined;
     if (raw === 'now') return 'now';
-    if (typeof raw === 'string') {
-        const d = new Date(raw);
-        if (!Number.isNaN(d.getTime())) return d;
-    }
+    if (typeof raw === 'string') return parseIsoDateUtc(raw, where, false);
     throw new CliError(`${where}: "date" must be "epoch", "now" or an ISO 8601 string.`, 1, ErrorCode.INPUT);
 }
 
@@ -162,8 +151,8 @@ function parseManifestCompression(raw: unknown, where: string): ZipCompressionOp
     return out;
 }
 
-const MANIFEST_KEYS = new Set(['version', 'comment', 'order', 'date', 'compression', 'entries']);
-const ENTRY_KEYS = new Set(['name', 'path', 'data', 'dataBase64', 'directory', 'method', 'level', 'deterministic', 'date', 'comment', 'mode']);
+const MANIFEST_KEYS = new Set(['version', 'comment', 'commentBase64', 'order', 'date', 'compression', 'entries']);
+const ENTRY_KEYS = new Set(['name', 'path', 'data', 'dataBase64', 'directory', 'method', 'level', 'deterministic', 'date', 'comment', 'mode', 'extraFields']);
 
 /** Parse a `create-manifest` document into a plan (paths resolve against the manifest's directory). */
 async function planFromManifest(manifestPath: string, storeExt: Set<string>): Promise<Plan> {
@@ -178,7 +167,7 @@ async function planFromManifest(manifestPath: string, storeExt: Set<string>): Pr
         }
     }
     if (m['version'] !== undefined && m['version'] !== 1) {
-        throw new CliError(`Unsupported manifest version ${String(m['version'])} (expected 1).`, 1, ErrorCode.INPUT);
+        throw new CliError(`Unsupported manifest version ${JSON.stringify(m['version'])} (expected 1).`, 1, ErrorCode.INPUT);
     }
     if (!Array.isArray(m['entries'])) {
         throw new CliError('Manifest "entries" must be an array.', 1, ErrorCode.INPUT);
@@ -188,9 +177,7 @@ async function planFromManifest(manifestPath: string, storeExt: Set<string>): Pr
     if (order !== undefined && order !== 'canonical' && order !== 'insertion') {
         throw new CliError('Manifest "order" must be "canonical" or "insertion".', 1, ErrorCode.INPUT);
     }
-    if (m['comment'] !== undefined && typeof m['comment'] !== 'string') {
-        throw new CliError('Manifest "comment" must be a string.', 1, ErrorCode.INPUT);
-    }
+    const archiveComment = parseManifestComment(m, 'manifest');
 
     const entries: PlannedEntry[] = [];
     const seen = new Set<string>();
@@ -214,7 +201,7 @@ async function planFromManifest(manifestPath: string, storeExt: Set<string>): Pr
         const name = isDirectory && !e['name'].endsWith('/') ? `${e['name']}/` : e['name'];
         const bare = name.endsWith('/') ? name.slice(0, -1) : name;
         if (sanitizeEntryPath(bare) === null) {
-            throw new CliError(`${where}: name "${name}" would not be extractable safely.`, 1, ErrorCode.INPUT, { entryName: name });
+            throw new CliError(`${where}: name "${name}" would not be extractable safely (traversal, absolute, drive/UNC, reserved device name or empty segment); use a plain relative name.`, 1, ErrorCode.INPUT, { entryName: name });
         }
         if (seen.has(name)) {
             throw new CliError(`${where}: duplicate entry name "${name}".`, 1, ErrorCode.INPUT, { entryName: name });
@@ -237,7 +224,6 @@ async function planFromManifest(manifestPath: string, storeExt: Set<string>): Pr
             const abs = resolve(baseDir, e['path']);
             let size = 0;
             try {
-                const { stat } = await import('node:fs/promises');
                 const st = await stat(abs);
                 if (!st.isFile()) throw new CliError(`${where}: "${e['path']}" is not a regular file.`, 1, ErrorCode.INPUT);
                 size = st.size;
@@ -285,14 +271,17 @@ async function planFromManifest(manifestPath: string, storeExt: Set<string>): Pr
         if (e['mode'] !== undefined) {
             options.externalAttributes = externalAttributesFor(parseMode(e['mode'], where), isDirectory);
         }
+        if (e['extraFields'] !== undefined) {
+            options.extraFields = parseExtraFields(e['extraFields'], where);
+        }
         entries.push({ name, isDirectory, source, options });
     }
 
     const archive: Plan['archive'] = {
-        ...(order !== undefined ? { order: order as 'canonical' | 'insertion' } : {}),
+        ...(order !== undefined ? { order } : {}),
         ...(parseManifestDate(m['date'], 'manifest') !== undefined ? { defaultDate: parseManifestDate(m['date'], 'manifest') } : {}),
         ...(m['compression'] !== undefined ? { compression: parseManifestCompression(m['compression'], 'manifest') } : {}),
-        ...(typeof m['comment'] === 'string' ? { comment: m['comment'] } : {}),
+        ...(archiveComment !== undefined ? { comment: archiveComment } : {}),
     };
     return { entries, skipped: [], archive };
 }
@@ -307,6 +296,8 @@ async function planFromPaths(args: ParsedArgs, inputs: readonly string[], stdinN
         followSymlinks: hasFlag(args.flags, 'follow-symlinks'),
         dirEntries: hasFlag(args.flags, 'dir-entries'),
         ...(parseNameFilter(args) !== undefined ? { filter: parseNameFilter(args) } : {}),
+        // `--order insertion` = the argv order (directories walk name-sorted).
+        preserveInputOrder: parseOrder(args) === 'insertion',
     });
     const preserveMode = hasFlag(args.flags, 'preserve-mode');
     const useMtime = hasFlag(args.flags, 'mtime');
@@ -329,10 +320,15 @@ async function planFromPaths(args: ParsedArgs, inputs: readonly string[], stdinN
     if (stdinName !== undefined) {
         const bare = stdinName.replace(/\\/g, '/');
         if (bare.endsWith('/') || sanitizeEntryPath(bare) === null) {
-            throw new CliError(`--stdin-name "${stdinName}" is not a safe entry name.`, 2);
+            throw new CliError(
+                `--stdin-name "${stdinName}" would not be extractable safely (traversal, absolute, reserved device name or empty segment); use a plain relative file name.`,
+                1,
+                ErrorCode.INPUT,
+                { entryName: stdinName },
+            );
         }
         if (entries.some((e) => e.name === bare)) {
-            throw new CliError(`--stdin-name "${stdinName}" collides with an input file name.`, 2);
+            throw new CliError(`--stdin-name "${stdinName}" collides with an input file name; pick another name or drop that input.`, 2);
         }
         const options: { -readonly [K in keyof AddEntryOptions]: AddEntryOptions[K] } = {};
         const c = comments.get(bare);
@@ -341,11 +337,10 @@ async function planFromPaths(args: ParsedArgs, inputs: readonly string[], stdinN
     }
     for (const [name] of comments) {
         if (!entries.some((e) => e.name === name)) {
-            throw new CliError(`--entry-comment names "${name}", which is not an entry of this archive.`, 2);
+            throw new CliError(`--entry-comment names "${name}", which is not an entry of this archive; entry names are relative to --base (run with --dry-run to list them).`, 2);
         }
     }
     if (preserveMode && process.platform === 'win32' && entries.length > 0) {
-        const { progress } = await import('../utils/agent.js');
         progress('warning: --preserve-mode has no effect on Windows (no POSIX mode bits to preserve).');
     }
     return { entries, skipped: [...walk.skipped], archive: {} };
@@ -373,7 +368,7 @@ export async function create(args: ParsedArgs): Promise<void> {
     const minJobSizeRaw = getStringFlag(args.flags, 'min-job-size');
     const minWorkerJobSize = minJobSizeRaw !== undefined ? parseByteSize(minJobSizeRaw, 'min-job-size') : undefined;
     const jobTimeout = parseIntFlag(args, 'job-timeout');
-    const comment = getStringFlag(args.flags, 'comment');
+    const comment = await parseArchiveComment(args);
     const storeExt = parseStoreExt(args);
 
     if (manifestPath !== undefined && (inputs.length > 0 || stdinName !== undefined)) {
@@ -395,10 +390,12 @@ export async function create(args: ParsedArgs): Promise<void> {
     if (!parallel && (workers !== undefined || minWorkerJobSize !== undefined || jobTimeout !== undefined)) {
         throw new CliError('--workers, --min-job-size and --job-timeout require --parallel.', 2);
     }
-    if (!streaming && chunkSize !== undefined) {
-        throw new CliError('--chunk-size requires --stream.', 2);
+    assertCodecModulesHonest(parallel, compression?.deterministic === true, dryRun);
+    // Both --stream and --stdin-name go through writer.stream(), the only
+    // path that chunks its output.
+    if (!streaming && stdinName === undefined && chunkSize !== undefined) {
+        throw new CliError('--chunk-size requires --stream or --stdin-name (the chunked writer).', 2);
     }
-    if (outputPath !== undefined) validatePath(outputPath);
 
     const plan = manifestPath !== undefined
         ? await planFromManifest(manifestPath, storeExt)
@@ -407,7 +404,7 @@ export async function create(args: ParsedArgs): Promise<void> {
     const hasStdin = plan.entries.some((e) => e.source.kind === 'stdin');
     if (hasStdin && !streaming) {
         // Buffered stdin: read it now so toBytes() can size the entry.
-        const data = await readStdin();
+        const data = await readStdin(false, parseInputSizeFlag(args));
         const idx = plan.entries.findIndex((e) => e.source.kind === 'stdin');
         const prev = plan.entries[idx] as PlannedEntry;
         plan.entries[idx] = { ...prev, source: { kind: 'bytes', data: new Uint8Array(data.buffer, data.byteOffset, data.byteLength) } };
@@ -423,7 +420,7 @@ export async function create(args: ParsedArgs): Promise<void> {
         ...(effectiveOrder !== undefined ? { order: effectiveOrder } : {}),
         ...(effectiveDate !== undefined ? { defaultDate: effectiveDate } : {}),
         ...(effectiveCompression !== undefined ? { compression: effectiveCompression } : {}),
-        ...(effectiveComment !== undefined ? { comment: effectiveComment } : {}),
+        ...(typeof effectiveComment === 'string' ? { comment: effectiveComment } : {}),
     };
 
     const files = plan.entries.filter((e) => !e.isDirectory).length;
@@ -433,6 +430,9 @@ export async function create(args: ParsedArgs): Promise<void> {
     const level = effectiveCompression?.level ?? 6;
     const deterministic = effectiveCompression?.deterministic === true;
     const skipped = plan.skipped.map((s) => ({ name: s.name, path: s.path, reason: s.reason }));
+    // Any addStream() entry forces the data-descriptor layout for that entry:
+    // same content as the buffered layout, different bytes (engine contract).
+    const layout: 'buffered' | 'data-descriptor' = streaming || hasStdin ? 'data-descriptor' : 'buffered';
     const summary = {
         command: 'create',
         output: outputPath ?? '-',
@@ -445,12 +445,15 @@ export async function create(args: ParsedArgs): Promise<void> {
         deterministic,
         order: effectiveOrder ?? 'canonical',
         stream: streaming,
+        layout,
         parallel: parallel ? { workers: workers ?? 'auto' } : false,
         skipped,
     };
 
     if (dryRun) {
-        if (!hasFlag(args.flags, 'json')) {
+        // Agent mode (global --json or ZIPNATIVE_JSON): the envelope is the
+        // artefact; the text plan would only pollute stdout.
+        if (!isJsonMode()) {
             const lines = plan.entries.map((e) => {
                 const size = e.source.kind === 'file' ? e.source.size : e.source.kind === 'bytes' ? e.source.data.length : '?';
                 const m = e.isDirectory ? 'dir' : (e.options.compression?.method ?? method);
@@ -464,7 +467,6 @@ export async function create(args: ParsedArgs): Promise<void> {
     }
 
     for (const s of plan.skipped) {
-        const { progress } = await import('../utils/agent.js');
         progress(`warning: skipped ${s.path} (${s.reason})`);
     }
 
@@ -487,6 +489,14 @@ export async function create(args: ParsedArgs): Promise<void> {
         }
     } catch (e) {
         throw mapZipError(e, 'Failed to initialise the archive writer');
+    }
+    // A binary comment (--comment-file / commentBase64) goes through setComment(Uint8Array).
+    if (effectiveComment instanceof Uint8Array) {
+        try {
+            writer.setComment(effectiveComment);
+        } catch (e) {
+            throw mapZipError(e, 'Failed to set the archive comment');
+        }
     }
 
     try {
@@ -516,20 +526,24 @@ export async function create(args: ParsedArgs): Promise<void> {
         throw mapZipError(e, 'Failed to add entries');
     }
 
-    // ── Output
+    // ── Output (an existing file is refused unless --overwrite)
     let bytes = 0;
+    const write = { exclusive: !hasFlag(args.flags, 'overwrite') };
     try {
         if (streaming || hasStdin) {
             bytes = await writeStreamingOutput(
                 writer.stream(chunkSize !== undefined ? { chunkSize } : undefined),
                 outputPath,
+                write,
             );
         } else {
             const out = await writer.toBytes();
-            await writeOutput(out, outputPath);
+            await writeOutput(out, outputPath, write);
             bytes = out.length;
         }
     } catch (e) {
+        if (e instanceof CliError && e.code === ErrorCode.IO) throw e;
+        if (outputPath !== undefined && outputPath !== '-') await unlinkQuiet(outputPath);
         throw mapZipError(e, 'Failed to write archive');
     }
 
@@ -541,6 +555,39 @@ export async function create(args: ParsedArgs): Promise<void> {
         tier: activeDeflateTier(deterministic),
         ...sink.field(),
     });
+}
+
+/**
+ * A `--codec` module can shape what the WRITER emits: a codec registered for
+ * method 0/8 replaces the built-in compressor (the engine resolves those
+ * methods through the registry, even under `--deterministic`), and a
+ * `deflateImpl` replaces the sync deflate tier unless `--deterministic` pins
+ * the engine's encoder. `--parallel` workers run their own bundle and never
+ * see the module, so the pool would compress with node:zlib while the
+ * envelope claimed otherwise — refused (E_USAGE) rather than misreported.
+ * Sequentially, the override is honoured and announced.
+ */
+function assertCodecModulesHonest(parallel: boolean, deterministic: boolean, dryRun: boolean): void {
+    for (const m of loadedCodecModules()) {
+        const overrides = m.overridesBuiltin.map((n) => `method ${n}`).join(', ');
+        if (m.overridesBuiltin.length > 0) {
+            if (parallel) {
+                throw new CliError(
+                    `--parallel cannot honour --codec ${m.path}: it registers ${overrides}, which the writer would use on the main thread while the worker pool compresses with node:zlib. Drop --parallel to use the module, or load a module that does not register method 0/8.`,
+                    2,
+                );
+            }
+            if (!dryRun) {
+                progress(`warning: --codec ${m.path} registers ${overrides} and replaces the built-in compressor for this write (also under --deterministic); the archive bytes depend on that module.`);
+            }
+        }
+        if (m.deflateImpl && parallel && !deterministic) {
+            throw new CliError(
+                `--parallel cannot honour the deflateImpl of --codec ${m.path}: the worker pool compresses with node:zlib and never sees it. Add --deterministic (the pinned encoder in every worker) or drop --parallel.`,
+                2,
+            );
+        }
+    }
 }
 
 /** `--workers` accepts 0 (main thread only), unlike the other positive-int flags. */

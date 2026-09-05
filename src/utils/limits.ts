@@ -66,7 +66,30 @@ export function parseLimitFlags(args: ParsedArgs): Partial<ZipLimits> | undefine
         out[spec.key] = value;
         any = true;
     }
-    return any ? (out as Partial<ZipLimits>) : undefined;
+    return any ? out : undefined;
+}
+
+/**
+ * `--max-input-size <size>` — the bound on a BUFFERED archive read (stdin or
+ * a file loaded whole by list/inspect/cat/extract/verify/modify, buffered
+ * stdin for create, `inflate --sync`). Not a `ZipLimits` key: the engine
+ * never sees the buffer; the CLI owns it. Default 4 GiB; `none` disables.
+ */
+export const MAX_INPUT_SIZE_FLAG = 'max-input-size';
+export const DEFAULT_MAX_INPUT_SIZE = 4 * 1024 ** 3;
+
+export function parseInputSizeFlag(args: ParsedArgs): number {
+    const raw = getStringFlag(args.flags, MAX_INPUT_SIZE_FLAG);
+    if (raw === undefined) return DEFAULT_MAX_INPUT_SIZE;
+    const value = parseByteSize(raw, MAX_INPUT_SIZE_FLAG);
+    if (value === 0) {
+        throw new CliError(`--${MAX_INPUT_SIZE_FLAG} must be positive (use "none" to disable the bound), got "${raw}".`, 2);
+    }
+    if (value === Infinity && !_warnedDisabled) {
+        _warnedDisabled = true;
+        progress(`warning: --${MAX_INPUT_SIZE_FLAG} none disables a security bound — not recommended for untrusted input.`);
+    }
+    return value;
 }
 
 /** Effective limits (defaults merged with overrides) for `doctor` / help text. */

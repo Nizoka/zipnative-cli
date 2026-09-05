@@ -7,8 +7,8 @@
 //   ndjson            one EntryRow per line (RAG / streaming consumers)
 
 import { type ParsedArgs, getStringFlag, hasFlag } from '../utils/args.js';
-import { isJsonMode } from '../utils/agent.js';
-import { createDiagnosticSink } from '../utils/diagnostics.js';
+import { isJsonMode, progress } from '../utils/agent.js';
+import { createDiagnosticSink, formatDiagnosticLine } from '../utils/diagnostics.js';
 import { prepareEngine } from '../utils/engine.js';
 import { CliError } from '../utils/error.js';
 import { rowFromEntry, renderTable, type EntryRow } from '../utils/entryfmt.js';
@@ -16,6 +16,7 @@ import { emitJsonReport, serializeJson } from '../utils/projection.js';
 import { guard } from '../utils/ziperr.js';
 import {
     commonOptions,
+    bytesToHex,
     decodeComment,
     openArchive,
     parseFormat,
@@ -31,6 +32,8 @@ export interface ListReport {
         readonly isZip64: boolean;
         readonly comment: string;
         readonly commentBytes: number;
+        /** Raw comment bytes, hex — present when the archive has a comment. */
+        readonly commentHex?: string;
     };
     readonly entries: readonly EntryRow[];
     readonly diagnostics: readonly unknown[];
@@ -67,10 +70,10 @@ export async function list(args: ParsedArgs): Promise<void> {
     if (validate !== undefined && validate !== 'lazy' && validate !== 'eager') {
         throw new CliError(`--validate must be "lazy" or "eager", got "${validate}".`, 2);
     }
-    const long = hasFlag(args.flags, 'long', 'l');
+    const long = hasFlag(args.flags, 'long');
     const filter = parseNameFilter(args);
 
-    const bytes = await readArchiveBytes(resolveInputPath(args));
+    const bytes = await readArchiveBytes(resolveInputPath(args), args);
     const sink = createDiagnosticSink(format === 'ndjson' && isJsonMode());
     const reader = openArchive(bytes, {
         ...commonOptions(args, sink),
@@ -93,11 +96,10 @@ export async function list(args: ParsedArgs): Promise<void> {
 
     if (format === 'ndjson') {
         for (const row of rows) process.stdout.write(serializeJson(row, false) + '\n');
-        // No wrapper to carry diagnostics: surface them as text on stderr.
+        // No wrapper to carry diagnostics: surface them as text on stderr
+        // (progress lines — suppressed by --quiet like every other text line).
         if (isJsonMode()) {
-            for (const d of sink.diagnostics) {
-                process.stderr.write(`${d.severity}: [${d.code}]${d.entryName !== undefined ? ` entry '${d.entryName}':` : ''} ${d.message}\n`);
-            }
+            for (const d of sink.diagnostics) progress(formatDiagnosticLine(d));
         }
         return;
     }
@@ -109,6 +111,7 @@ export async function list(args: ParsedArgs): Promise<void> {
             isZip64: reader.isZip64,
             comment: decodeComment(reader.comment),
             commentBytes: reader.comment.length,
+            ...(reader.comment.length > 0 ? { commentHex: bytesToHex(reader.comment) } : {}),
         },
         entries: rows,
         diagnostics: sink.diagnostics,

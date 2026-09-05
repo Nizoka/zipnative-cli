@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "build",
+      "command": "create",
+      "flags": {
+        "input": "text",
+        "output": "out/text.zip",
+        "deterministic": true,
+        "comment": "batch pipeline"
+      }
+    },
+    {
+      "id": "check",
+      "command": "verify",
+      "flags": {
+        "input": "@build",
+        "format": "json",
+        "summary": true
+      }
+    },
+    {
+      "id": "gate",
+      "command": "inspect",
+      "flags": {
+        "input": "@build",
+        "check": [
+          "deterministic",
+          "has=text/readme.txt"
+        ],
+        "format": "json",
+        "summary": true
+      }
+    },
+    {
+      "id": "unpack",
+      "command": "extract",
+      "flags": {
+        "input": "@build",
+        "output-dir": "out/unpacked",
+        "overwrite": true
+      }
+    },
+    {
+      "id": "sum",
+      "command": "crc32",
+      "flags": {
+        "input": "out/unpacked/text/readme.txt",
+        "format": "json"
+      }
+    }
+  ]
+}
