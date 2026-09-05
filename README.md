@@ -915,6 +915,11 @@ is printed — not recommended for untrusted input). Limits are also flat keys i
 
 #### Process contract
 
+- **Config discovery is upward.** `.zipnativerc.json` is looked up from the working directory
+  to the filesystem root; an unattended run should pass `--no-config` (or `--config <file>`).
+  Explicit flags win over the file; the `codec` key is refused from any config file.
+- **stderr is line-oriented.** Under `--json` the envelope is the last line that starts with
+  `{`; the other lines are text (progress, NDJSON diagnostics) that `--quiet` removes.
 - **Flags and positionals are order-independent.** A boolean flag never consumes the next
   token, so `zipnative --json list a.zip` and `zipnative list --long a.zip` both work;
   `--flag=false|0|no|off` is the explicit off form. Combined short flags (`-lq`) are refused
@@ -964,6 +969,14 @@ is printed — not recommended for untrusted input). Limits are also flat keys i
 
 `VERAZIP_REQUIRED`, `VERAZIP_REPORT_DIR` and `VERAZIP_TOOLS` are read by the veraZIP scripts
 only, never by the CLI.
+
+#### Locale
+
+Output is English and locale-independent by design: no environment locale is read, no
+`Intl` / `toLocale*` formatting is used, numbers are ASCII digits, dates are ISO-8601 UTC
+(`--date` is UTC wall-clock), sizes use binary units. Messages are not translated and are
+not part of the contract — branch on `error.code` / `error.zipCode` / `error.remedy`. Entry
+names are emitted as UTF-8 bytes (on PowerShell set `[Console]::OutputEncoding` to UTF-8).
 
 #### Memory
 
@@ -1056,6 +1069,17 @@ See [AGENTS.md](AGENTS.md) and the [`samples/agent/`](samples/agent) scripts.
   veraZIP gate runs on Linux and Windows for every pull request.
 
 See [SECURITY.md](SECURITY.md) for the full security policy and vulnerability disclosure procedure.
+
+## Versioning and stability
+
+Semantic Versioning over an explicit public surface: the 15 commands and their flags, exit
+codes `0`/`1`/`2`/`130`/`143`, the 13 `E_*` classes and the `ZIP_*` → `E_*` mapping, the
+envelope and report keys, the `schema` subjects and `schema manifest` shape, the
+`.zipnativerc.json` keys, the `ZIPNATIVE_*` variables, and the bytes written under
+`--deterministic` (a byte change is semver-major). Message wording, text layout and key order
+are not a contract. A flag is deprecated in a minor release (it keeps working and prints one
+`warning:` line) and removed no earlier than the next major. Details in
+[CONTRIBUTING.md](CONTRIBUTING.md#versioning-stability-and-deprecation).
 
 ## Getting Help
 

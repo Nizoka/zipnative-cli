@@ -13,7 +13,10 @@ npm ci
 ### Requirements
 
 - Node.js >= 22
-- npm >= 9
+- npm >= 10 for development (`npm ci`); publishing needs npm >= 11.5.1 (Trusted Publishing)
+  and happens only in `publish.yml`, which resolves the newest Node for that reason. There is
+  deliberately no `packageManager` field: Corepack would force every Node 22 contributor to
+  fetch npm 11 for a step nobody runs locally.
 
 ## Build
 
@@ -214,7 +217,9 @@ is reviewable): required checks `ci (22)`, `ci (24)`, `windows (22)`, `windows (
 no force-push; no bypass for anyone, maintainers included. None of the required workflows
 carries a `paths:` filter (a filtered workflow that does not run reports "Expected — Waiting for
 status" and blocks the merge). Every action is pinned to a commit SHA and Dependabot keeps the
-pins current.
+pins current. Alongside the ruleset the maintainers enable **secret scanning with push
+protection** and Dependabot alerts (repository → Security → Code security); no npm token exists
+anywhere — publishing is OIDC-only.
 
 ## Code Style
 
@@ -305,6 +310,34 @@ samples/                   # .sh + .ps1 per command (41 demos), run-all.js (73 j
 - `--codec` is the only dynamic import of user code — argv only, refused from config files, gated in manifests, reported truthfully when it shapes the writer. Do not add another.
 - No command may open a socket. Do not add a network path.
 - A CycloneDX **SBOM** is generated and attested in CI and attached to each release; the generator is build-time only — do not add it as a runtime dependency.
+
+## Versioning, stability and deprecation
+
+The package follows [Semantic Versioning](https://semver.org/). The **public surface** guarded
+by it:
+
+- the 15 command names and their flags and positional forms (the `COMMANDS` table in
+  `src/commands/completion.ts`);
+- exit codes `0` / `1` / `2` and the signal exits `130` / `143`;
+- the 13 `E_*` class names and the `ZIP_*` → `E_*` mapping (`src/utils/ziperr.ts`);
+- the envelope keys (`ok`, `command`, `error.{code, message, zipCode, entryName, detail,
+  remedy}`, the status-envelope fields listed in AGENTS.md §2), the JSON report shapes and
+  their schema `$id`s, the `schema manifest` shape and `docs/data/errors.json`;
+- the `.zipnativerc.json` keys and the `ZIPNATIVE_*` environment variables;
+- the bytes written under `--deterministic` — the engine's frozen contract; a byte change is
+  semver-**major** (`ai-governance.json` → `deterministic_bytes_are_semver_major`).
+
+**Not a contract:** message wording (including the engine's), text-mode layout, progress and
+warning lines, `--help` prose, JSON key order.
+
+**Rules:** a new field, flag, schema subject or `E_*` class is a **minor**; a rename, removal,
+exit-code change or byte change is a **major**; an engine major bumps the CLI major.
+
+**Deprecation ladder:** (1) a minor release keeps the old flag working and calls
+`deprecate(name, replacement)` (`src/utils/error.ts`: one `warning:` line per process, never
+suppressed) and lists it under `### Deprecated` in the changelog with a strike-through in the
+README table; (2) at least one further minor of overlap; (3) removal in the next major, after
+which the flag is an ordinary `E_USAGE`.
 
 ## Commit Convention
 

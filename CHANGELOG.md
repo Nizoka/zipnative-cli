@@ -20,6 +20,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   engine's `sanitizeEntryPath()` — the pre-extraction gate `verify` cannot give (it proves
   integrity and structure, not path safety; its help and the docs now say so). (review Q2-F3)
 
+### Documentation
+
+- Agent docs (AGENTS.md, llms.txt, README, knowledge base): the two rules an unattended caller
+  must encode — hermetic invocation (`--no-config` / `--config`; `.zipnativerc.json` is
+  discovered cwd-upward) and line-by-line stderr parsing (the envelope is the last `{` line).
+  (review Q2-F4)
+- CONTRIBUTING: "Versioning, stability and deprecation" (the public surface, the semver rules,
+  the `deprecate()` ladder) with a README summary; the branch-protection paragraph names
+  secret scanning / push protection; npm requirements and the deliberate absence of
+  `packageManager`. README: the locale stance (English, locale-independent output).
+
 ### Fixed
 
 - `--quiet` now also silences the text diagnostics that `list --format ndjson` and

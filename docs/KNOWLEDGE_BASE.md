@@ -219,7 +219,7 @@ Every command that writes a **file** refuses an existing one with `E_IO` "Refusi
 The CLI owns stderr, so the core never gets to use its deduplicated `console.warn` default. Every core call receives a sink's `onDiagnostic`; the engine's handler contract delivers *every* diagnostic (no dedup), and the CLI sink **deduplicates by `(code, entryName)`** — an entry read twice in one run yields one row — and presents:
 
 - **text mode** — one `warning: [CODE] entry 'x': message` / `info: [CODE] message` line on stderr, suppressed by `--quiet`;
-- **`--json`** — nothing per diagnostic; the collected `DiagnosticRow[]` travels in the success envelope (`emitStatus({ …, ...sink.field() })`) or in the stdout report's `diagnostics` field (`list` / `inspect` / `verify` / `stream --format json`); NDJSON outputs print them as text on stderr; `verify` renders the engine report's own list (`diagnosticRows`) unchanged;
+- **`--json`** — nothing per diagnostic; the collected `DiagnosticRow[]` travels in the success envelope (`emitStatus({ …, ...sink.field() })`) or in the stdout report's `diagnostics` field (`list` / `inspect` / `verify` / `stream --format json`); NDJSON outputs print them as text on stderr (`progress()` lines, so `--quiet` suppresses them); `verify` renders the engine report's own list (`diagnosticRows`) unchanged;
 - **`--strict`** — handled by the core (`strict: true`): the first diagnostic throws `ZIP_STRICT_DIAGNOSTIC` → `E_CHECK_FAILED` before any output byte. `verify --strict` is the exception: the report is printed, then the verdict is `E_VERIFY_FAILED` when any diagnostic was emitted.
 
 Which command can raise which of the 11 codes is tabulated in §5.
@@ -608,6 +608,8 @@ The CLI is designed so an autonomous AI agent — or any program — can drive i
 | **exit code** | `0` success · `1` runtime / check failure · `2` usage · `130` / `143` after SIGINT / SIGTERM (in-flight outputs removed). Unchanged in every mode. |
 
 ### Process contract
+
+Two rules an unattended caller must encode: **run hermetically** — `.zipnativerc.json` is discovered cwd-upward to the filesystem root, so pass `--no-config` (or `--config <file>`); and **parse stderr line by line** — under `--json` the envelope is the last line starting with `{`, every other line is text (progress, NDJSON diagnostics) that `--quiet` removes, never an envelope.
 
 - **Flags are order-independent.** `zipnative --json list a.zip` and `zipnative list a.zip --json` are the same invocation; a boolean flag never consumes the next token; `--flag=false` is the explicit off form; combined short flags (`-lq`) are refused (exit 2).
 - **Environment.** The global flags set `ZIPNATIVE_JSON`, `ZIPNATIVE_DRY_RUN`, `ZIPNATIVE_QUIET`, `ZIPNATIVE_STRICT`, `ZIPNATIVE_PURE_CODECS` (`=1`) for the process, and the same variables are honoured when the caller sets them (`ZIPNATIVE_JSON=1 zipnative extract …` is agent mode without a flag; `create --dry-run` / `extract --dry-run` print no text plan under it either). `ZIPNATIVE_DEBUG=1` prints stack traces. Colour: `NO_COLOR`, `FORCE_COLOR`, `TERM`. The veraZIP scripts read `VERAZIP_REQUIRED`, `VERAZIP_REPORT_DIR`, `VERAZIP_TOOLS`.

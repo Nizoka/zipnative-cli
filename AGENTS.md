@@ -52,6 +52,18 @@ process reads back, and you may set them yourself instead of passing the flag:
 (`VERAZIP_REQUIRED`, `VERAZIP_REPORT_DIR`, `VERAZIP_TOOLS` are read by the
 conformance scripts only.)
 
+**Hermetic invocation.** `.zipnativerc.json` is discovered by walking up from the
+working directory to the filesystem root, so an unattended call inherits whatever a
+parent directory holds (`extract: { overwrite: true }`, `max-ratio: none`, …). Always
+pass `--no-config` (or `--config <file>`) in a pipeline; an explicit flag always wins
+over the file, and the `codec` key is refused from any config file.
+
+**Parse stderr line by line.** Under `--json` stderr is newline-delimited and may still
+carry text lines (`warning:` progress for skipped entries, `--codec` / `none` notices,
+NDJSON diagnostics, `ZIPNATIVE_DEBUG` traces). Each line is either a JSON object
+(starts with `{`) or text; the envelope is the *last line that starts with `{`*. Never
+`JSON.parse` the whole stream. `--quiet` removes the text lines, never an envelope.
+
 **Edge cases you can rely on.**
 
 - No input path and stdin is a terminal → `E_USAGE` (exit 2) "No input: pass
@@ -502,6 +514,8 @@ the first failing task's `E_*` code and `zipCode`.
 - **Offline, always.** No command opens a socket — not `doctor`, not `govern`, not
   `schema`, not `--json`. The engine never touches the network either. There is nothing
   to allow-list.
+- **Run hermetically.** `--no-config` (or `--config <file>`) in every unattended call —
+  `.zipnativerc.json` discovery walks up to the filesystem root (§1).
 - **The sink is guarded three times.** The engine sanitises every path
   (`sanitizeEntryPath`) and refuses hostile shapes; the CLI re-proves lexically that each
   destination stays under `--output-dir` (`safeJoin`); then, before creating a directory,

@@ -21,6 +21,12 @@ machine-readable JSON manifest run `zipnative schema manifest`.
   quietly), `1` runtime/check failure, `2` usage error (bad flags, unknown
   command, a refused combination), `130` / `143` interrupted by SIGINT /
   SIGTERM (the files being written at that moment are removed).
+- **Hermetic**: `.zipnativerc.json` is discovered cwd-upward to the root; pass
+  `--no-config` (or `--config <file>`) in unattended runs. Flags win over config;
+  `codec` is refused from config.
+- **stderr, line by line**: under `--json` the envelope is the last line that
+  starts with `{`; other lines are text (progress, NDJSON diagnostics) and
+  `--quiet` removes them, never an envelope.
 - **Flags and positionals are order-independent**: a boolean flag never
   consumes the next token (`zipnative --json list a.zip` works);
   `--flag=false` is the explicit off form; combined short flags (`-lq`) are
