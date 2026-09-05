@@ -142,8 +142,8 @@
   counts, `E_*` codes, the `ZIP_*` mapping, the 77-export map, the limits table, the schema
   subjects, USAGE ↔ `COMMANDS` ↔ README / KB tables, status enum ↔ `emitStatus` callers,
   CITATION version, environment variables, tarball paths).
-- **1184 tests, 57 files, all green** (1175 passed + 9 platform-conditional skips).
-  Coverage statements 96.27 / branches 92.36 / functions 97.91 / lines 96.81 against the
+- **1201 tests, 61 files, all green** (1192 passed + 9 platform-conditional skips).
+  Coverage statements 96.32 / branches 92.52 / functions 97.93 / lines 96.91 against the
   enforced thresholds 93 / 88 / 94 / 93.
 
 ## The audit pass, batch by batch
@@ -197,7 +197,7 @@ Every command below was run on this branch at HEAD and must be green again on th
 
 - `npm run typecheck:all` — clean
 - `npm run lint` — 0 errors (`src/` and `tests/`)
-- `npm run test:coverage` — 1175 passed + 9 skipped across 57 files; statements 96.27 /
+- `npm run test:coverage` — 1192 passed + 9 skipped across 61 files; statements 96.27 /
   branches 92.36 / functions 97.91 / lines 96.81 ≥ thresholds 93 / 88 / 94 / 93
 - `npm run build` — `dist/cli.cjs` only (no `dist/cli.js`, no `.d.ts`, no maps)
 - `npx vitest run tests/integration/built-binary-smoke.test.ts` — post-build spawn suite
@@ -206,7 +206,7 @@ Every command below was run on this branch at HEAD and must be green again on th
 - `npm run validate:zip` — **33 PASS + 4 XFAIL, 0 FAIL**, exit 0 (level 1 with the tools
   present; `VERAZIP_REQUIRED=1` in CI)
 - `node samples/run-all.js` — 73/73
-- `npm pack --dry-run` — 7 files, 116.7 kB packed
+- `npm pack --dry-run` — 7 files, 120.0 kB packed
 - `npm audit --audit-level=high` — 0 vulnerabilities
 - Built-binary drive: `create --deterministic` → `inspect --check deterministic` →
   `verify --strict` → `extract` → `crc32` cross-check; `create --parallel` resolves the worker

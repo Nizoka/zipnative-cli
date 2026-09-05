@@ -999,7 +999,7 @@ npm run build
 # Test (56 vitest files, in-process; one spawn smoke test against the built binary)
 npm test
 npm run test:coverage       # thresholds: statements 93 / branches 88 / functions 94 / lines 93
-                            # (measured 96.27 / 92.36 / 97.91 / 96.81 on 2026-09-05; never lower them — add tests)
+                            # (measured 96.32 / 92.52 / 97.93 / 96.91 on 2026-09-05; never lower them — add tests)
 
 # Conformance (veraZIP — ISO/IEC 21320-1:2015; level 0 needs no external tool)
 npm run corpus:zip          # write the 37-archive corpus to test-output/zip/ (needs a prior build)

@@ -286,11 +286,11 @@ Considerations" (A-11, A-25, A-36, B-21, B-39, B-42) and one was rejected (B-44)
 - **Tests** — in-process vitest suites (stdout / stderr captured) for every command and
   util, an engine-independent raw ZIP builder for adversarial shapes (never committed — see
   `tests/fixtures/README.md`), two foreign-provenance interop fixtures, one spawn smoke test
-  against the built binary, and `tests/docs/consistency.test.ts`. 1184 tests across
-  57 files (1175 passed + 9 platform-conditional skips; statements 96.27 %, branches 92.36 %,
-  functions 97.91 %, lines 96.81 %).
+  against the built binary, and `tests/docs/consistency.test.ts`. 1201 tests across
+  61 files (1192 passed + 9 platform-conditional skips; statements 96.32 %, branches 92.52 %,
+  functions 97.93 %, lines 96.91 %).
 - **Package** — the CJS bin only (`dist/cli.cjs`; no ESM build, no `.d.ts`, no source maps):
-  7 files, 116.7 kB packed.
+  7 files, 120.0 kB packed.
 - **Samples** — 41 dual-shell demos (`.sh` + `.ps1`) under `samples/`, plus `samples/agent/`
   and `samples/run-all.js` (73 jobs); every sample runs offline.
 
