@@ -197,8 +197,8 @@ Every command below was run on this branch at HEAD and must be green again on th
 
 - `npm run typecheck:all` — clean
 - `npm run lint` — 0 errors (`src/` and `tests/`)
-- `npm run test:coverage` — 1192 passed + 9 skipped across 61 files; statements 96.27 /
-  branches 92.36 / functions 97.91 / lines 96.81 ≥ thresholds 93 / 88 / 94 / 93
+- `npm run test:coverage` — 1192 passed + 9 skipped across 61 files; statements 96.32 /
+  branches 92.52 / functions 97.93 / lines 96.91 ≥ thresholds 93 / 88 / 94 / 93
 - `npm run build` — `dist/cli.cjs` only (no `dist/cli.js`, no `.d.ts`, no maps)
 - `npx vitest run tests/integration/built-binary-smoke.test.ts` — post-build spawn suite
   (`--help`, `--version --json`, `schema manifest` = 15 commands, EPIPE exit 0, SIGINT exit 130
