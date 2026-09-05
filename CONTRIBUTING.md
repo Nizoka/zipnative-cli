@@ -345,9 +345,11 @@ which the flag is an ordinary `E_USAGE`.
 ## Commit Convention
 
 Use [Conventional Commits](https://www.conventionalcommits.org/). The `commitlint` job checks every
-commit subject of a PR and the PR title against
-`^(feat|fix|docs|chore|test|refactor|ci|build|perf|style|revert)(\([a-z0-9,./ -]+\))?!?: .+` (at most 100
-characters):
+commit subject of a PR (base to PR head, merges excluded) and the PR title against
+`^(feat|fix|docs|chore|test|refactor|ci|build|perf|style|revert)(\([a-z0-9,./ -]+\))?!?: .+`. The PR
+title is checked because a squash merge turns it into the commit subject. A subject longer than
+100 characters (commitlint's default) only draws a warning — Conventional Commits itself sets no
+limit, and GitHub truncates the display at 72. Types:
 - `feat:` new feature
 - `fix:` bug fix
 - `chore:` maintenance (deps, CI, governance)

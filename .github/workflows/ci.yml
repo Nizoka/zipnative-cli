@@ -228,8 +228,13 @@ jobs:
           persist-credentials: false
 
       - name: Check commit subjects and the PR title
+        # The PR title is checked because a squash merge turns it into the commit subject.
+        # The range ends at the PR head, not at the synthetic "Merge X into Y" commit GitHub
+        # builds for refs/pull/N/merge. Format is blocking; length over 100 is advisory
+        # (Conventional Commits sets no limit — 100 is commitlint's default header length).
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_TITLE: ${{ github.event.pull_request.title }}
         shell: bash
         run: |
@@ -237,9 +242,9 @@ jobs:
           fail=0
           check() {
             local subject="$1"
-            if [ "${#subject}" -gt 100 ]; then echo "too long (> 100): $subject"; fail=1; fi
-            if ! printf '%s' "$subject" | grep -Eq "$pattern"; then echo "not Conventional Commits: $subject"; fail=1; fi
+            if [ "${#subject}" -gt 100 ]; then echo "::warning::subject longer than 100 characters: $subject"; fi
+            if ! printf '%s' "$subject" | grep -Eq "$pattern"; then echo "::error::not Conventional Commits: $subject"; fail=1; fi
           }
-          while IFS= read -r subject; do check "$subject"; done < <(git log --format=%s "$BASE_SHA..HEAD")
+          while IFS= read -r subject; do check "$subject"; done < <(git log --no-merges --format=%s "$BASE_SHA..$HEAD_SHA")
           check "$PR_TITLE"
           exit "$fail"

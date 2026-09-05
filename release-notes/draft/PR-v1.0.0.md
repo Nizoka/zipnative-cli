@@ -1,5 +1,7 @@
-# v1.0.0 — the agent-grade ZIP CLI on zipnative 1.0.0
+# feat: zipnative-cli 1.0.0 — the agent-grade ZIP CLI on zipnative 1.0.0
 
+> **PR title:** the line above, verbatim — the `commitlint` job requires a Conventional
+> Commits subject for the title because a squash merge turns it into the commit subject.
 > **Branch:** release/v1.0.0 → main
 > **Type:** First release (establishes the 1.x machine contract: envelopes, `E_*` classes, the `ZIP_*` mapping, exit codes, schema subjects)
 > **zipnative:** ^1.0.0 (sole runtime dependency; external in the bundle, `zipnative/worker` included)
