@@ -55,6 +55,7 @@ describe('loadCodecModule', () => {
             codecs: [{ method: 99, name: 'xor' }],
             inflateImpl: false,
             deflateImpl: false,
+            overridesBuiltin: [],
         });
         const codec = getCodec(99);
         expect(codec).not.toBeNull();
@@ -152,5 +153,17 @@ describe('loadCodecModule', () => {
         const before = loadedCodecModules().length;
         await expectInput(loadCodecModule(await writeModule(`export const codecs = [{ method: 5, name: 'x' }];`)), /invalid codec/);
         expect(loadedCodecModules().length).toBe(before);
+    });
+});
+
+describe('overridesBuiltin', () => {
+    it('lists the writer-resolved methods (0, 8) a module registers, and nothing else', async () => {
+        const file = await writeModule(`export const codecs = [
+            { method: 8, name: 'my-deflate', compressSync(d) { return d; }, decompressSync(d) { return d; } },
+            { method: 0, name: 'my-store', compressSync(d) { return d; } },
+            { method: 42, name: 'exotic', decompressSync(d) { return d; } },
+        ];`);
+        const loaded = await loadCodecModule(file);
+        expect(loaded.overridesBuiltin).toEqual([8, 0]);
     });
 });

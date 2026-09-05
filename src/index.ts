@@ -39,8 +39,11 @@ Global options (any command):
                     inflate, create --stream) are not bounded by it.
   --pure-codecs     Skip node:zlib and run the pure-TS codec tier
   --codec <module>  Load an ESM module exporting { codecs: ZipCodec[] } and
-                    register it (read-side only). Executes user code: only
-                    accepted on the command line, never from a config file.
+                    register it. A codec for method 0/8 (or a deflateImpl)
+                    also drives the writer — reported in the envelope tier
+                    and a warning; refused by create --parallel. Executes
+                    user code: only accepted on the command line, never
+                    from a config file.
 `;
 
 const USAGE = `\
@@ -137,7 +140,10 @@ Output modes:
                            (ZIP_UNSUPPORTED_ZIP64_STREAMING)
   --chunk-size <size>      Chunk size for --stream (default 65536)
   --parallel               Deflate across a worker pool (zipnative/worker);
-                           byte-identical to the sequential writer per tier
+                           byte-identical to the sequential writer per tier.
+                           Refused (exit 2) with a --codec module registering
+                           method 0/8, or a deflateImpl without --deterministic:
+                           workers never see the module
   --workers <n>            Worker count (default: cores-1, max 8; 0 = main thread)
   --min-job-size <size>    Minimum entry size dispatched to a worker (default 32k)
   --job-timeout <ms>       Per-job cap before inline fallback (default 60000)
@@ -314,6 +320,12 @@ Options:
 Default save is APPEND-ONLY: original bytes verbatim + appended entries + a new
 central directory. Removed/replaced content REMAINS RECOVERABLE (data remanence)
 and 7-Zip's CLI is known to mis-read this layout — pass --compact when either matters.
+
+Every untouched entry is VERIFIED before it is re-emitted verbatim (CRC-32, sizes,
+local header vs central directory — one decompress pass, never a recompress): a
+lying record is refused (E_DATA / E_SECURITY with the entry name) instead of being
+laundered into a clean-looking archive. Encrypted entries and entries whose codec
+has no sync decompressor are copied as-is and counted in verifySkipped.
 `;
 
 const VERIFY_USAGE = `\

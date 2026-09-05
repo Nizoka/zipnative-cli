@@ -680,7 +680,7 @@ See [AGENTS.md](../AGENTS.md) for the agent-facing summary.
 | Path traversal via `--input`, `--output`, `--output-dir`, `--from-manifest`, `--manifest`, `--base`, `--codec`, `--config`, manifest values | `validatePath()` rejects `../` before any filesystem access |
 | Memory exhaustion via large JSON | 50 MB cap before `JSON.parse` (manifests, drafts); 1 MB cap on `.zipnativerc.json`; 1 000-task cap on batch manifests |
 | Unbounded raw DEFLATE (`inflate`) | Mandatory output bound (`--max-output`, default = the effective `--max-entry-size`) |
-| Executing user code | `--codec` is the only dynamic import: argv only, refused from config files, refused inside manifests without `--allow-codec-load`, read-side only |
+| Executing user code | `--codec` is the only dynamic import: argv only, refused from config files, refused inside manifests without `--allow-codec-load`; a method-0/8 override or `deflateImpl` is reported (`tier`, `warning:`) and refused under `create --parallel` |
 | Hostile config file planted in a repository | The `codec` key is refused; config only supplies flag defaults and never runs code |
 | Data remanence in `modify` | Documented on `--help` and printed as an `info:` line; `--compact` is the deletion path |
 | Forward-reader trust (`stream`) | Attribute-dependent flags refused; `trust: "local-headers-only"` in every JSON output; a `warning:` line at start |

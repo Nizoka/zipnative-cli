@@ -156,7 +156,7 @@ Official CLI for the [`zipnative`](https://github.com/Nizoka/zipnative) engine �
 | Determinism verdict | ✅ | `inspect` reports `determinism.{epochTimestamps, canonicalOrder, utf8Flags, noDataDescriptors, canonicalLayout, deterministic}` — `deterministic` is reproducibility (epoch + canonical order + UTF-8 flags), `canonicalLayout` is the buffered layout (a `--stream` archive is reproducible but not canonical); `--check deterministic` / `--check canonical-layout` gate them |
 | **Not supported** | | |
 | Encryption (read or write) | ❌ | Policy of the engine in 1.x (ZipCrypto is broken); encrypted entries are detected, listed and refused with `ZIP_UNSUPPORTED_ENCRYPTION` |
-| Other archive formats / exotic codecs | ❌ | No 7z, RAR, tar, gzip; the read-side codec registry (`--codec`) is the extension point |
+| Other archive formats / exotic codecs | ❌ | No 7z, RAR, tar, gzip; the codec registry (`--codec`) is the extension point — a registered method is readable everywhere and, for methods 0/8, also drives the writer |
 | Multi-disk / spanned archives | ❌ | Detected and refused (`ZIP_UNSUPPORTED_MULTI_DISK`) |
 | Archive repair / salvage | ❌ | Structural problems are reported (`verify`), never guessed at |
 | Streamed entries > 4 GiB | ❌ | `create --stream` refuses them (`ZIP_UNSUPPORTED_ZIP64_STREAMING`); buffered entries are fully Zip64 |
@@ -808,7 +808,7 @@ passing check is **necessary but not sufficient** — the human review gate alwa
 | `--max-comment-bytes <size>` | `65535` | Maximum comment length in bytes (CWE-400) |
 | `--max-cd-bytes <size>` | `268435456` (256 MiB) | Maximum central-directory size in bytes (CWE-400) |
 | `--pure-codecs` | — | Skip `node:zlib` and run the pure-TS codec tier |
-| `--codec <module>` | — | Load an ESM module exporting `{ codecs: ZipCodec[] }` (and optional `inflateImpl` / `deflateImpl`) and register it — **read-side only**. Executes user code: only accepted on the command line, never from a config file |
+| `--codec <module>` | — | Load an ESM module exporting `{ codecs: ZipCodec[] }` (and optional `inflateImpl` / `deflateImpl`) and register it. A registered codec serves the reader for its method **and the writer** when it registers store (0) or deflate (8) — such a module replaces the built-in compressor for `create`/`modify` even under `--deterministic`; `deflateImpl` replaces the sync deflate tier (`tier: "injected"`) unless `--deterministic` pins the engine's encoder; `create --parallel` refuses either (workers cannot see the module). Executes user code: only accepted on the command line, never from a config file |
 | `--version --json` | — | `{ name, version, zipnative }` — machine-readable version output |
 | `--help`, `-h` | — | Global or per-command usage |
 
@@ -860,7 +860,9 @@ See [AGENTS.md](AGENTS.md) and the [`samples/agent/`](samples/agent) scripts.
   listed and reported as `skipped` by `verify`; reads fail with `ZIP_UNSUPPORTED_ENCRYPTION`.
 - **`--codec` is a trust boundary** — the CLI's only dynamic import of user code (same trust as
   `node -r`): argv only, refused from `.zipnativerc.json`, refused inside a `batch --manifest`
-  without `--allow-codec-load`, and read-side only.
+  without `--allow-codec-load`. A module that registers method 0/8 or exports `deflateImpl`
+  also shapes what `create`/`modify` write — the envelope's `tier` and a `warning:` line say so,
+  and `create --parallel` refuses to run with such a module loaded.
 - **Path traversal protection** — every file-path argument (and every path inside a manifest)
   is validated against `../` before filesystem access.
 - **JSON size cap** — manifests, drafts and JSON inputs are capped at 50 MB before parsing

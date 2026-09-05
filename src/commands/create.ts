@@ -17,7 +17,8 @@ import { createReadStream } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { dirname, extname, resolve } from 'node:path';
 import { type ParsedArgs, getStringFlag, getStringFlagAll, hasFlag } from '../utils/args.js';
-import { emitStatus, isDryRun } from '../utils/agent.js';
+import { emitStatus, isDryRun, progress } from '../utils/agent.js';
+import { loadedCodecModules } from '../utils/codecs.js';
 import {
     activeDeflateTier,
     createZip,
@@ -345,7 +346,6 @@ async function planFromPaths(args: ParsedArgs, inputs: readonly string[], stdinN
         }
     }
     if (preserveMode && process.platform === 'win32' && entries.length > 0) {
-        const { progress } = await import('../utils/agent.js');
         progress('warning: --preserve-mode has no effect on Windows (no POSIX mode bits to preserve).');
     }
     return { entries, skipped: [...walk.skipped], archive: {} };
@@ -395,6 +395,7 @@ export async function create(args: ParsedArgs): Promise<void> {
     if (!parallel && (workers !== undefined || minWorkerJobSize !== undefined || jobTimeout !== undefined)) {
         throw new CliError('--workers, --min-job-size and --job-timeout require --parallel.', 2);
     }
+    assertCodecModulesHonest(parallel, compression?.deterministic === true, dryRun);
     if (!streaming && chunkSize !== undefined) {
         throw new CliError('--chunk-size requires --stream.', 2);
     }
@@ -467,7 +468,6 @@ export async function create(args: ParsedArgs): Promise<void> {
     }
 
     for (const s of plan.skipped) {
-        const { progress } = await import('../utils/agent.js');
         progress(`warning: skipped ${s.path} (${s.reason})`);
     }
 
@@ -548,6 +548,39 @@ export async function create(args: ParsedArgs): Promise<void> {
         tier: activeDeflateTier(deterministic),
         ...sink.field(),
     });
+}
+
+/**
+ * A `--codec` module can shape what the WRITER emits: a codec registered for
+ * method 0/8 replaces the built-in compressor (the engine resolves those
+ * methods through the registry, even under `--deterministic`), and a
+ * `deflateImpl` replaces the sync deflate tier unless `--deterministic` pins
+ * the engine's encoder. `--parallel` workers run their own bundle and never
+ * see the module, so the pool would compress with node:zlib while the
+ * envelope claimed otherwise — refused (E_USAGE) rather than misreported.
+ * Sequentially, the override is honoured and announced.
+ */
+function assertCodecModulesHonest(parallel: boolean, deterministic: boolean, dryRun: boolean): void {
+    for (const m of loadedCodecModules()) {
+        const overrides = m.overridesBuiltin.map((n) => `method ${n}`).join(', ');
+        if (m.overridesBuiltin.length > 0) {
+            if (parallel) {
+                throw new CliError(
+                    `--parallel cannot honour --codec ${m.path}: it registers ${overrides}, which the writer would use on the main thread while the worker pool compresses with node:zlib. Drop --parallel to use the module, or load a module that does not register method 0/8.`,
+                    2,
+                );
+            }
+            if (!dryRun) {
+                progress(`warning: --codec ${m.path} registers ${overrides} and replaces the built-in compressor for this write (also under --deterministic); the archive bytes depend on that module.`);
+            }
+        }
+        if (m.deflateImpl && parallel && !deterministic) {
+            throw new CliError(
+                `--parallel cannot honour the deflateImpl of --codec ${m.path}: the worker pool compresses with node:zlib and never sees it. Add --deterministic (the pinned encoder in every worker) or drop --parallel.`,
+                2,
+            );
+        }
+    }
 }
 
 /** `--workers` accepts 0 (main thread only), unlike the other positive-int flags. */

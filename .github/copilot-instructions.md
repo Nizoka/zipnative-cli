@@ -77,7 +77,7 @@ src/
 │   ├── limits.ts      # Eight --max-* flags → Partial<ZipLimits>, pre-validated (ZIP_LIMIT_INVALID unreachable)
 │   ├── diagnostics.ts # Core diagnostic sink: text warning lines | collected into the --json envelope
 │   ├── engine.ts      # prepareEngine(): --codec modules (argv only) + node:zlib tier unless --pure-codecs
-│   ├── codecs.ts      # `--codec <module>` loader — the ONLY dynamic import of user code (read-side only)
+│   ├── codecs.ts      # `--codec <module>` loader — the ONLY dynamic import of user code
 │   ├── zipops.ts      # Shared flag → core-option translation (open, compression, common options)
 │   ├── glob.ts        # Dependency-free `/`-separated glob matcher for --include / --exclude
 │   ├── walk.ts        # Deterministic filesystem walk for `create` (sorted, symlinks skipped, sanitizeEntryPath)
@@ -143,7 +143,9 @@ src/
   named `--skip-*` / `--allow-*`, are argv-explicit, and are documented in SECURITY.md.
 - `--codec <module>` executes user code: honoured from **argv only** — `.zipnativerc.json`
   refuses the key, and a `batch` manifest task carrying `codec` is refused unless the
-  invocation passes `--allow-codec-load`. Registered codecs are read-side only.
+  invocation passes `--allow-codec-load`. A codec registered for method 0/8 (or a
+  `deflateImpl`) also drives the writer: reported via `tier` / a `warning:` line, and
+  refused by `create --parallel` (its workers cannot see the module).
 - Path flags (`--input`, `--output`, `--output-dir`, manifest paths, `batch` positionals)
   are validated against `..` traversal (`validatePath`) before any read/write.
 - Input JSON (manifests, drafts) is capped at 50 MB before `JSON.parse`; a `batch` manifest

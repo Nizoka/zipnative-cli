@@ -18,11 +18,18 @@ import { dirname, resolve } from 'node:path';
 import { type ParsedArgs, getStringFlag, getStringFlagAll, hasFlag } from '../utils/args.js';
 import { emitStatus, isDryRun, progress } from '../utils/agent.js';
 import {
+    METHOD_DEFLATE,
+    METHOD_STORE,
+    activeDeflateTier,
     createZipModifier,
+    getCodec,
     sanitizeEntryPath,
     type AddEntryOptions,
+    type EntryVerification,
     type ZipCompressionOptions,
+    type ZipEntry,
     type ZipModifierOptions,
+    type ZipReader,
 } from '../core-bridge/index.js';
 import { createDiagnosticSink } from '../utils/diagnostics.js';
 import { prepareEngine } from '../utils/engine.js';
@@ -231,10 +238,11 @@ export async function modify(args: ParsedArgs): Promise<void> {
         throw new CliError('modify requires at least one edit: --add, --replace, --remove, --rename, --add-dir, --comment or --from-manifest.', 2);
     }
 
-    // ── Open + wrap.
+    // ── Open (eagerly: overlap / CD↔LFH structure is checked before any
+    // edit, since untouched records are re-emitted verbatim) + wrap.
     const bytes = await readArchiveBytes(inputPath, args);
     const sink = createDiagnosticSink();
-    const reader = openArchive(bytes, commonOptions(args, sink));
+    const reader = openArchive(bytes, { ...commonOptions(args, sink), validate: 'eager' });
     const modifierOptions: ZipModifierOptions = {
         ...commonOptions(args, sink),
         ...(compression !== undefined ? { compression } : {}),
@@ -285,6 +293,16 @@ export async function modify(args: ParsedArgs): Promise<void> {
         applied.push({ op: 'comment', name: comment });
     }
 
+    // ── Verify every entry that will be re-emitted VERBATIM. The modifier
+    // copies untouched records byte for byte, so a CRC lie, a size lie or a
+    // local header that disagrees with the central directory would otherwise
+    // be laundered into a fresh, canonical-looking archive. One decompress
+    // pass over the survivors (never a recompress); no opt-out (an opt-out
+    // would write unverified bytes). Runs under --dry-run too.
+    const gone = new Set(ordered.filter((e) => e.op === 'remove' || e.op === 'replace').map((e) => e.name));
+    const { verified, verifySkipped } = verifySurvivors(reader, gone);
+    const tier = activeDeflateTier(compression?.deterministic === true);
+
     const destructive = ordered.some((e) => e.op === 'remove' || e.op === 'replace' || e.op === 'rename');
     const layout = compact ? 'compact' : 'append-only';
     if (!compact && destructive && !dryRun) {
@@ -292,7 +310,7 @@ export async function modify(args: ParsedArgs): Promise<void> {
     }
 
     if (dryRun) {
-        emitStatus({ command: 'modify', dryRun: true, output: outputPath ?? '-', edits: applied, layout, ...sink.field() });
+        emitStatus({ command: 'modify', dryRun: true, output: outputPath ?? '-', edits: applied, layout, verified, verifySkipped, tier, ...sink.field() });
         return;
     }
 
@@ -332,6 +350,71 @@ export async function modify(args: ParsedArgs): Promise<void> {
         edits: applied,
         layout,
         changed,
+        verified,
+        verifySkipped,
+        tier,
         ...sink.field(),
     });
+}
+
+/**
+ * Cross-check (CRC, sizes, local header) every central-directory entry the
+ * save will copy verbatim. Encrypted entries and entries whose registered
+ * codec has no sync decompressor cannot be verified and are counted as
+ * skipped — exactly the two `skipped` reasons of `verifyZip`. An entry with
+ * no registered codec at all is refused (E_UNSUPPORTED via the engine).
+ */
+function verifySurvivors(reader: ZipReader, gone: ReadonlySet<string>): { verified: number; verifySkipped: number } {
+    let verified = 0;
+    let verifySkipped = 0;
+    let entries: ZipEntry[];
+    try {
+        entries = [...reader.entries()];
+    } catch (e) {
+        throw mapZipError(e, 'Failed to read the central directory');
+    }
+    for (const entry of entries) {
+        if (gone.has(entry.name)) continue;
+        const custom = entry.compressionMethod !== METHOD_STORE && entry.compressionMethod !== METHOD_DEFLATE;
+        const codec = custom ? getCodec(entry.compressionMethod) : null;
+        if (entry.isEncrypted || (custom && codec !== null && codec.decompressSync === undefined)) {
+            verifySkipped++;
+            continue;
+        }
+        let v: EntryVerification;
+        try {
+            v = reader.verifyEntry(entry);
+        } catch (e) {
+            throw mapZipError(e, `Cannot verify entry "${entry.name}" before re-emitting it`, entry.name);
+        }
+        if (!v.ok) throw survivorFailure(entry, v);
+        verified++;
+    }
+    return { verified, verifySkipped };
+}
+
+function survivorFailure(entry: ZipEntry, v: EntryVerification): CliError {
+    const tail = 'it would be re-emitted verbatim — refusing to launder it. Run `zipnative verify` for the full report, or --remove/--replace the entry.';
+    if (!v.localHeaderMatch) {
+        return new CliError(
+            `Entry "${entry.name}": local header disagrees with the central directory; ${tail}`,
+            1,
+            ErrorCode.SECURITY,
+            { entryName: entry.name, zipCode: 'ZIP_CD_LFH_MISMATCH' },
+        );
+    }
+    if (!v.crcMatch) {
+        return new CliError(
+            `Entry "${entry.name}": CRC-32 does not match its central-directory record; ${tail}`,
+            1,
+            ErrorCode.DATA,
+            { entryName: entry.name, zipCode: 'ZIP_CRC_MISMATCH' },
+        );
+    }
+    return new CliError(
+        `Entry "${entry.name}": decompressed size does not match its central-directory record; ${tail}`,
+        1,
+        ErrorCode.DATA,
+        { entryName: entry.name, zipCode: 'ZIP_SIZE_MISMATCH' },
+    );
 }

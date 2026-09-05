@@ -126,7 +126,7 @@ socket. Zero extra runtime dependencies. Node.js ≥ 22.
   warning; values are pre-validated so `ZIP_LIMIT_INVALID` is unreachable from the CLI.
 - **`--pure-codecs`** (skip `node:zlib`, run the pure-TS tier) and **`--codec <module>`** (load
   an ESM module exporting `{ codecs: ZipCodec[] }` and optional `inflateImpl` / `deflateImpl`;
-  read-side only; the CLI's only dynamic import of user code — argv only, refused from config
+  the CLI's only dynamic import of user code — argv only, refused from config
   files, refused inside manifests without `--allow-codec-load`).
 
 #### Agent surface

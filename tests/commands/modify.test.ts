@@ -8,6 +8,7 @@ import { modify } from '../../src/commands/modify.js';
 import { parseArgs } from '../../src/utils/args.js';
 import { ErrorCode } from '../../src/utils/error.js';
 import { createZip, openZip, type ZipEntry } from '../../src/core-bridge/index.js';
+import { buildRawZip } from '../helpers/raw-zip-builder.js';
 
 // ── Local capture helper ──────────────────────────────────────────────
 
@@ -558,5 +559,91 @@ describe('modify', () => {
         expect(snapshot(new Uint8Array(await readFile(input))).names).toEqual(['a.txt', 'b.txt']);
         const leftovers = (await readdir(dir)).filter((n) => n.startsWith('in.zip.tmp-') && n !== `in.zip.tmp-${process.pid}`);
         expect(leftovers).toEqual([]);
+    });
+});
+
+// ── Survivor verification (audit B-03) ──────────────────────────────
+// Untouched records are re-emitted verbatim, so every one of them is
+// cross-checked (CRC, sizes, local header) before the save — a lying record
+// must never be laundered into a clean-looking archive.
+
+describe('modify verifies what it re-emits', () => {
+    let dir = '';
+    const enc = new TextEncoder();
+
+    afterEach(async () => {
+        vi.restoreAllMocks();
+        delete process.env['ZIPNATIVE_JSON'];
+        if (dir !== '') await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+        dir = '';
+    });
+
+    async function archive(bytes: Uint8Array): Promise<{ input: string; output: string }> {
+        dir = await mkdtemp(join(tmpdir(), 'zipnative-cli-'));
+        const input = join(dir, 'hostile.zip');
+        await writeFile(input, bytes);
+        return { input, output: join(dir, 'out.zip') };
+    }
+
+    it('a CRC lie on an untouched entry is E_DATA / ZIP_CRC_MISMATCH naming the entry, nothing written — also under --dry-run', async () => {
+        const { input, output } = await archive(buildRawZip([
+            { name: 'a.txt', data: enc.encode('AAAA-alpha'), crcOverride: 0xdeadbeef },
+            { name: 'b.txt', data: enc.encode('BBBB-bravo') },
+        ]));
+        const r = await run(() => modify(parseArgs(['--input', input, '--output', output, '--remove', 'b.txt'])));
+        expect(r.error).toMatchObject({ code: ErrorCode.DATA, exitCode: 1, zipCode: 'ZIP_CRC_MISMATCH', entryName: 'a.txt' });
+        expect((r.error as Error).message).toMatch(/re-emitted verbatim/);
+        expect(existsSync(output)).toBe(false);
+        const dry = await run(() => modify(parseArgs(['--input', input, '--output', output, '--remove', 'b.txt', '--dry-run'])));
+        expect(dry.error).toMatchObject({ code: ErrorCode.DATA, zipCode: 'ZIP_CRC_MISMATCH' });
+    });
+
+    it('removing or replacing the lying entry makes the edit acceptable; the envelope counts the verified survivors', async () => {
+        process.env['ZIPNATIVE_JSON'] = '1';
+        const { input, output } = await archive(buildRawZip([
+            { name: 'a.txt', data: enc.encode('AAAA-alpha'), crcOverride: 0xdeadbeef },
+            { name: 'b.txt', data: enc.encode('BBBB-bravo') },
+            { name: 'c.txt', data: enc.encode('CCCC-charlie'), method: 8 },
+        ]));
+        const r = await run(() => modify(parseArgs(['--input', input, '--output', output, '--remove', 'a.txt'])));
+        expect(r.error).toBeUndefined();
+        expect(envelope(r.err)).toMatchObject({ ok: true, command: 'modify', verified: 2, verifySkipped: 0, tier: expect.stringMatching(/^(node-zlib|pure|injected|pure-pinned)$/) as string });
+        expect(snapshot(new Uint8Array(await readFile(output))).names).toEqual(['b.txt', 'c.txt']);
+        const rep = await run(() => modify(parseArgs(['--input', input, '--output', join(dir, 'rep.zip'), '--replace', `a.txt=${join(dir, 'hostile.zip')}`])));
+        expect(rep.error).toBeUndefined();
+        expect(envelope(rep.err)).toMatchObject({ verified: 2 });
+    });
+
+    it('a local header that disagrees with the central directory is E_SECURITY / ZIP_CD_LFH_MISMATCH', async () => {
+        const { input, output } = await archive(buildRawZip([
+            { name: 'a.txt', data: enc.encode('AAAA-alpha'), lfhMethodOverride: 8 },
+            { name: 'b.txt', data: enc.encode('BBBB-bravo') },
+        ]));
+        const r = await run(() => modify(parseArgs(['--input', input, '--output', output, '--add-dir', 'new'])));
+        expect(r.error).toMatchObject({ code: ErrorCode.SECURITY, zipCode: 'ZIP_CD_LFH_MISMATCH', entryName: 'a.txt' });
+        expect(existsSync(output)).toBe(false);
+    });
+
+    it('overlapping entry ranges are refused at open (eager validation) with ZIP_ENTRY_OVERLAP', async () => {
+        const { input, output } = await archive(buildRawZip([
+            { name: 'a.txt', data: enc.encode('AAAA-alpha-AAAA-alpha') },
+            { name: 'b.txt', data: enc.encode('BB'), localHeaderOffsetOverride: 10 },
+        ]));
+        const r = await run(() => modify(parseArgs(['--input', input, '--output', output, '--add-dir', 'new'])));
+        expect(r.error).toMatchObject({ code: ErrorCode.SECURITY, zipCode: 'ZIP_ENTRY_OVERLAP' });
+        expect(existsSync(output)).toBe(false);
+    });
+
+    it('an encrypted untouched entry cannot be verified: copied as-is and counted in verifySkipped', async () => {
+        process.env['ZIPNATIVE_JSON'] = '1';
+        const { input, output } = await archive(buildRawZip([
+            { name: 'secret.bin', data: enc.encode('opaque-ciphertext-bytes'), flags: 0x0001 },
+            { name: 'plain.txt', data: enc.encode('plain') },
+        ]));
+        const r = await run(() => modify(parseArgs(['--input', input, '--output', output, '--add-dir', 'new'])));
+        expect(r.error).toBeUndefined();
+        expect(envelope(r.err)).toMatchObject({ verified: 1, verifySkipped: 1 });
+        const names = snapshot(new Uint8Array(await readFile(output))).names;
+        expect(names).toEqual(expect.arrayContaining(['secret.bin', 'plain.txt', 'new/']));
     });
 });

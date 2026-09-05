@@ -395,8 +395,9 @@ zipCode? }`, and exit 1 carries the first failing task's `E_*` code.
   streams you cannot seek; prefer `list` / `extract` on a complete file.
 - **`--codec` runs user code.** It is the CLI's only dynamic import (same trust as
   `node -r`): argv only, refused from `.zipnativerc.json`, refused inside a
-  `batch --manifest` without `--allow-codec-load`, read-side only. Never pass a module
-  you did not author or vet.
+  `batch --manifest` without `--allow-codec-load`. A module registering method 0/8 or
+  exporting `deflateImpl` also shapes what `create`/`modify` write (`tier`, `warning:`);
+  `create --parallel` refuses it. Never pass a module you did not author or vet.
 - **No encryption.** Encrypted entries are detected, listed and reported as `skipped`
   by `verify`; reads fail with `ZIP_UNSUPPORTED_ENCRYPTION`. Do not expect a password
   flag.
