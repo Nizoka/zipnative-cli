@@ -30,7 +30,8 @@ machine-readable JSON manifest run `zipnative schema manifest`.
 - **`--json`** (agent mode): success emits `{ "ok": true, "command", … }` on
   stderr (create, modify, extract, stream, cat, inflate, crc32); failure emits
   `{ "ok": false, "command", "error": { "code", "message", "zipCode"?,
-  "entryName"?, "detail"? } }`. `list`, `inspect`, `verify`, `doctor` and
+  "entryName"?, "detail"?, "remedy"? } }` — `remedy` is the CLI flag or command
+  that lifts the refusal (`--skip-unsafe (extract, stream)`, `--overwrite`, …). `list`, `inspect`, `verify`, `doctor` and
   `batch` put their JSON report on stdout instead.
 - **Stable error classes** (branch on `error.code`, not on the message):
   `E_USAGE, E_INPUT, E_PARSE, E_IO, E_SECURITY, E_DATA, E_LIMIT,`

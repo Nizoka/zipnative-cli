@@ -143,7 +143,7 @@ describe('docs/data/core-exports.json ↔ KNOWLEDGE_BASE §8 ↔ the bridge', ()
 describe('docs/data/errors.json ↔ ZIP_TO_CLI ↔ AGENTS.md', () => {
     const data = JSON.parse(read('docs/data/errors.json')) as {
         zipnativeVersion: string;
-        errors: { code: string; cli: { code: string; exitCode: number } }[];
+        errors: { code: string; cli: { code: string; exitCode: number; remedy?: string } }[];
         diagnostics: { code: string }[];
     };
 
@@ -157,10 +157,11 @@ describe('docs/data/errors.json ↔ ZIP_TO_CLI ↔ AGENTS.md', () => {
         expect(data.diagnostics.map((d) => d.code).sort()).toEqual([...ZIP_DIAGNOSTIC_CODES].sort());
     });
 
-    it('the cli mapping of every code matches ZIP_TO_CLI', () => {
+    it('the cli mapping (and remedy) of every code matches ZIP_TO_CLI and ZIP_REMEDY', () => {
         for (const e of data.errors) {
             const [code, exitCode] = ZIP_TO_CLI[e.code as keyof typeof ZIP_TO_CLI];
-            expect(e.cli, e.code).toEqual({ code, exitCode });
+            const remedy = Object.hasOwn(ZIP_REMEDY, e.code) ? ZIP_REMEDY[e.code as keyof typeof ZIP_REMEDY] : undefined;
+            expect(e.cli, e.code).toEqual({ code, exitCode, ...(remedy !== undefined ? { remedy } : {}) });
         }
     });
 
@@ -225,7 +226,35 @@ describe('agent-surface lists', () => {
 // codes and shapes that live in the source; pin them too.
 
 import { GLOBAL_FLAGS, PATH_FLAGS } from '../../src/commands/completion.js';
+import { ZIP_REMEDY } from '../../src/utils/agent.js';
 import { BOOLEAN_FLAGS } from '../../src/utils/flags.js';
+import { readdirSync, statSync } from 'node:fs';
+
+/** Every .ts file under a directory, recursively. */
+function walkTs(dir: string): string[] {
+    const out: string[] = [];
+    for (const name of readdirSync(dir)) {
+        const p = join(dir, name);
+        if (statSync(p).isDirectory()) out.push(...walkTs(p));
+        else if (p.endsWith('.ts')) out.push(p);
+    }
+    return out;
+}
+
+describe('the bridge is the only door to the engine', () => {
+    it('no src/ file outside core-bridge references the zipnative package, except the package.json metadata probe in version.ts', () => {
+        for (const file of walkTs(join(ROOT, 'src'))) {
+            const rel = file.slice(ROOT.length + 1).replace(/\\/g, '/');
+            if (rel === 'src/core-bridge/index.ts') continue;
+            const text = readFileSync(file, 'utf8');
+            // Module specifiers only (import/require); the word "zipnative" in
+            // help text or completion scripts is not an engine reference.
+            for (const m of text.matchAll(/(?:from|require\(|import\()\s*['"](zipnative(?:\/[^'"]*)?)['"]/g)) {
+                expect(`${rel}: ${m[1]}`).toBe(rel === 'src/utils/version.ts' ? `${rel}: zipnative/package.json` : `${rel}: (no zipnative reference allowed)`);
+            }
+        }
+    });
+});
 
 const indexSrc = read('src/index.ts');
 

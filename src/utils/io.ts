@@ -46,7 +46,10 @@ function inputTooLarge(observed: number, configured: number, what: string): CliE
         `${what} exceeds --max-input-size (${configured} bytes; observed ${observed}). Raise the bound only for trusted input, or use a streaming command (stream, crc32, inflate, create --stream).`,
         1,
         ErrorCode.LIMIT,
-        { detail: { limit: 'maxInputSize', configured, observed } },
+        {
+            detail: { limit: 'maxInputSize', configured, observed },
+            remedy: '--max-input-size <size> (trusted input only) | a streaming command (stream, crc32, inflate, create --stream)',
+        },
     );
 }
 
@@ -167,7 +170,7 @@ export function overwriteRefused(filePath: string, entryName?: string): CliError
         `Refusing to overwrite existing file ${filePath} (pass --overwrite).`,
         1,
         ErrorCode.IO,
-        entryName !== undefined ? { entryName } : undefined,
+        { remedy: '--overwrite', ...(entryName !== undefined ? { entryName } : {}) },
     );
 }
 
@@ -375,7 +378,10 @@ export async function captureStdout<T>(fn: () => Promise<T>, maxBytes: number = 
                 `Captured task output exceeds ${maxBytes} bytes; give the task an --output file instead of writing its artefact to stdout.`,
                 1,
                 ErrorCode.LIMIT,
-                { detail: { limit: 'captureBytes', configured: maxBytes, observed: total } },
+                {
+                    detail: { limit: 'captureBytes', configured: maxBytes, observed: total },
+                    remedy: 'an "output" flag on the task (the artefact goes to a file, not stdout)',
+                },
             );
             const done = typeof encoding === 'function' ? encoding : cb;
             if (typeof done === 'function') (done as (e: Error) => void)(overflow);

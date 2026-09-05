@@ -17,7 +17,7 @@ import { join, basename, dirname, extname, resolve } from 'node:path';
 import { type ParsedArgs, getStringFlag, hasFlag } from '../utils/args.js';
 import { assertJsonSizeLimit, captureStdout } from '../utils/io.js';
 import { CliError, ErrorCode, type ErrorCodeValue } from '../utils/error.js';
-import { isJsonMode, isDryRun, progress } from '../utils/agent.js';
+import { isJsonMode, isDryRun, progress, remedyFor } from '../utils/agent.js';
 import { selectFields, serializeJson, parseFieldList } from '../utils/projection.js';
 import { style } from '../utils/colors.js';
 import { verifyZip } from '../core-bridge/index.js';
@@ -117,7 +117,7 @@ interface ManifestTaskResult {
     readonly command: string;
     readonly ok: boolean;
     readonly output?: string;
-    readonly error?: { readonly code: ErrorCodeValue; readonly message: string; readonly zipCode?: string };
+    readonly error?: { readonly code: ErrorCodeValue; readonly message: string; readonly zipCode?: string; readonly remedy?: string };
     readonly skipped?: true;
     /** JSON mode: the task's stdout, parsed (object, or array of objects for NDJSON). */
     readonly report?: unknown;
@@ -283,7 +283,12 @@ async function runManifest(manifestPath: string, args: ParsedArgs): Promise<void
                 id: task.id,
                 command: task.command,
                 ok: false,
-                error: { code: cli.code, message: cli.message, ...(cli.zipCode !== undefined ? { zipCode: cli.zipCode } : {}) },
+                error: {
+                    code: cli.code,
+                    message: cli.message,
+                    ...(cli.zipCode !== undefined ? { zipCode: cli.zipCode } : {}),
+                    ...(remedyFor(cli) !== undefined ? { remedy: remedyFor(cli) } : {}),
+                },
             });
             progress(`${label} … ${style('failed', 'red')} (${cli.message})`);
             if (!continueOnError) aborted = true;

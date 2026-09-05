@@ -1,6 +1,6 @@
 import { parseArgs, hasFlag, getStringFlag } from './utils/args.js';
 import { CliError, ErrorCode } from './utils/error.js';
-import { isJsonMode, emitJsonError } from './utils/agent.js';
+import { isJsonMode, emitJsonError, remedyFor } from './utils/agent.js';
 import { loadConfig, applyConfigDefaults } from './utils/config.js';
 import { installSignalCleanup } from './utils/inflight.js';
 import { installEpipeGuard } from './utils/io.js';
@@ -697,6 +697,10 @@ main().catch((e: unknown) => {
         if (e.message.length > 0) {
             process.stderr.write(e.message + '\n');
         }
+        // The machine-actionable counterpart of the message (same text as the
+        // --json envelope's error.remedy); part of the error, never suppressed.
+        const remedy = remedyFor(e);
+        if (remedy !== undefined) process.stderr.write(`remedy: ${remedy}\n`);
         process.exit(e.exitCode);
     }
     const message = e instanceof Error ? e.message : String(e);

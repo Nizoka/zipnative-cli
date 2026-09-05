@@ -139,9 +139,10 @@ describe('schema', () => {
         };
         expect(doc.kind).toBe('error-codes');
         expect(Object.keys(doc.zipnativeToCli)).toHaveLength(39);
-        expect(doc.zipnativeToCli['ZIP_PATH_TRAVERSAL']).toEqual({ code: 'E_SECURITY', exitCode: 1 });
+        expect(doc.zipnativeToCli['ZIP_PATH_TRAVERSAL']).toEqual({ code: 'E_SECURITY', exitCode: 1, remedy: '--skip-unsafe (extract, stream)' });
+        expect(doc.zipnativeToCli['ZIP_ENTRY_OVERLAP']).toEqual({ code: 'E_SECURITY', exitCode: 1 });
         expect(doc.zipnativeToCli['ZIP_INVALID_OPTION']).toEqual({ code: 'E_USAGE', exitCode: 2 });
-        expect(doc.zipnativeToCli['ZIP_LIMIT_EXCEEDED']).toEqual({ code: 'E_LIMIT', exitCode: 1 });
+        expect(doc.zipnativeToCli['ZIP_LIMIT_EXCEEDED']).toEqual({ code: 'E_LIMIT', exitCode: 1, remedy: '--max-<bound> <size> (the bound is named in detail.limit; trusted input only)' });
         expect(doc.cli.map((c) => c.code)).toEqual(E_CODES);
         expect(doc.cli.find((c) => c.code === 'E_USAGE')?.exitCode).toBe(2);
         expect(doc.cli.filter((c) => c.code !== 'E_USAGE').every((c) => c.exitCode === 1)).toBe(true);

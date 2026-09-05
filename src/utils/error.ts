@@ -47,6 +47,11 @@ export interface CliErrorOptions {
     readonly entryName?: string;
     /** Code-specific structured detail (limit/configured/observed, feature, CRCs…). */
     readonly detail?: ErrorDetail;
+    /**
+     * The CLI flag(s) or command that lift this refusal (e.g. `--overwrite`),
+     * for refusals that have no `zipCode` to look up in the remedy table.
+     */
+    readonly remedy?: string;
 }
 
 /**
@@ -66,6 +71,7 @@ export class CliError extends Error {
     public readonly zipCode: string | undefined;
     public readonly entryName: string | undefined;
     public readonly detail: ErrorDetail | undefined;
+    public readonly remedy: string | undefined;
 
     constructor(message: string, exitCode = 1, code?: ErrorCodeValue, options?: CliErrorOptions) {
         super(message);
@@ -75,6 +81,7 @@ export class CliError extends Error {
         this.zipCode = options?.zipCode;
         this.entryName = options?.entryName;
         this.detail = options?.detail;
+        this.remedy = options?.remedy;
     }
 }
 

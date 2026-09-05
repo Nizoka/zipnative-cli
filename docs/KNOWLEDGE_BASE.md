@@ -81,7 +81,7 @@ src/
 │   ├── ziperr.ts         # ZIP_TO_CLI (39 codes → E_*/exit), diagnostics list, mapZipError / guard
 │   ├── version.ts        # bundle-safe CLI + engine version resolution (name-guarded package.json probe)
 │   ├── governance.ts     # AI-governance policy + AGENT_RULES text + pure draft validator (pinned to .github/ by a test)
-│   └── error.ts          # CliError { exitCode, code, zipCode?, entryName?, detail? } + 13 E_* codes
+│   └── error.ts          # CliError { exitCode, code, zipCode?, entryName?, detail?, remedy? } + 13 E_* codes
 └── core-bridge/
     └── index.ts          # The ONLY import point of `zipnative` / `zipnative/worker` (77-export ledger)
 
@@ -131,7 +131,7 @@ src/index.ts
     ├── verify   → verifyZip(bytes, { limits }) | eager open + verifyEntry(name) per --entry → report on stdout → exit verdict
     │
     └── every core call is wrapped: guard('context', () => core())  ← src/utils/ziperr.ts
-                                     → CliError { code: E_*, zipCode: ZIP_*, entryName, detail }
+                                     → CliError { code: E_*, zipCode: ZIP_*, entryName, detail, remedy }
 main().catch → emitJsonError (under --json) | message on stderr → process.exit(exitCode)
 ```
 
@@ -186,7 +186,7 @@ const reader = guard('Failed to open archive', () => openZip(bytes, options));
 // or: try { … } catch (e) { throw mapZipError(e, 'Failed to add entries', entryName); }
 ```
 
-`mapZipError` returns `CliError`s unchanged, maps `ZipError` subclasses (class → `E_*`, `err.code` → `zipCode`, `entryName` from `ZipSecurityError` / `ZipDataError` or the caller's fallback, `detail` from `ZipLimitError` / `ZipUnsupportedError` / CRC-bearing `ZipDataError`), maps Node `ErrnoException`s (`ENOENT`, `EACCES`, …) to `E_IO`, maps the unwrapped node:zlib errors of the sync tier (`Z_DATA_ERROR` / `Z_NEED_DICT` → `ZIP_DEFLATE_CORRUPT`, `Z_BUF_ERROR` → `ZIP_DEFLATE_TRUNCATED`, both `E_PARSE`, so the class never depends on the codec tier), and everything else to `E_RUNTIME`. Exit code conventions: `0` success, `1` runtime / check failure, `2` usage; `130` / `143` after SIGINT / SIGTERM (§5). Two CLI-side rules keep the classes honest: an unsafe **entry name** that arrives as data (`modify --add/--rename/--add-dir`, `create --stdin-name`, manifest names) is `E_INPUT` (exit 1) with `entryName`, and a malformed **flag** is `E_USAGE` (exit 2). Every CLI-side `E_NOT_FOUND` (`cat`, `inspect --entry`, `stream --cat`, `verify --entry`) carries `zipCode: "ZIP_ENTRY_NOT_FOUND"` and names the remedy.
+`mapZipError` returns `CliError`s unchanged, maps `ZipError` subclasses (class → `E_*`, `err.code` → `zipCode`, `entryName` from `ZipSecurityError` / `ZipDataError` or the caller's fallback, `detail` from `ZipLimitError` / `ZipUnsupportedError` / CRC-bearing `ZipDataError`), maps Node `ErrnoException`s (`ENOENT`, `EACCES`, …) to `E_IO`, maps the unwrapped node:zlib errors of the sync tier (`Z_DATA_ERROR` / `Z_NEED_DICT` → `ZIP_DEFLATE_CORRUPT`, `Z_BUF_ERROR` → `ZIP_DEFLATE_TRUNCATED`, both `E_PARSE`, so the class never depends on the codec tier), and everything else to `E_RUNTIME`. `buildErrorEnvelope` (utils/agent.ts) adds `error.remedy` — the CLI flag(s) or command that lift the refusal — from an explicit `CliError` option (`--overwrite`, `--max-input-size`) or the `ZIP_REMEDY` table (`ZIP_PATH_TRAVERSAL → --skip-unsafe (extract, stream)`, `ZIP_EXTRACT_DUPLICATE_PATH → --on-duplicate first|last`, `ZIP_LIMIT_EXCEEDED → the exact --max-* flag`, …; absent when nothing lifts it), mirrored in `docs/data/errors.json` `cli.remedy` and printed as a `remedy:` line in text mode. Exit code conventions: `0` success, `1` runtime / check failure, `2` usage; `130` / `143` after SIGINT / SIGTERM (§5). Two CLI-side rules keep the classes honest: an unsafe **entry name** that arrives as data (`modify --add/--rename/--add-dir`, `create --stdin-name`, manifest names) is `E_INPUT` (exit 1) with `entryName`, and a malformed **flag** is `E_USAGE` (exit 2). Every CLI-side `E_NOT_FOUND` (`cat`, `inspect --entry`, `stream --cat`, `verify --entry`) carries `zipCode: "ZIP_ENTRY_NOT_FOUND"` and names the remedy.
 
 ### Determinism, dates and layout (`src/utils/zipops.ts`, `src/commands/create.ts`)
 

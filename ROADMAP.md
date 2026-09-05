@@ -119,7 +119,8 @@ CLI stays a thin dispatch layer and never re-implements engine logic).
   `extract --codec` on the complete file.
 - **`--explain <ZIP_CODE>`** — print `raisedWhen` / `remedy` / class / CLI mapping for one
   error or diagnostic code from `docs/data/errors.json`, so an agent can resolve a `zipCode`
-  without leaving the terminal. Feasible now (pure data).
+  without leaving the terminal — fed by the same `ZIP_REMEDY` table that already emits
+  `error.remedy` in the envelope. Feasible now (pure data).
 - **`deflate` command** — the twin of `inflate`: raw DEFLATE of a file or stdin through the
   engine's deflate facade with the same tier / determinism vocabulary (`--level`,
   `--deterministic`). Feasible now.

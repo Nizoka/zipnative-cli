@@ -20,6 +20,7 @@ import {
     type ZipErrorCode,
 } from '../core-bridge/index.js';
 import { CliError, ErrorCode, type ErrorCodeValue, type ErrorDetail } from './error.js';
+import { LIMIT_FLAGS } from './limits.js';
 
 type Mapping = readonly [code: ErrorCodeValue, exitCode: number];
 
@@ -176,10 +177,13 @@ export function mapZipError(err: unknown, context: string, entryName?: string): 
         const [code, exitCode] = ZIP_TO_CLI[err.code] ?? RUNTIME;
         const name = entryNameOf(err) ?? entryName;
         const detail = detailOf(err);
+        // A limit refusal names its bound: the remedy is the exact --max-* flag.
+        const limitFlag = err instanceof ZipLimitError ? LIMIT_FLAGS.find((l) => l.key === String(err.limit)) : undefined;
         return new CliError(`${context}: ${err.message}`, exitCode, code, {
             zipCode: err.code,
             ...(name !== undefined ? { entryName: name } : {}),
             ...(detail !== undefined ? { detail } : {}),
+            ...(limitFlag !== undefined ? { remedy: `--${limitFlag.flag} <value> (raise the bound for trusted input only; "none" disables it)` } : {}),
         });
     }
     if (isFsError(err)) {

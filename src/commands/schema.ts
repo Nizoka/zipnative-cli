@@ -13,6 +13,7 @@ import type { ParsedArgs } from '../utils/args.js';
 import { CliError, ErrorCode } from '../utils/error.js';
 import { cliVersion, engineVersion } from '../utils/version.js';
 import { LIMIT_FLAGS } from '../utils/limits.js';
+import { ZIP_REMEDY } from '../utils/agent.js';
 import { ZIP_DIAGNOSTIC_CODES, ZIP_TO_CLI } from '../utils/ziperr.js';
 import { MANIFEST_COMMANDS } from '../utils/manifest.js';
 import { PROJECTED_COMMANDS } from '../utils/projection.js';
@@ -471,7 +472,7 @@ function batchSchema(): JsonSchema {
                     properties: {
                         id: { type: 'string' }, command: { type: 'string' }, ok: { type: 'boolean' }, output: { type: 'string' },
                         skipped: { const: true },
-                        error: { type: 'object', required: ['code', 'message'], properties: { code: { enum: ERROR_CODES }, message: { type: 'string' }, zipCode: { enum: ZIP_CODES } } },
+                        error: { type: 'object', required: ['code', 'message'], properties: { code: { enum: ERROR_CODES }, message: { type: 'string' }, zipCode: { enum: ZIP_CODES }, remedy: { type: 'string' } } },
                         report: { description: 'JSON mode only: what the task wrote to stdout, parsed (an object, or an array of objects for NDJSON).' },
                         stdout: { type: 'string', description: 'JSON mode only: the task\'s stdout when it was not JSON (text output).' },
                         stdoutBytes: { type: 'integer', description: 'JSON mode only: bytes the task wrote to stdout (captured, never interleaved with the batch document).' },
@@ -617,6 +618,10 @@ function errorSchema(): JsonSchema {
                         description: 'Code-specific: { limit, configured, observed } (E_LIMIT), { feature } (E_UNSUPPORTED), { expectedCrc, actualCrc } (E_DATA / E_CHECK_FAILED).',
                         additionalProperties: { type: ['string', 'number', 'boolean', 'null'] },
                     },
+                    remedy: {
+                        type: 'string',
+                        description: 'The CLI flag(s) or command that lift this refusal (e.g. "--skip-unsafe (extract, stream)", "--overwrite"); absent when nothing does. Apply it only for trusted input.',
+                    },
                 },
             },
         },
@@ -624,8 +629,11 @@ function errorSchema(): JsonSchema {
 }
 
 function errorsDocument(): JsonSchema {
-    const zip: Record<string, { code: string; exitCode: number }> = {};
-    for (const [k, [code, exitCode]] of Object.entries(ZIP_TO_CLI)) zip[k] = { code, exitCode };
+    const zip: Record<string, { code: string; exitCode: number; remedy?: string }> = {};
+    for (const [k, [code, exitCode]] of Object.entries(ZIP_TO_CLI)) {
+        const remedy = Object.hasOwn(ZIP_REMEDY, k) ? ZIP_REMEDY[k as keyof typeof ZIP_REMEDY] : undefined;
+        zip[k] = { code, exitCode, ...(remedy !== undefined ? { remedy } : {}) };
+    }
     return {
         $id: `${ID_BASE}/${cliVersion()}/errors.json`,
         kind: 'error-codes',

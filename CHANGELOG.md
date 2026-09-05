@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`error.remedy`** in the `--json` error envelope (and a `remedy:` line in text mode): the
+  CLI flag(s) or command that lift a refusal — `--skip-unsafe (extract, stream)`,
+  `--on-duplicate first|last`, `--overwrite`, the exact `--max-*` flag of an exceeded bound,
+  `--skip-unsupported`, `zipnative list` … — computed from one `ZIP_REMEDY` table and mirrored
+  in `schema error`, `schema errors` and `docs/data/errors.json` (`cli.remedy`). The engine
+  message stays verbatim (it names library options, not flags). (review Q2-F2)
+
+### Fixed
+
+- `--quiet` now also silences the text diagnostics that `list --format ndjson` and
+  `stream --list` print on stderr under `--json` (they went through `process.stderr` directly);
+  one `formatDiagnosticLine()` renders every stderr diagnostic. (review Q2-F1)
+- The bridge rule is pinned by a test: no `src/` file outside `core-bridge` references the
+  `zipnative` package, except the `zipnative/package.json` metadata probe in `version.ts`
+  (kept out of the bridge so `--version` never loads the engine). (review Q3)
+
 ## [1.0.0] – 2026-09-05
 
 Built on **zipnative 1.0.0** — the engine's first stable release, whose 77-export API, 39-code

@@ -86,7 +86,7 @@ to their JSON format and compact it).
 **On failure**, a single JSON object is written to stderr (`zipnative schema error`):
 
 ```json
-{ "ok": false, "command": "extract", "error": { "code": "E_SECURITY", "message": "Failed to extract: zipnative: entry '../etc/passwd' escapes the extraction root …", "zipCode": "ZIP_PATH_TRAVERSAL", "entryName": "../etc/passwd" } }
+{ "ok": false, "command": "extract", "error": { "code": "E_SECURITY", "message": "Failed to extract: zipnative: entry '../etc/passwd' escapes the extraction root …", "zipCode": "ZIP_PATH_TRAVERSAL", "entryName": "../etc/passwd", "remedy": "--skip-unsafe (extract, stream)" } }
 ```
 
 ```json
@@ -372,7 +372,9 @@ file and `docs/data/errors.json`).
 **Listing for RAG.** `list --format ndjson` emits one JSON object per entry
 (`{ name, method, compressedSize, uncompressedSize, crc32, lastModified,
 isEncrypted, … }`) which streams cleanly into a retrieval pipeline; add `--long`
-for flags, offsets, extra fields and the raw name bytes (`rawNameHex`).
+for flags, offsets, extra fields and the raw name bytes (`rawNameHex`). NDJSON has
+no wrapper, so engine diagnostics arrive as `severity: [ZIP_CODE] …` text lines on
+stderr (suppressed by `--quiet`, like every progress line).
 
 ---
 
@@ -433,7 +435,9 @@ enforces.
    nothing written. Extract into an empty directory.
 4. `zipnative extract --input a.zip --output-dir out/ --json` → do it; read the status
    envelope from stderr.
-5. On any non-zero exit, parse the last stderr line and branch on `error.code`
+5. On any non-zero exit, take the last stderr line that starts with `{`, branch on
+   `error.code`, and apply `error.remedy` (the CLI flag that lifts the refusal —
+   e.g. `--skip-unsafe`, `--on-duplicate first`, `--overwrite`) only for trusted input
    (class) then `error.zipCode` (cause): `E_SECURITY` → quarantine the archive;
    `E_LIMIT` → only for trusted input, retry with the named `--max-*` (or
    `--max-input-size`) raised; `E_UNSUPPORTED` → route around the feature

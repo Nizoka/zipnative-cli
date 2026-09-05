@@ -139,7 +139,7 @@ Official CLI for the [`zipnative`](https://github.com/Nizoka/zipnative) engine �
 | `govern` AI-governance / HITL | ✅ | `rules` / `policy` / `verify-issue`; gates drafts with `E_POLICY` |
 | `.zipnativerc.json` config file | ✅ | Global + per-command defaults; flags > config; `codec` refused from config |
 | **Agent & automation** | | |
-| Global `--json` envelope | ✅ | Status on success, `{ ok: false, command, error: { code, message, zipCode?, entryName?, detail? } }` on failure |
+| Global `--json` envelope | ✅ | Status on success, `{ ok: false, command, error: { code, message, zipCode?, entryName?, detail?, remedy? } }` on failure — `remedy` names the flag that lifts the refusal |
 | Stable error classes | ✅ | 13 `E_*` codes — `E_USAGE`, `E_INPUT`, `E_PARSE`, `E_IO`, `E_SECURITY`, `E_DATA`, `E_LIMIT`, `E_UNSUPPORTED`, `E_NOT_FOUND`, `E_VERIFY_FAILED`, `E_CHECK_FAILED`, `E_POLICY`, `E_RUNTIME` |
 | Exact cause | ✅ | `error.zipCode` = zipnative's frozen `ZIP_*` code, verbatim (39 codes; `schema errors` prints the mapping) |
 | Diagnostics channel | ✅ | 11 `ZIP_*` diagnostic codes: text on stderr, arrays under `--json`, `--strict` escalates the first into `E_CHECK_FAILED` |
@@ -982,7 +982,10 @@ deterministically — no MCP server, no daemon, just the process contract:
   **stderr = diagnostics.**
 - Pass **`--json`** (anywhere on the command line) to get a single machine-readable envelope on
   stderr. On failure:
-  `{ "ok": false, "command": "...", "error": { "code": "E_*", "message": "...", "zipCode"?: "ZIP_*", "entryName"?: "...", "detail"?: { ... } } }`.
+  `{ "ok": false, "command": "...", "error": { "code": "E_*", "message": "...", "zipCode"?: "ZIP_*", "entryName"?: "...", "detail"?: { ... }, "remedy"?: "--skip-unsafe (extract, stream)" } }`.
+  `remedy` is the machine-actionable counterpart of `message`: the CLI flag(s) or command that
+  lift the refusal (the engine message names library options, not flags); absent when nothing
+  does; apply it only for trusted input. Text mode prints the same as a `remedy:` line.
   On success for `create` / `modify` / `extract` / `stream` / `cat` / `inflate` / `crc32`: a
   `{ "ok": true, "command": "...", ... }` status line. `list` / `inspect` / `verify` / `doctor` /
   `batch` put their JSON report on stdout instead (`batch --json` = one document with every

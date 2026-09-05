@@ -82,13 +82,16 @@ describe('agent mode helpers', () => {
                     zipCode: 'ZIP_LIMIT_EXCEEDED',
                     entryName: 'big.bin',
                     detail: { limit: 'maxEntryUncompressedSize', configured: 10, observed: 20 },
+                    remedy: '--max-<bound> <size> (the bound is named in detail.limit; trusted input only)',
                 },
             });
         });
 
-        it('carries only the subset of options that are set', () => {
+        it('carries only the subset of options that are set (plus the table remedy for a known zipCode)', () => {
             const env = buildErrorEnvelope('cat', new CliError('nf', 1, ErrorCode.NOT_FOUND, { zipCode: 'ZIP_ENTRY_NOT_FOUND' }));
-            expect(env.error).toEqual({ code: 'E_NOT_FOUND', message: 'nf', zipCode: 'ZIP_ENTRY_NOT_FOUND' });
+            expect(env.error).toEqual({ code: 'E_NOT_FOUND', message: 'nf', zipCode: 'ZIP_ENTRY_NOT_FOUND', remedy: 'zipnative list <archive> (names are case-sensitive)' });
+            const bare = buildErrorEnvelope('cat', new CliError('nf', 1, ErrorCode.NOT_FOUND, { zipCode: 'ZIP_ENTRY_OVERLAP' }));
+            expect(bare.error).toEqual({ code: 'E_NOT_FOUND', message: 'nf', zipCode: 'ZIP_ENTRY_OVERLAP' });
         });
 
         it.each(Object.values(ErrorCode))('substitutes a non-empty default message for an empty %s message', (code) => {

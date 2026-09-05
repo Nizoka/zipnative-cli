@@ -57,7 +57,7 @@ describe('--overwrite policy', () => {
 
     it('create: refuses an existing -o (buffered and --stream), intact; --overwrite replaces', async () => {
         const e1 = await fails(() => create(parseArgs([src, '-o', out])));
-        expect(e1).toMatchObject({ code: 'E_IO', exitCode: 1, message: `Refusing to overwrite existing file ${out} (pass --overwrite).` });
+        expect(e1).toMatchObject({ code: 'E_IO', exitCode: 1, message: `Refusing to overwrite existing file ${out} (pass --overwrite).`, remedy: '--overwrite' });
         expect((await readFile(out)).toString()).toBe('keep me');
         const e2 = await fails(() => create(parseArgs([src, '-o', out, '--stream'])));
         expect(e2).toMatchObject({ code: 'E_IO' });

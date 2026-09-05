@@ -1,5 +1,5 @@
 {
-  "$comment": "Copy of zipnative docs/data/errors.json (the frozen 39-code error vocabulary and 11 diagnostic codes, with raisedWhen/remedy per code) plus, per error code, the CLI mapping \"cli\": { code: E_*, exitCode } taken from src/utils/ziperr.ts (ZIP_TO_CLI), and, per diagnostic, \"raisedBy\": the CLI commands whose engine paths can emit it (batch surfaces whatever its tasks raise). The --json error envelope carries error.code (the E_* class) and error.zipCode (the ZIP_* cause, verbatim). tests/docs/consistency.test.ts enforces sync with the source table.",
+  "$comment": "Copy of zipnative docs/data/errors.json (the frozen 39-code error vocabulary and 11 diagnostic codes, with raisedWhen/remedy per code) plus, per error code, the CLI mapping \"cli\": { code: E_*, exitCode } taken from src/utils/ziperr.ts (ZIP_TO_CLI), and, per diagnostic, \"raisedBy\": the CLI commands whose engine paths can emit it (batch surfaces whatever its tasks raise). The --json error envelope carries error.code (the E_* class) and error.zipCode (the ZIP_* cause, verbatim). tests/docs/consistency.test.ts enforces sync with the source table. cli.remedy (when present) is the CLI flag or command that lifts the refusal — the machine-actionable counterpart of the engine message, also emitted as error.remedy in the --json envelope (source: ZIP_REMEDY in src/utils/agent.ts).",
   "package": "zipnative",
   "zipnativeVersion": "1.0.0",
   "verifiedOn": "2026-09-05",
@@ -34,7 +34,8 @@
       "remedy": "Names are case-sensitive — iterate entries() to list what the archive holds.",
       "cli": {
         "code": "E_NOT_FOUND",
-        "exitCode": 1
+        "exitCode": 1,
+        "remedy": "zipnative list <archive> (names are case-sensitive)"
       }
     },
     {
@@ -45,7 +46,8 @@
       "remedy": "Use replaceEntry() to overwrite, or removeEntry() the target first — renames never overwrite implicitly.",
       "cli": {
         "code": "E_INPUT",
-        "exitCode": 1
+        "exitCode": 1,
+        "remedy": "modify --replace <name>=<path>"
       }
     },
     {
@@ -67,7 +69,8 @@
       "remedy": "The message embeds the underlying diagnostic code; handle the archive shape it names, or drop strict and receive diagnostics via onDiagnostic.",
       "cli": {
         "code": "E_CHECK_FAILED",
-        "exitCode": 1
+        "exitCode": 1,
+        "remedy": "drop --strict, or fix the producer named by the diagnostic"
       }
     },
     {
@@ -188,7 +191,8 @@
       "remedy": "Use relative, forward-slash paths without traversal segments.",
       "cli": {
         "code": "E_INPUT",
-        "exitCode": 1
+        "exitCode": 1,
+        "remedy": "a plain relative name (no .., no drive, no device name)"
       }
     },
     {
@@ -199,7 +203,8 @@
       "remedy": "Every archive path must be unique; for duplicate-name source archives, extract and rebuild with createZip().",
       "cli": {
         "code": "E_INPUT",
-        "exitCode": 1
+        "exitCode": 1,
+        "remedy": "unique entry names"
       }
     },
     {
@@ -269,7 +274,8 @@
       "remedy": "The archive is hostile, corrupt, or POSIX-authored with device-name files; pass rejectTraversal: false to silently skip such entries instead (they are never emitted).",
       "cli": {
         "code": "E_SECURITY",
-        "exitCode": 1
+        "exitCode": 1,
+        "remedy": "--skip-unsafe (extract, stream)"
       }
     },
     {
@@ -281,7 +287,8 @@
       "remedy": "Pass rejectSymlinks: false to receive the link target as ordinary data (never materialized as a link).",
       "cli": {
         "code": "E_SECURITY",
-        "exitCode": 1
+        "exitCode": 1,
+        "remedy": "--allow-symlinks (target text as data) | --skip-symlinks (extract)"
       }
     },
     {
@@ -293,7 +300,8 @@
       "remedy": "Pass onDuplicate: 'first' or 'last' to resolve the shadowing deliberately.",
       "cli": {
         "code": "E_SECURITY",
-        "exitCode": 1
+        "exitCode": 1,
+        "remedy": "--on-duplicate first|last (extract, stream)"
       }
     },
     {
@@ -361,7 +369,8 @@
       "remedy": "Raise limits.<limit> explicitly if this archive is trusted — the message names the key and both values.",
       "cli": {
         "code": "E_LIMIT",
-        "exitCode": 1
+        "exitCode": 1,
+        "remedy": "--max-<bound> <size> (the bound is named in detail.limit; trusted input only)"
       }
     },
     {
@@ -385,7 +394,8 @@
       "remedy": "Check entry.isEncrypted to route around such entries; encrypted entries remain copyable by the modifier without decompression.",
       "cli": {
         "code": "E_UNSUPPORTED",
-        "exitCode": 1
+        "exitCode": 1,
+        "remedy": "--skip-unsupported (extract, stream); no password support in 1.x"
       }
     },
     {
@@ -397,7 +407,8 @@
       "remedy": "registerCodec() one, or re-save the archive with store/deflate.",
       "cli": {
         "code": "E_UNSUPPORTED",
-        "exitCode": 1
+        "exitCode": 1,
+        "remedy": "--codec <module> | --skip-unsupported (extract, stream)"
       }
     },
     {
@@ -421,7 +432,8 @@
       "remedy": "Buffer the content via add() or split it; a per-entry opt-in is tracked on the roadmap.",
       "cli": {
         "code": "E_UNSUPPORTED",
-        "exitCode": 1
+        "exitCode": 1,
+        "remedy": "create without --stream (buffered entries are fully Zip64)"
       }
     },
     {
@@ -433,7 +445,8 @@
       "remedy": "Use openZip() on the complete archive instead.",
       "cli": {
         "code": "E_UNSUPPORTED",
-        "exitCode": 1
+        "exitCode": 1,
+        "remedy": "cat / extract on the complete file (random access)"
       }
     },
     {
@@ -445,7 +458,8 @@
       "remedy": "The message names the compliant call (readEntryStream() or readEntry()).",
       "cli": {
         "code": "E_UNSUPPORTED",
-        "exitCode": 1
+        "exitCode": 1,
+        "remedy": "cat / extract --codec <module> on the complete file"
       }
     }
   ],
