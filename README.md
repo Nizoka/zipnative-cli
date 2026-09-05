@@ -1064,7 +1064,7 @@ See [AGENTS.md](AGENTS.md) and the [`samples/agent/`](samples/agent) scripts.
 - **JSON size cap** — manifests, drafts and JSON inputs are capped at 50 MB before parsing
   (config files at 1 MB).
 - Signed builds with npm provenance (Trusted Publishing / OIDC) and a CycloneDX SBOM per
-  release, itself attested with `actions/attest-build-provenance` — verify with
+  release; the SBOM and the tarball are attested with `actions/attest-build-provenance` — verify with
   `npm audit signatures`. CI runs on Ubuntu 22/24, Windows 22/24 (blocking) and macOS 22; the
   veraZIP gate runs on Linux and Windows for every pull request.
 

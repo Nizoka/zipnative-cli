@@ -99,6 +99,7 @@
     "zipnative": "^1.0.0"
   },
   "devDependencies": {
+    "@cyclonedx/cyclonedx-npm": "6.0.1",
     "@types/node": "^22.0.0",
     "@vitest/coverage-v8": "^4.1.7",
     "eslint": "^9.0.0",

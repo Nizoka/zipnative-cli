@@ -24,6 +24,10 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "tsup"
         update-types: ["version-update:semver-major"]
+      # Exact-pinned SBOM generator run inside the publish job (publish.yml):
+      # majors are reviewed by hand, minors/patches flow through the group.
+      - dependency-name: "@cyclonedx/cyclonedx-npm"
+        update-types: ["version-update:semver-major"]
     groups:
       dev-dependencies:
         patterns:

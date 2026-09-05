@@ -206,10 +206,12 @@ knowledge base, SECURITY.md and CITATION.cff. The only paths CI ignores are `LIC
 | `ci.yml` | `ci (22)`, `ci (24)` | ubuntu-latest, Node 22 / 24 | `npm audit --audit-level=high`, typecheck, lint, `test:coverage` (thresholds), build, dist shape (CJS bin only), built-binary smoke (`--help`, `--version`, `schema manifest` = 15 commands), the spawn integration suite |
 | `ci.yml` | `windows (22)`, `windows (24)` | windows-latest, Node 22 / 24 | typecheck, lint, tests, build, dist shape, smoke, spawn suite — **blocking**: a ZIP CLI lives or dies on `\` separators, reserved device names, the case-insensitive filesystem and CRLF checkouts; any `skip on win32` needs a stated reason |
 | `ci.yml` | `macos` | macos-latest, Node 22 | tests, build, spawn suite — the second case-insensitive filesystem the sink handles (`CASE_INSENSITIVE_FS` covers win32 and darwin) |
+| `ci.yml` (every job) | reproducible build, start-up budget | — | `dist/cli.cjs` is built twice and the SHA-256 must match; `tests/integration/startup-budget.test.ts` pins the bundle shape (the worker is reachable only through the lazy `import()`; the engine is the single hoisted external) and keeps the start-up overhead over bare Node under 250 ms |
 | `verazip.yml` | `verazip-linux`, `verazip-windows` | ubuntu-latest / windows-latest, Node 22 | build → `corpus:zip` → `validate-zip.mjs` with `VERAZIP_REQUIRED=1`; tool versions in the job summary; reports uploaded as artifacts |
 | `codeql.yml` | `Analyze (javascript-typescript)` | ubuntu-latest | CodeQL on code changes (keeps a docs path filter, so it is not a required check — a docs-only PR would wait forever) and weekly |
 | `scorecard.yml` | `Scorecard analysis` | ubuntu-latest | OpenSSF Scorecard on push to `main` and weekly (not a PR check) |
-| `publish.yml` | `publish` | ubuntu-latest, newest Node ≥ 22.14 | the whole gate again + veraZIP, CycloneDX SBOM attested with `actions/attest-build-provenance`, tarball verification, `npm publish --provenance` via Trusted Publishing — on a published GitHub Release |
+| `publish.yml` | `publish` | ubuntu-latest, newest Node ≥ 22.14 | the whole gate again + veraZIP, CycloneDX SBOM from the exact-pinned generator, tarball packed, verified and **attested** with `actions/attest-build-provenance` (the SBOM too), the packed file published with `npm publish <tgz> --provenance` via Trusted Publishing — on a published GitHub Release |
+| `ci.yml` | `commitlint` | ubuntu-latest, PRs only | every commit subject and the PR title match the Conventional Commits pattern below (no dependency; not a required check yet) |
 
 **Branch protection** on `main` (a repository setting the maintainers apply; recorded here so it
 is reviewable): required checks `ci (22)`, `ci (24)`, `windows (22)`, `windows (24)`, `macos`,
@@ -309,7 +311,7 @@ samples/                   # .sh + .ps1 per command (41 demos), run-all.js (73 j
 - `modify` verifies every entry it re-emits (`verifyEntry()`), with no opt-out. Do not add one.
 - `--codec` is the only dynamic import of user code — argv only, refused from config files, gated in manifests, reported truthfully when it shapes the writer. Do not add another.
 - No command may open a socket. Do not add a network path.
-- A CycloneDX **SBOM** is generated and attested in CI and attached to each release; the generator is build-time only — do not add it as a runtime dependency.
+- A CycloneDX **SBOM** is generated in CI by `@cyclonedx/cyclonedx-npm` (an exact-pinned devDependency, installed from the lockfile — never fetched by `npx` inside the publish job) and attested with the tarball; build-time only — never a runtime dependency. `npm audit` runs at `--audit-level=moderate`.
 
 ## Versioning, stability and deprecation
 
@@ -341,7 +343,10 @@ which the flag is an ordinary `E_USAGE`.
 
 ## Commit Convention
 
-Use [Conventional Commits](https://www.conventionalcommits.org/):
+Use [Conventional Commits](https://www.conventionalcommits.org/). The `commitlint` job checks every
+commit subject of a PR and the PR title against
+`^(feat|fix|docs|chore|test|refactor|ci|build|perf|style|revert)(\([a-z0-9,./ -]+\))?!?: .+` (at most 100
+characters):
 - `feat:` new feature
 - `fix:` bug fix
 - `chore:` maintenance (deps, CI, governance)

@@ -20,6 +20,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   engine's `sanitizeEntryPath()` — the pre-extraction gate `verify` cannot give (it proves
   integrity and structure, not path safety; its help and the docs now say so). (review Q2-F3)
 
+### Supply chain
+
+- The CycloneDX generator is an exact-pinned devDependency (`@cyclonedx/cyclonedx-npm` 6.0.1,
+  installed from the lockfile) instead of an unpinned `npx --yes …@^1` fetched inside the
+  publish job — the old range also declared `engines.npm: 6 - 9`, incompatible with the npm ≥ 11
+  Trusted Publishing requires. (review Q4-P0-2)
+- The published tarball is attested with `actions/attest-build-provenance` (next to the SBOM),
+  attached to the release with its SHA-256, and `npm publish` ships that packed file. (P1-1)
+- CI proves the bundle is byte-reproducible (two builds, one hash), audits at
+  `--audit-level=moderate`, checks Conventional Commits on PRs (dependency-free job), and runs
+  a start-up guard (the worker bundle is reachable only through the lazy `import()`, the engine
+  is the single hoisted external; overhead over bare Node under 250 ms). (P1-2, P1-8, P2-5, P2-6)
+
 ### Documentation
 
 - Agent docs (AGENTS.md, llms.txt, README, knowledge base): the two rules an unattended caller

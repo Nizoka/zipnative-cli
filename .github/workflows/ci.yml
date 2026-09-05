@@ -56,7 +56,7 @@ jobs:
         run: npm ci
 
       - name: Audit dependencies
-        run: npm audit --audit-level=high
+        run: npm audit --audit-level=moderate
 
       - name: Type check
         run: npm run typecheck:all
@@ -69,6 +69,15 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      # The product sells byte-reproducible archives; its own bundle must be
+      # byte-reproducible too (tsup/esbuild with a locked toolchain).
+      - name: Build is reproducible
+        shell: bash
+        run: |
+          sha256sum dist/cli.cjs > build.sha
+          npm run build
+          sha256sum -c build.sha
 
       - name: Verify dist output
         # The package ships the CJS bin only (no ESM build, no .d.ts, no maps).
@@ -91,7 +100,7 @@ jobs:
       # stdin/stdout pipes, real exit codes) — this suite self-skips when
       # dist/ is absent, so it must run post-build.
       - name: Built-binary integration (post-build)
-        run: npx vitest run tests/integration/built-binary-smoke.test.ts
+        run: npx vitest run tests/integration/built-binary-smoke.test.ts tests/integration/startup-budget.test.ts
 
   # A ZIP CLI lives or dies on Windows correctness: `\` vs `/` path
   # separators in entry names and --base/--prefix handling, reserved device
@@ -136,6 +145,15 @@ jobs:
       - name: Build
         run: npm run build
 
+      # The product sells byte-reproducible archives; its own bundle must be
+      # byte-reproducible too (tsup/esbuild with a locked toolchain).
+      - name: Build is reproducible
+        shell: bash
+        run: |
+          sha256sum dist/cli.cjs > build.sha
+          npm run build
+          sha256sum -c build.sha
+
       - name: Verify dist output
         shell: bash
         run: |
@@ -151,7 +169,7 @@ jobs:
           node dist/cli.cjs schema manifest | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const m=JSON.parse(s);if(!Array.isArray(m.commands)||m.commands.length!==15){console.error("schema manifest: expected 15 commands, got "+(Array.isArray(m.commands)?m.commands.length:"none"));process.exit(1)}console.log("schema manifest ok: "+m.commands.length+" commands")})'
 
       - name: Built-binary integration (post-build)
-        run: npx vitest run tests/integration/built-binary-smoke.test.ts
+        run: npx vitest run tests/integration/built-binary-smoke.test.ts tests/integration/startup-budget.test.ts
 
   # macOS is the second case-insensitive filesystem the sink handles
   # (utils/sink.ts CASE_INSENSITIVE_FS covers win32 AND darwin): the
@@ -182,5 +200,46 @@ jobs:
       - name: Build
         run: npm run build
 
+      # The product sells byte-reproducible archives; its own bundle must be
+      # byte-reproducible too (tsup/esbuild with a locked toolchain).
+      - name: Build is reproducible
+        shell: bash
+        run: |
+          sha256sum dist/cli.cjs > build.sha
+          npm run build
+          sha256sum -c build.sha
+
       - name: Built-binary integration (post-build)
-        run: npx vitest run tests/integration/built-binary-smoke.test.ts
+        run: npx vitest run tests/integration/built-binary-smoke.test.ts tests/integration/startup-budget.test.ts
+
+  # Conventional Commits, enforced without a dependency: every commit subject
+  # of the PR and the PR title (the squash-merge subject) must match the
+  # pattern CONTRIBUTING.md documents. Not a required check until it has
+  # run quietly for a while.
+  commitlint:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check commit subjects and the PR title
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        shell: bash
+        run: |
+          pattern='^(feat|fix|docs|chore|test|refactor|ci|build|perf|style|revert)(\([a-z0-9,./ -]+\))?!?: .+'
+          fail=0
+          check() {
+            local subject="$1"
+            if [ "${#subject}" -gt 100 ]; then echo "too long (> 100): $subject"; fail=1; fi
+            if ! printf '%s' "$subject" | grep -Eq "$pattern"; then echo "not Conventional Commits: $subject"; fail=1; fi
+          }
+          while IFS= read -r subject; do check "$subject"; done < <(git log --format=%s "$BASE_SHA..HEAD")
+          check "$PR_TITLE"
+          exit "$fail"

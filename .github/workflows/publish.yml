@@ -55,7 +55,7 @@ jobs:
         run: npm ci
 
       - name: Audit dependencies
-        run: npm audit --audit-level=high
+        run: npm audit --audit-level=moderate
 
       - name: Type check
         run: npm run typecheck:all
@@ -86,7 +86,7 @@ jobs:
       # Spawns the built dist/cli.cjs as a child process — self-skips when
       # dist/ is absent, so it must run post-build.
       - name: Built-binary integration (post-build)
-        run: npx vitest run tests/integration/built-binary-smoke.test.ts
+        run: npx vitest run tests/integration/built-binary-smoke.test.ts tests/integration/startup-budget.test.ts
 
       # veraZIP gate: the release must never publish a CLI whose archives the
       # ISO/IEC 21320-1 reference validator rejects. Same corpus generator +
@@ -109,10 +109,13 @@ jobs:
         run: node scripts/validate-zip.mjs
 
       - name: Generate SBOM (CycloneDX)
-        # Software Bill of Materials for supply-chain transparency. Uses the
-        # CycloneDX generator via npx (build-time only — adds ZERO runtime
-        # dependencies to the published package).
-        run: npx --yes @cyclonedx/cyclonedx-npm@^1 --output-format JSON --output-file sbom.cdx.json
+        # Software Bill of Materials for supply-chain transparency. The
+        # generator is an EXACT-pinned devDependency installed by npm ci from
+        # the lockfile (integrity-checked) — never fetched by npx at publish
+        # time inside a job that holds the OIDC token. Build-time only: ZERO
+        # runtime dependencies are added to the package.
+        # --omit dev: the SBOM describes the shipped tree (zipnative only).
+        run: npx cyclonedx-npm --omit dev --output-format JSON --output-file sbom.cdx.json
 
       - name: Upload SBOM artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -138,8 +141,17 @@ jobs:
           TAG: ${{ github.event.release.tag_name }}
         run: gh release upload "$TAG" sbom.cdx.json --clobber
 
-      - name: Pack tarball (what npm publish will ship)
-        run: npm pack --pack-destination .
+      - name: Pack tarball (the bytes that will be published)
+        run: |
+          npm pack --pack-destination .
+          sha256sum zipnative-cli-*.tgz | tee tarball.sha256
+          {
+            echo '## Published tarball'
+            echo
+            echo '```'
+            cat tarball.sha256
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify tarball contents
         # The package must carry exactly the bin, the agent docs and the
@@ -154,5 +166,21 @@ jobs:
           ! grep -q '\.map$' tarball.txt
           ! grep -q 'package/tests/' tarball.txt
 
+      # Signed provenance for the tarball itself (Sigstore, stored as a GitHub
+      # attestation): gh attestation verify zipnative-cli-<v>.tgz -R Nizoka/zipnative-cli
+      - name: Attest tarball provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: zipnative-cli-*.tgz
+
+      - name: Attach tarball to release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$TAG" zipnative-cli-*.tgz tarball.sha256 --clobber
+
+      # Publish the PACKED file, so the attested bytes are the published bytes
+      # (a bare npm publish would re-pack).
       - name: Publish
-        run: npm publish --provenance --access public
+        run: npm publish ./zipnative-cli-*.tgz --provenance --access public
