@@ -15,7 +15,6 @@ import {
     ZIP_ERROR_CODES,
     ZIP_TO_CLI,
     guard,
-    guardAsync,
     isFsError,
     mapZipError,
 } from '../../src/utils/ziperr.js';
@@ -342,10 +341,9 @@ describe('mapZipError — non-core errors', () => {
     });
 });
 
-describe('guard / guardAsync', () => {
-    it('return the function result on success', async () => {
+describe('guard', () => {
+    it('returns the function result on success', () => {
         expect(guard('ctx', () => 7)).toBe(7);
-        await expect(guardAsync('ctx', async () => 'ok')).resolves.toBe('ok');
     });
 
     it('translate a thrown core error through mapZipError', () => {
@@ -366,22 +364,5 @@ describe('guard / guardAsync', () => {
         }
     });
 
-    it('guardAsync translates rejections and forwards the entry name', async () => {
-        const failing = async (): Promise<never> => {
-            throw new ZipDataError('ZIP_CRC_MISMATCH', 'crc');
-        };
-        await expect(guardAsync('Read', failing, 'x.bin')).rejects.toMatchObject({
-            code: 'E_DATA',
-            exitCode: 1,
-            zipCode: 'ZIP_CRC_MISMATCH',
-            entryName: 'x.bin',
-        });
-    });
 
-    it('guardAsync maps a plain rejection to E_RUNTIME', async () => {
-        await expect(guardAsync('Read', async () => { throw new Error('nope'); })).rejects.toMatchObject({
-            code: 'E_RUNTIME',
-            message: 'Read: nope',
-        });
-    });
 });

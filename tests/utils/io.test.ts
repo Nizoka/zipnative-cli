@@ -15,10 +15,8 @@ import {
     writeStreamingOutput,
     writeFileStream,
     pathExists,
-    ensureDir,
     unlinkQuiet,
     safeJoin,
-    parentDir,
     readJsonInput,
     readableToByteSource,
 } from '../../src/utils/io.js';
@@ -321,7 +319,7 @@ describe('writeFileStream', () => {
     });
 });
 
-describe('pathExists / ensureDir / unlinkQuiet / parentDir', () => {
+describe('pathExists / unlinkQuiet', () => {
     it('pathExists is true for files and directories, false otherwise', async () => {
         const file = join(dir, 'p.bin');
         await writeFile(file, 'x');
@@ -330,12 +328,6 @@ describe('pathExists / ensureDir / unlinkQuiet / parentDir', () => {
         expect(await pathExists(join(dir, 'absent'))).toBe(false);
     });
 
-    it('ensureDir creates nested directories and is idempotent', async () => {
-        const nested = join(dir, 'a', 'b', 'c');
-        await ensureDir(nested);
-        await ensureDir(nested);
-        expect((await stat(nested)).isDirectory()).toBe(true);
-    });
 
     it('unlinkQuiet removes an existing file and never throws for a missing one', async () => {
         const file = join(dir, 'tmp.bin');
@@ -346,9 +338,6 @@ describe('pathExists / ensureDir / unlinkQuiet / parentDir', () => {
         await expect(unlinkQuiet('')).resolves.toBeUndefined();
     });
 
-    it('parentDir returns the dirname', () => {
-        expect(parentDir(join('a', 'b', 'c.zip'))).toBe(join('a', 'b'));
-    });
 });
 
 describe('safeJoin', () => {

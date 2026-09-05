@@ -14,6 +14,7 @@
 
 import type { ParsedArgs } from '../utils/args.js';
 import { CliError } from '../utils/error.js';
+import { isBooleanFlag } from '../utils/flags.js';
 import { LIMIT_FLAG_NAMES } from '../utils/limits.js';
 
 export { BOOLEAN_FLAGS, COMMAND_BOOLEAN_FLAGS, GLOBAL_BOOLEAN_FLAGS, isBooleanFlag } from '../utils/flags.js';
@@ -154,22 +155,44 @@ export const COMMANDS: readonly CommandSpec[] = [
 
 export const COMMAND_NAMES: readonly string[] = COMMANDS.map((c) => c.name);
 
+/**
+ * Value flags whose argument is a filesystem path — the shells complete
+ * files after them (`_filedir`, `_files`, fish `-F`). Every other value flag
+ * takes free text / a number / an enum and gets no argument completion.
+ */
+export const PATH_FLAGS: readonly string[] = [
+    '--input', '--output', '--output-dir', '--input-dir', '--base', '--from-manifest', '--manifest',
+    '--config', '--codec', '--comment-file',
+];
+
+/** True when `flag` (dashed) takes a value (derived from the boolean table). */
+function takesValue(flag: string): boolean {
+    return !isBooleanFlag(flag.replace(/^--/, ''));
+}
+
 function bashScript(): string {
     const cmds = COMMAND_NAMES.join(' ');
     const cases = COMMANDS.map(
         (c) => `        ${c.name}) opts="${[...c.flags, ...GLOBAL_FLAGS].join(' ')}" ;;`,
     ).join('\n');
+    const pathFlags = PATH_FLAGS.join('|');
     return `\
 # bash completion for zipnative
 _zipnative() {
     local cur prev words cword
-    _init_completion 2>/dev/null || { cur="\${COMP_WORDS[COMP_CWORD]}"; }
+    _init_completion 2>/dev/null || { cur="\${COMP_WORDS[COMP_CWORD]}"; prev="\${COMP_WORDS[COMP_CWORD-1]}"; }
     local cmd="\${COMP_WORDS[1]}"
     local opts="${GLOBAL_FLAGS.join(' ')}"
     if [[ \${COMP_CWORD} -eq 1 ]]; then
         COMPREPLY=( $(compgen -W "${cmds}" -- "\${cur}") )
         return 0
     fi
+    # A path flag completes files/directories for its argument.
+    case "\${prev}" in
+        ${pathFlags})
+            if declare -F _filedir >/dev/null 2>&1; then _filedir; else COMPREPLY=( $(compgen -f -- "\${cur}") ); fi
+            return 0 ;;
+    esac
     case "\${cmd}" in
 ${cases}
     esac
@@ -188,6 +211,7 @@ function zshScript(): string {
                 .map((f) => `'${f}'`)
                 .join(' ')} ;;`,
     ).join('\n');
+    const pathFlags = PATH_FLAGS.join('|');
     return `\
 #compdef zipnative
 # zsh completion for zipnative
@@ -200,6 +224,10 @@ ${cmdLines}
         _describe 'command' commands
         return
     fi
+    # A path flag completes files/directories for its argument.
+    case "\${words[CURRENT-1]}" in
+        ${pathFlags}) _files; return ;;
+    esac
     case "\${words[2]}" in
 ${cases}
     esac
@@ -218,8 +246,10 @@ function fishScript(): string {
     }
     for (const c of COMMANDS) {
         for (const flag of [...c.flags, ...GLOBAL_FLAGS]) {
+            // -r: the flag requires an argument; -F: complete files for it.
+            const arg = PATH_FLAGS.includes(flag) ? ' -r -F' : takesValue(flag) ? ' -r' : '';
             lines.push(
-                `complete -c zipnative -n '__fish_seen_subcommand_from ${c.name}' -l ${flag.replace(/^--/, '')}`,
+                `complete -c zipnative -n '__fish_seen_subcommand_from ${c.name}' -l ${flag.replace(/^--/, '')}${arg}`,
             );
         }
     }

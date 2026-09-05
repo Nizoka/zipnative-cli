@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { doctor, LIMIT_DEFAULTS } from '../../src/commands/doctor.js';
+import { doctor } from '../../src/commands/doctor.js';
 import { parseArgs } from '../../src/utils/args.js';
 import { ErrorCode } from '../../src/utils/error.js';
 import { DEFAULT_ZIP_LIMITS } from '../../src/core-bridge/index.js';
@@ -126,8 +126,4 @@ describe('doctor', () => {
         await expect(capture(() => doctor(parseArgs(['--format', 'json', '--max-entries', '0'])))).rejects.toMatchObject({ exitCode: 2 });
     });
 
-    it('exports the engine limit defaults for the schema command', () => {
-        expect(LIMIT_DEFAULTS).toBe(DEFAULT_ZIP_LIMITS);
-        expect(Object.keys(LIMIT_DEFAULTS)).toHaveLength(8);
-    });
 });

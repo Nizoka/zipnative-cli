@@ -14,7 +14,7 @@
 // encoder so the SHA-256 is identical on every runtime.
 
 import { createReadStream } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { dirname, extname, resolve } from 'node:path';
 import { type ParsedArgs, getStringFlag, getStringFlagAll, hasFlag } from '../utils/args.js';
 import { emitStatus, isDryRun, isJsonMode, progress } from '../utils/agent.js';
@@ -201,7 +201,7 @@ async function planFromManifest(manifestPath: string, storeExt: Set<string>): Pr
         const name = isDirectory && !e['name'].endsWith('/') ? `${e['name']}/` : e['name'];
         const bare = name.endsWith('/') ? name.slice(0, -1) : name;
         if (sanitizeEntryPath(bare) === null) {
-            throw new CliError(`${where}: name "${name}" would not be extractable safely.`, 1, ErrorCode.INPUT, { entryName: name });
+            throw new CliError(`${where}: name "${name}" would not be extractable safely (traversal, absolute, drive/UNC, reserved device name or empty segment); use a plain relative name.`, 1, ErrorCode.INPUT, { entryName: name });
         }
         if (seen.has(name)) {
             throw new CliError(`${where}: duplicate entry name "${name}".`, 1, ErrorCode.INPUT, { entryName: name });
@@ -224,7 +224,6 @@ async function planFromManifest(manifestPath: string, storeExt: Set<string>): Pr
             const abs = resolve(baseDir, e['path']);
             let size = 0;
             try {
-                const { stat } = await import('node:fs/promises');
                 const st = await stat(abs);
                 if (!st.isFile()) throw new CliError(`${where}: "${e['path']}" is not a regular file.`, 1, ErrorCode.INPUT);
                 size = st.size;
@@ -329,7 +328,7 @@ async function planFromPaths(args: ParsedArgs, inputs: readonly string[], stdinN
             );
         }
         if (entries.some((e) => e.name === bare)) {
-            throw new CliError(`--stdin-name "${stdinName}" collides with an input file name.`, 2);
+            throw new CliError(`--stdin-name "${stdinName}" collides with an input file name; pick another name or drop that input.`, 2);
         }
         const options: { -readonly [K in keyof AddEntryOptions]: AddEntryOptions[K] } = {};
         const c = comments.get(bare);
@@ -338,7 +337,7 @@ async function planFromPaths(args: ParsedArgs, inputs: readonly string[], stdinN
     }
     for (const [name] of comments) {
         if (!entries.some((e) => e.name === name)) {
-            throw new CliError(`--entry-comment names "${name}", which is not an entry of this archive.`, 2);
+            throw new CliError(`--entry-comment names "${name}", which is not an entry of this archive; entry names are relative to --base (run with --dry-run to list them).`, 2);
         }
     }
     if (preserveMode && process.platform === 'win32' && entries.length > 0) {
@@ -392,8 +391,10 @@ export async function create(args: ParsedArgs): Promise<void> {
         throw new CliError('--workers, --min-job-size and --job-timeout require --parallel.', 2);
     }
     assertCodecModulesHonest(parallel, compression?.deterministic === true, dryRun);
-    if (!streaming && chunkSize !== undefined) {
-        throw new CliError('--chunk-size requires --stream.', 2);
+    // Both --stream and --stdin-name go through writer.stream(), the only
+    // path that chunks its output.
+    if (!streaming && stdinName === undefined && chunkSize !== undefined) {
+        throw new CliError('--chunk-size requires --stream or --stdin-name (the chunked writer).', 2);
     }
 
     const plan = manifestPath !== undefined

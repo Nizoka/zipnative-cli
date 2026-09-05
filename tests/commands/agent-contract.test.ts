@@ -235,3 +235,22 @@ describe('an existing archive is not disturbed by a refused run', () => {
         expect((await readFile(archive)).length).toBeGreaterThan(0);
     });
 });
+
+describe('--chunk-size with --stdin-name', () => {
+    it('is accepted (the stdin path uses the chunked writer) while --chunk-size alone stays a usage error', async () => {
+        const { Readable } = await import('node:stream');
+        const original = Object.getOwnPropertyDescriptor(process, 'stdin');
+        Object.defineProperty(process, 'stdin', { value: Readable.from([Buffer.from('chunked stdin payload')]), configurable: true });
+        try {
+            const out = join(dir, 'stdin.zip');
+            const r = await run(() => create(parseArgs(['--stdin-name', 'in.bin', '--chunk-size', '1k', '-o', out])));
+            expect(r.error).toBeUndefined();
+            expect([...openZip(new Uint8Array(await readFile(out))).entries()].map((e) => e.name)).toEqual(['in.bin']);
+        } finally {
+            if (original !== undefined) Object.defineProperty(process, 'stdin', original);
+        }
+        const bad = await run(() => create(parseArgs([src, '--chunk-size', '1k', '-o', join(dir, 'never.zip')])));
+        expect(bad.error).toMatchObject({ exitCode: 2 });
+        expect((bad.error as Error).message).toMatch(/--stream or --stdin-name/);
+    });
+});

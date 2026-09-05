@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { completion, COMMANDS, COMMAND_NAMES, GLOBAL_FLAGS, DRY_RUN_COMMANDS } from '../../src/commands/completion.js';
+import { completion, COMMANDS, COMMAND_NAMES, GLOBAL_FLAGS, DRY_RUN_COMMANDS, PATH_FLAGS } from '../../src/commands/completion.js';
 import { parseArgs } from '../../src/utils/args.js';
 import { ErrorCode } from '../../src/utils/error.js';
 
@@ -73,29 +73,41 @@ describe('completion', () => {
         }
     });
 
-    it('bash: defines the completion function and registers it', async () => {
+    it('bash: defines the completion function, completes files after path flags, and registers it', async () => {
         const out = await capture(() => completion(parseArgs(['bash'])));
         expect(out.startsWith('# bash completion for zipnative')).toBe(true);
         expect(out).toContain('_zipnative()');
         expect(out).toContain('complete -F _zipnative zipnative');
         expect(out).toContain('        modify) opts="--input --output --add');
+        expect(out).toContain('--input|--output|--output-dir|');
+        expect(out).toContain('_filedir');
+        expect(out).toContain('compgen -f');
     });
 
-    it('zsh: starts with #compdef and describes every command with its summary', async () => {
+    it('zsh: starts with #compdef, describes every command with its summary and completes files after path flags', async () => {
         const out = await capture(() => completion(parseArgs(['zsh'])));
         expect(out.startsWith('#compdef zipnative')).toBe(true);
         expect(out).toContain('_describe');
         expect(out).toContain("'stream:Forward-only reader over stdin/pipes (no central directory)'");
         expect(out).not.toContain("''");
+        expect(out).toContain('--comment-file) _files; return ;;');
     });
 
-    it('fish: one subcommand line per command and per-command -l flags', async () => {
+    it('fish: one subcommand line per command, -r on value flags, -r -F on path flags, nothing on booleans', async () => {
         const out = await capture(() => completion(parseArgs(['fish'])));
         expect(out.startsWith('# fish completion for zipnative')).toBe(true);
         expect(out).toContain('complete -c zipnative -f');
         for (const name of NAMES) expect(out).toContain(`-n __fish_use_subcommand -a ${name} -d`);
-        expect(out).toContain("-n '__fish_seen_subcommand_from inflate' -l max-output");
-        expect(out).toContain("-n '__fish_seen_subcommand_from schema' -l json");
+        expect(out).toContain("-n '__fish_seen_subcommand_from inflate' -l max-output -r\n");
+        expect(out).toContain("-n '__fish_seen_subcommand_from inflate' -l input -r -F\n");
+        expect(out).toContain("-n '__fish_seen_subcommand_from schema' -l json\n");
+        expect(out).toContain("-n '__fish_seen_subcommand_from create' -l stream\n");
+        expect(out).toContain("-n '__fish_seen_subcommand_from create' -l level -r\n");
+    });
+
+    it('PATH_FLAGS are value flags that exist on some command or globally', () => {
+        const all = new Set([...GLOBAL_FLAGS, ...COMMANDS.flatMap((c) => c.flags)]);
+        for (const f of PATH_FLAGS) expect(all.has(f), f).toBe(true);
     });
 
     it('powershell (and the pwsh alias): a Register-ArgumentCompleter block with a switch per command', async () => {

@@ -177,12 +177,3 @@ export function guard<T>(context: string, fn: () => T, entryName?: string): T {
         throw mapZipError(e, context, entryName);
     }
 }
-
-/** Async variant of {@link guard}. */
-export async function guardAsync<T>(context: string, fn: () => Promise<T>, entryName?: string): Promise<T> {
-    try {
-        return await fn();
-    } catch (e) {
-        throw mapZipError(e, context, entryName);
-    }
-}

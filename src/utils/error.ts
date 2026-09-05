@@ -79,17 +79,10 @@ export class CliError extends Error {
 }
 
 /**
- * Print a message to stderr and terminate the process.
- * Never returns — declared as `never` for type narrowing.
- */
-export function die(message: string, exitCode = 1): never {
-    process.stderr.write(message + '\n');
-    process.exit(exitCode);
-}
-
-/**
  * Emit a single deprecation warning to stderr.
  * Idempotent per (name) within a process — repeated calls produce one line.
+ * Unused in 1.0.0 (no flag has been renamed yet); kept as the one sanctioned
+ * way to retire a flag name in a minor release.
  */
 const _deprecateSeen = new Set<string>();
 export function deprecate(name: string, replacement: string): void {

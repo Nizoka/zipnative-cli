@@ -23,6 +23,7 @@ import { style } from '../utils/colors.js';
 import { verifyZip } from '../core-bridge/index.js';
 import { prepareEngine } from '../utils/engine.js';
 import { parseLimitFlags } from '../utils/limits.js';
+import { parsePositiveInt } from '../utils/sizes.js';
 import { guard } from '../utils/ziperr.js';
 import {
     parseManifest,
@@ -32,6 +33,9 @@ import {
     type ManifestTaskPlan,
 } from '../utils/manifest.js';
 import { create } from './create.js';
+
+/** Upper bound for `--concurrency` (directory mode): beyond this the pool only burns file descriptors. */
+const MAX_CONCURRENCY = 64;
 
 // Flags consumed by `batch` itself and therefore NOT forwarded to `create`.
 const BATCH_ONLY_FLAGS = new Set([
@@ -198,7 +202,7 @@ async function runManifest(manifestPath: string, args: ParsedArgs): Promise<void
     try {
         rawBuf = await readFile(manifestPath);
     } catch {
-        throw new CliError(`Cannot read --manifest: ${manifestPath}`, 1, ErrorCode.IO);
+        throw new CliError(`Cannot read --manifest ${manifestPath}: check the path (relative to the current directory) and its permissions.`, 1, ErrorCode.IO);
     }
     assertJsonSizeLimit(rawBuf);
     const raw = rawBuf.toString('utf8');
@@ -332,18 +336,17 @@ export async function batch(args: ParsedArgs): Promise<void> {
     const concurrencyRaw = getStringFlag(args.flags, 'concurrency');
     let concurrency = 4;
     if (concurrencyRaw !== undefined) {
-        const n = Number.parseInt(concurrencyRaw, 10);
-        if (!Number.isInteger(n) || n < 1) {
-            throw new CliError('--concurrency must be a positive integer.', 2);
+        concurrency = parsePositiveInt(concurrencyRaw, 'concurrency');
+        if (concurrency > MAX_CONCURRENCY) {
+            throw new CliError(`--concurrency ${concurrencyRaw} exceeds the maximum of ${MAX_CONCURRENCY} (each worker opens one archive; use several batch runs for more).`, 2);
         }
-        concurrency = n;
     }
 
     let names: string[];
     try {
         names = (await readdir(inputDir)).sort();
     } catch {
-        throw new CliError(`Cannot read --input-dir: ${inputDir}`, 1, ErrorCode.IO);
+        throw new CliError(`Cannot read --input-dir ${inputDir}: it must be an existing, readable directory.`, 1, ErrorCode.IO);
     }
 
     const results: FileResult[] = [];
@@ -359,7 +362,7 @@ export async function batch(args: ParsedArgs): Promise<void> {
             }
         }
         if (dirs.length === 0) {
-            throw new CliError(`No subdirectories found in ${inputDir}.`, 1, ErrorCode.INPUT);
+            throw new CliError(`No subdirectories found in ${inputDir}: --task create archives each immediate subdirectory (use \`zipnative create\` for a single tree).`, 1, ErrorCode.INPUT);
         }
         if (!dryRun) await mkdir(outputDir as string, { recursive: true });
 
@@ -382,7 +385,7 @@ export async function batch(args: ParsedArgs): Promise<void> {
         await prepareEngine(args);
         const zips = names.filter((n) => extname(n).toLowerCase() === '.zip');
         if (zips.length === 0) {
-            throw new CliError(`No .zip files found in ${inputDir}.`, 1, ErrorCode.INPUT);
+            throw new CliError(`No .zip files found in ${inputDir}: --task verify checks every *.zip directly inside the directory (not recursively).`, 1, ErrorCode.INPUT);
         }
         const limits = parseLimitFlags(args);
         await runPool(zips, concurrency, async (file) => {

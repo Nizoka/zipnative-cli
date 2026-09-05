@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { walkPaths, entryBasename } from '../../src/utils/walk.js';
+import { walkPaths } from '../../src/utils/walk.js';
 import { buildFilter } from '../../src/utils/glob.js';
 import { CliError } from '../../src/utils/error.js';
 
@@ -245,10 +245,3 @@ describe('walkPaths', () => {
     });
 });
 
-describe('entryBasename', () => {
-    it('returns the last segment for / and \\ paths', () => {
-        expect(entryBasename('a/b/c.txt')).toBe('c.txt');
-        expect(entryBasename('a\\b\\c.txt')).toBe('c.txt');
-        expect(entryBasename('c.txt')).toBe('c.txt');
-    });
-});

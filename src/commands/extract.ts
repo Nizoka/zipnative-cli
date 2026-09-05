@@ -206,7 +206,7 @@ export async function extract(args: ParsedArgs): Promise<void> {
             const safe = sanitizeEntryPath(e.name);
             if (safe === null) {
                 if (skipUnsafe) { skipped.push({ name: e.name, reason: 'unsafe-path' }); continue; }
-                throw new CliError(`Directory entry "${e.name}" is not a safe path.`, 1, ErrorCode.SECURITY, { entryName: e.name, zipCode: 'ZIP_PATH_TRAVERSAL' });
+                throw new CliError(`Directory entry "${e.name}" is not a safe path (traversal, absolute, drive/UNC, NUL, ADS or reserved device name); pass --skip-unsafe to drop such entries.`, 1, ErrorCode.SECURITY, { entryName: e.name, zipCode: 'ZIP_PATH_TRAVERSAL' });
             }
             dirTargets.push({ name: e.name, target: safeJoin(root, safe) });
         }

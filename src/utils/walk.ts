@@ -13,7 +13,7 @@
 //     traversal) is refused at creation time.
 
 import { lstat, readdir, realpath, stat } from 'node:fs/promises';
-import { basename, dirname, join, relative, resolve, sep } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { sanitizeEntryPath } from '../core-bridge/index.js';
 import { CliError, ErrorCode } from './error.js';
 import type { NameFilter } from './glob.js';
@@ -199,9 +199,4 @@ export async function walkPaths(inputs: readonly string[], options: WalkOptions 
         files.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     }
     return { files, skipped };
-}
-
-/** Basename helper (exported for callers building single-entry names). */
-export function entryBasename(path: string): string {
-    return basename(path.replace(/\\/g, '/'));
 }

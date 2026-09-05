@@ -61,7 +61,7 @@ export async function cat(args: ParsedArgs): Promise<void> {
             throw new CliError(`Entry not found: ${name} (run \`zipnative list\` for the exact names).`, 1, ErrorCode.NOT_FOUND, { entryName: name, zipCode: 'ZIP_ENTRY_NOT_FOUND' });
         }
         if (entry.isDirectory) {
-            throw new CliError(`"${name}" is a directory entry — nothing to output.`, 1, ErrorCode.INPUT, { entryName: name });
+            throw new CliError(`"${name}" is a directory entry — nothing to output; name a file entry, or use \`zipnative extract\` to materialise the directory.`, 1, ErrorCode.INPUT, { entryName: name });
         }
         entries.push(entry);
     }

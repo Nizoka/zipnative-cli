@@ -104,7 +104,7 @@ async function loadPayload(path: string, baseDir: string | undefined, stdinUsed:
     const abs = baseDir !== undefined ? resolve(baseDir, path) : resolve(path);
     try {
         const st = await stat(abs);
-        if (!st.isFile()) throw new CliError(`"${path}" is not a regular file.`, 1, ErrorCode.INPUT);
+        if (!st.isFile()) throw new CliError(`"${path}" is not a regular file; a payload must be a file (use --add-dir for a directory entry).`, 1, ErrorCode.INPUT);
         const buf = await readFile(abs);
         return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
     } catch (e) {
@@ -169,7 +169,7 @@ async function editsFromManifest(manifestPath: string, stdinUsed: { used: boolea
             const target = op === 'rename' ? e['to'] : name;
             if (typeof target !== 'string' || target.length === 0) throw new CliError(`${where}: "to" is required for rename.`, 1, ErrorCode.INPUT);
             const bare = target.endsWith('/') ? target.slice(0, -1) : target;
-            if (sanitizeEntryPath(bare) === null) throw new CliError(`${where}: "${target}" is not a safe entry name.`, 1, ErrorCode.INPUT, { entryName: target });
+            if (sanitizeEntryPath(bare) === null) throw new CliError(`${where}: "${target}" would not be extractable safely (traversal, absolute, drive/UNC, reserved device name or empty segment); use a plain relative name.`, 1, ErrorCode.INPUT, { entryName: target });
         }
         const compression: { method?: 'store' | 'deflate'; level?: number; deterministic?: boolean } = {};
         if (e['method'] !== undefined) {

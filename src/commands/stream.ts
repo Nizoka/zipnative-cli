@@ -138,7 +138,7 @@ export async function stream(args: ParsedArgs): Promise<void> {
                 const safeDir = sanitizeEntryPath(header.name);
                 if (safeDir === null) {
                     if (skipUnsafe) { skipped.push({ name: header.name, reason: 'unsafe-path' }); continue; }
-                    throw new CliError(`Directory entry "${header.name}" is not a safe path.`, 1, ErrorCode.SECURITY, { entryName: header.name, zipCode: 'ZIP_PATH_TRAVERSAL' });
+                    throw new CliError(`Directory entry "${header.name}" is not a safe path (traversal, absolute, drive/UNC, NUL, ADS or reserved device name); pass --skip-unsafe to drop such entries.`, 1, ErrorCode.SECURITY, { entryName: header.name, zipCode: 'ZIP_PATH_TRAVERSAL' });
                 }
                 if (!flat && !dryRun) await ensureSinkDir(root as string, safeJoin(root as string, safeDir), header.name);
                 emitRow(row);
@@ -149,7 +149,7 @@ export async function stream(args: ParsedArgs): Promise<void> {
                 await item.skip();
                 if (skipUnsafe) { skipped.push({ name: header.name, reason: 'unsafe-path' }); continue; }
                 throw new CliError(
-                    `Entry name "${header.name}" is not a safe path (traversal, absolute, drive/UNC, NUL, ADS or reserved device name).`,
+                    `Entry name "${header.name}" is not a safe path (traversal, absolute, drive/UNC, NUL, ADS or reserved device name); pass --skip-unsafe to drop such entries.`,
                     1,
                     ErrorCode.SECURITY,
                     { entryName: header.name, zipCode: 'ZIP_PATH_TRAVERSAL' },

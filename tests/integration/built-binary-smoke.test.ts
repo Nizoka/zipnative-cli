@@ -170,4 +170,24 @@ describe.skipIf(!existsSync(BIN))('integration: built binary smoke (dist/cli.cjs
             expect(stderr).not.toContain('EPIPE');
         }
     });
+    it.skipIf(process.platform === 'win32')('SIGINT during a write removes the in-flight output and exits 130 (A-43)', async () => {
+        // Windows has no POSIX signals for child processes; the handler is
+        // exercised on Linux/macOS only. `--stream` opens the output at once
+        // and stdin never ends, so the archive is in flight when the signal lands.
+        const { spawn } = await import('node:child_process');
+        const out = join(dir, 'interrupted.zip');
+        const child = spawn(process.execPath, [BIN, 'create', '--stdin-name', 'endless.bin', '--stream', '-o', out], {
+            cwd: ROOT,
+            env: { ...process.env, NO_COLOR: '1' },
+            stdio: ['pipe', 'pipe', 'pipe'],
+        });
+        child.stdin.write(Buffer.alloc(64 * 1024));
+        await new Promise((r) => setTimeout(r, 400));
+        expect(existsSync(out)).toBe(true);
+        child.kill('SIGINT');
+        const code = await new Promise<number | null>((r) => child.on('exit', (c) => r(c)));
+        expect(code).toBe(130);
+        expect(existsSync(out)).toBe(false);
+    });
+
 });

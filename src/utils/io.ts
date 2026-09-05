@@ -1,8 +1,9 @@
 import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
-import { dirname, isAbsolute, relative, resolve as resolvePath, sep } from 'node:path';
+import { open, readFile, rm, stat, type FileHandle } from 'node:fs/promises';
+import { isAbsolute, relative, resolve as resolvePath, sep } from 'node:path';
 import type { Readable } from 'node:stream';
 import { CliError, ErrorCode } from './error.js';
+import { clearInFlight, markInFlight } from './inflight.js';
 
 const JSON_SIZE_LIMIT = 50 * 1024 * 1024; // 50 MB
 
@@ -183,11 +184,22 @@ export async function writeOutput(data: Uint8Array, filePath: string | undefined
         await writeStdout(data);
         return;
     }
+    // Open first, register for signal cleanup only once the open succeeded:
+    // an EEXIST refusal must never remove the existing file, while a file WE
+    // created is removed if SIGINT/SIGTERM lands mid-write.
+    let handle: FileHandle;
     try {
-        await writeFile(filePath, data, { flag: options.exclusive === true ? 'wx' : 'w' });
+        handle = await open(filePath, options.exclusive === true ? 'wx' : 'w');
     } catch (e) {
         if (isEexist(e)) throw overwriteRefused(filePath);
         throw e;
+    }
+    markInFlight(filePath);
+    try {
+        await handle.writeFile(data);
+    } finally {
+        await handle.close();
+        clearInFlight(filePath);
     }
 }
 
@@ -230,8 +242,12 @@ export async function writeFileStream(
     // unlink the path and then have the deferred open() recreate an empty file.
     let failure: unknown;
     await new Promise<void>((resolve, reject) => {
+        // Only a file WE created is ours to remove on SIGINT/SIGTERM: register
+        // it once the open succeeded (an EEXIST refusal never gets here).
+        stream.on('open', () => markInFlight(filePath));
         stream.on('error', (e: unknown) => { failure ??= e; });
         stream.on('close', () => {
+            clearInFlight(filePath);
             if (failure !== undefined) reject(isEexist(failure) ? overwriteRefused(filePath) : failure);
             else resolve();
         });
@@ -264,11 +280,6 @@ export async function pathExists(filePath: string): Promise<boolean> {
     }
 }
 
-/** Create a directory (and parents) — idempotent. */
-export async function ensureDir(dir: string): Promise<void> {
-    await mkdir(dir, { recursive: true });
-}
-
 /** Best-effort removal of a partially written file; never throws. */
 export async function unlinkQuiet(filePath: string): Promise<void> {
     try {
@@ -299,11 +310,6 @@ export function safeJoin(root: string, relPath: string): string {
         );
     }
     return target;
-}
-
-/** Directory of a file path (helper for parent creation). */
-export function parentDir(filePath: string): string {
-    return dirname(filePath);
 }
 
 /**

@@ -200,6 +200,9 @@ describe('batch (directory mode)', () => {
         expect(zero.error).toMatchObject({ exitCode: 2 });
         const junk = await run(() => batch(parseArgs(['--input-dir', inputDir, '--output-dir', outputDir, '--concurrency', 'many'])));
         expect(junk.error).toMatchObject({ exitCode: 2 });
+        const tooMany = await run(() => batch(parseArgs(['--input-dir', inputDir, '--output-dir', outputDir, '--concurrency', '65'])));
+        expect(tooMany.error).toMatchObject({ exitCode: 2 });
+        expect((tooMany.error as Error).message).toMatch(/maximum of 64/);
     });
 
     it('missing --input-dir / --output-dir, bad --task and bad --format are usage errors', async () => {

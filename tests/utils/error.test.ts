@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { CliError, ErrorCode, deprecate, die } from '../../src/utils/error.js';
+import { CliError, ErrorCode, deprecate } from '../../src/utils/error.js';
 import { captureStderr } from '../helpers/capture.js';
 
 /** The frozen public error-class vocabulary (13). Adding or renaming one is a contract change. */
@@ -144,27 +144,3 @@ describe('deprecate', () => {
     });
 });
 
-describe('die', () => {
-    afterEach(() => {
-        vi.restoreAllMocks();
-    });
-
-    it('writes the message to stderr and exits with the given code', () => {
-        const err = captureStderr();
-        const exit = vi.spyOn(process, 'exit').mockImplementation(((code?: number): never => {
-            throw new Error(`exit ${code}`);
-        }) as typeof process.exit);
-        expect(() => die('fatal', 2)).toThrow('exit 2');
-        expect(err.text()).toBe('fatal\n');
-        expect(exit).toHaveBeenCalledWith(2);
-    });
-
-    it('defaults the exit code to 1', () => {
-        captureStderr();
-        const exit = vi.spyOn(process, 'exit').mockImplementation(((code?: number): never => {
-            throw new Error(`exit ${code}`);
-        }) as typeof process.exit);
-        expect(() => die('fatal')).toThrow('exit 1');
-        expect(exit).toHaveBeenCalledWith(1);
-    });
-});

@@ -2,6 +2,7 @@ import { parseArgs, hasFlag, getStringFlag } from './utils/args.js';
 import { CliError, ErrorCode } from './utils/error.js';
 import { isJsonMode, emitJsonError } from './utils/agent.js';
 import { loadConfig, applyConfigDefaults } from './utils/config.js';
+import { installSignalCleanup } from './utils/inflight.js';
 import { installEpipeGuard } from './utils/io.js';
 import { cliVersion, engineVersion } from './utils/version.js';
 
@@ -144,7 +145,8 @@ Output modes:
                            the buffered layout — the content is identical);
                            entries > 4 GiB are refused
                            (ZIP_UNSUPPORTED_ZIP64_STREAMING)
-  --chunk-size <size>      Chunk size for --stream (default 65536)
+  --chunk-size <size>      Output chunk size for the chunked writer (--stream
+                           or --stdin-name; default 65536)
   --parallel               Deflate across a worker pool (zipnative/worker);
                            byte-identical to the sequential writer per tier.
                            Refused (exit 2) with a --codec module registering
@@ -419,7 +421,7 @@ Directory mode:
                       *.zip in the directory is verified
   --output-dir <dir>  Destination for --task create
   --overwrite         Replace existing <name>.zip files (default: each is refused, E_IO)
-  --concurrency <n>   Parallel workers (default 4)
+  --concurrency <n>   Parallel workers (default 4, max 64)
   --fail-fast         Stop scheduling after the first failure
 
 Manifest mode:
@@ -555,6 +557,7 @@ let activeCommand: string | null = null;
 
 async function main(): Promise<void> {
     installEpipeGuard();
+    installSignalCleanup();
     const argv = process.argv.slice(2);
     const args = parseArgs(argv);
 

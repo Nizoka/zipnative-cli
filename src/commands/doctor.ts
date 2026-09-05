@@ -17,7 +17,6 @@ import { serializeJson } from '../utils/projection.js';
 import { cliVersion, engineVersion } from '../utils/version.js';
 import { COMMANDS } from './completion.js';
 import {
-    DEFAULT_ZIP_LIMITS,
     METHOD_DEFLATE,
     METHOD_STORE,
     VERSION,
@@ -199,6 +198,3 @@ export async function doctor(args: ParsedArgs): Promise<void> {
 
     if (!ok) process.exitCode = 1;
 }
-
-/** Defaults exposed for `schema limits` / docs (avoids importing the bridge there). */
-export const LIMIT_DEFAULTS = DEFAULT_ZIP_LIMITS;
