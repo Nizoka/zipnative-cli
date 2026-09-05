@@ -28,8 +28,11 @@ import { resolve } from 'node:path';
 import { type ParsedArgs, getStringFlag, getStringFlagAll, hasFlag } from '../utils/args.js';
 import { emitStatus, isDryRun, progress } from '../utils/agent.js';
 import {
+    METHOD_DEFLATE,
+    METHOD_STORE,
     extractZip,
     extractZipStream,
+    getCodec,
     getUnixMode,
     isSymlinkEntry,
     sanitizeEntryPath,
@@ -71,7 +74,14 @@ interface PlannedFile {
 
 interface Skipped {
     readonly name: string;
-    readonly reason: 'unsafe-path' | 'symlink' | 'filtered' | 'duplicate';
+    readonly reason: 'unsafe-path' | 'symlink' | 'filtered' | 'duplicate' | 'unsupported';
+}
+
+/** Encrypted, or a compression method the engine has no codec for. */
+function isUndecodable(entry: ZipEntry): boolean {
+    if (entry.isEncrypted) return true;
+    const m = entry.compressionMethod;
+    return m !== METHOD_STORE && m !== METHOD_DEFLATE && getCodec(m) === null;
 }
 
 export async function extract(args: ParsedArgs): Promise<void> {
@@ -83,6 +93,7 @@ export async function extract(args: ParsedArgs): Promise<void> {
     }
     const overwrite = hasFlag(args.flags, 'overwrite');
     const skipUnsafe = hasFlag(args.flags, 'skip-unsafe');
+    const skipUnsupported = hasFlag(args.flags, 'skip-unsupported');
     const allowSymlinks = hasFlag(args.flags, 'allow-symlinks');
     const skipSymlinks = hasFlag(args.flags, 'skip-symlinks');
     const flat = hasFlag(args.flags, 'flat');
@@ -121,6 +132,12 @@ export async function extract(args: ParsedArgs): Promise<void> {
         }
         if (skipSymlinks && isSymlinkEntry(entry)) {
             skipped.push({ name: entry.name, reason: 'symlink' });
+            return false;
+        }
+        if (skipUnsupported && !entry.isDirectory && isUndecodable(entry)) {
+            // Skip-not-write: an encrypted payload or a method with no
+            // registered codec would otherwise abort the whole extraction.
+            skipped.push({ name: entry.name, reason: 'unsupported' });
             return false;
         }
         return true;

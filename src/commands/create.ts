@@ -49,11 +49,16 @@ import { walkPaths, type SkippedPath } from '../utils/walk.js';
 import { mapZipError } from '../utils/ziperr.js';
 import {
     commonOptions,
+    externalAttributesFor,
+    parseArchiveComment,
     parseChunkSize,
     parseCompression,
     parseDateFlag,
+    parseExtraFields,
     parseIntFlag,
     parseIsoDateUtc,
+    parseManifestComment,
+    parseMode,
     parseNameFilter,
 } from '../utils/zipops.js';
 
@@ -78,19 +83,8 @@ interface Plan {
         readonly order?: 'canonical' | 'insertion';
         readonly defaultDate?: Date | 'now';
         readonly compression?: ZipCompressionOptions;
-        readonly comment?: string;
+        readonly comment?: string | Uint8Array;
     };
-}
-
-const S_IFREG = 0o100000;
-const S_IFDIR = 0o040000;
-const DOS_ATTR_DIRECTORY = 0x10;
-
-function externalAttributesFor(mode: number, isDirectory: boolean): number {
-    // setuid / setgid / sticky are never propagated into an archive.
-    const perm = mode & 0o777;
-    if (isDirectory) return (((S_IFDIR | perm) << 16) >>> 0) | DOS_ATTR_DIRECTORY;
-    return ((S_IFREG | perm) << 16) >>> 0;
 }
 
 function parseOrder(args: ParsedArgs): 'canonical' | 'insertion' | undefined {
@@ -119,12 +113,6 @@ function parseStoreExt(args: ParsedArgs): Set<string> {
         if (e.length > 0) out.add(e);
     }
     return out;
-}
-
-function parseMode(raw: unknown, where: string): number {
-    if (typeof raw === 'number' && Number.isInteger(raw) && raw >= 0 && raw <= 0o7777) return raw;
-    if (typeof raw === 'string' && /^0?[0-7]{3,4}$/.test(raw)) return Number.parseInt(raw, 8);
-    throw new CliError(`${where}: "mode" must be an octal string like "0644" or "0755".`, 1, ErrorCode.INPUT);
 }
 
 function parseManifestDate(raw: unknown, where: string): Date | 'now' | undefined {
@@ -163,8 +151,8 @@ function parseManifestCompression(raw: unknown, where: string): ZipCompressionOp
     return out;
 }
 
-const MANIFEST_KEYS = new Set(['version', 'comment', 'order', 'date', 'compression', 'entries']);
-const ENTRY_KEYS = new Set(['name', 'path', 'data', 'dataBase64', 'directory', 'method', 'level', 'deterministic', 'date', 'comment', 'mode']);
+const MANIFEST_KEYS = new Set(['version', 'comment', 'commentBase64', 'order', 'date', 'compression', 'entries']);
+const ENTRY_KEYS = new Set(['name', 'path', 'data', 'dataBase64', 'directory', 'method', 'level', 'deterministic', 'date', 'comment', 'mode', 'extraFields']);
 
 /** Parse a `create-manifest` document into a plan (paths resolve against the manifest's directory). */
 async function planFromManifest(manifestPath: string, storeExt: Set<string>): Promise<Plan> {
@@ -189,9 +177,7 @@ async function planFromManifest(manifestPath: string, storeExt: Set<string>): Pr
     if (order !== undefined && order !== 'canonical' && order !== 'insertion') {
         throw new CliError('Manifest "order" must be "canonical" or "insertion".', 1, ErrorCode.INPUT);
     }
-    if (m['comment'] !== undefined && typeof m['comment'] !== 'string') {
-        throw new CliError('Manifest "comment" must be a string.', 1, ErrorCode.INPUT);
-    }
+    const archiveComment = parseManifestComment(m, 'manifest');
 
     const entries: PlannedEntry[] = [];
     const seen = new Set<string>();
@@ -286,6 +272,9 @@ async function planFromManifest(manifestPath: string, storeExt: Set<string>): Pr
         if (e['mode'] !== undefined) {
             options.externalAttributes = externalAttributesFor(parseMode(e['mode'], where), isDirectory);
         }
+        if (e['extraFields'] !== undefined) {
+            options.extraFields = parseExtraFields(e['extraFields'], where);
+        }
         entries.push({ name, isDirectory, source, options });
     }
 
@@ -293,7 +282,7 @@ async function planFromManifest(manifestPath: string, storeExt: Set<string>): Pr
         ...(order !== undefined ? { order: order as 'canonical' | 'insertion' } : {}),
         ...(parseManifestDate(m['date'], 'manifest') !== undefined ? { defaultDate: parseManifestDate(m['date'], 'manifest') } : {}),
         ...(m['compression'] !== undefined ? { compression: parseManifestCompression(m['compression'], 'manifest') } : {}),
-        ...(typeof m['comment'] === 'string' ? { comment: m['comment'] } : {}),
+        ...(archiveComment !== undefined ? { comment: archiveComment } : {}),
     };
     return { entries, skipped: [], archive };
 }
@@ -308,6 +297,8 @@ async function planFromPaths(args: ParsedArgs, inputs: readonly string[], stdinN
         followSymlinks: hasFlag(args.flags, 'follow-symlinks'),
         dirEntries: hasFlag(args.flags, 'dir-entries'),
         ...(parseNameFilter(args) !== undefined ? { filter: parseNameFilter(args) } : {}),
+        // `--order insertion` = the argv order (directories walk name-sorted).
+        preserveInputOrder: parseOrder(args) === 'insertion',
     });
     const preserveMode = hasFlag(args.flags, 'preserve-mode');
     const useMtime = hasFlag(args.flags, 'mtime');
@@ -373,7 +364,7 @@ export async function create(args: ParsedArgs): Promise<void> {
     const minJobSizeRaw = getStringFlag(args.flags, 'min-job-size');
     const minWorkerJobSize = minJobSizeRaw !== undefined ? parseByteSize(minJobSizeRaw, 'min-job-size') : undefined;
     const jobTimeout = parseIntFlag(args, 'job-timeout');
-    const comment = getStringFlag(args.flags, 'comment');
+    const comment = await parseArchiveComment(args);
     const storeExt = parseStoreExt(args);
 
     if (manifestPath !== undefined && (inputs.length > 0 || stdinName !== undefined)) {
@@ -423,7 +414,7 @@ export async function create(args: ParsedArgs): Promise<void> {
         ...(effectiveOrder !== undefined ? { order: effectiveOrder } : {}),
         ...(effectiveDate !== undefined ? { defaultDate: effectiveDate } : {}),
         ...(effectiveCompression !== undefined ? { compression: effectiveCompression } : {}),
-        ...(effectiveComment !== undefined ? { comment: effectiveComment } : {}),
+        ...(typeof effectiveComment === 'string' ? { comment: effectiveComment } : {}),
     };
 
     const files = plan.entries.filter((e) => !e.isDirectory).length;
@@ -490,6 +481,14 @@ export async function create(args: ParsedArgs): Promise<void> {
         }
     } catch (e) {
         throw mapZipError(e, 'Failed to initialise the archive writer');
+    }
+    // A binary comment (--comment-file / commentBase64) goes through setComment(Uint8Array).
+    if (effectiveComment instanceof Uint8Array) {
+        try {
+            writer.setComment(effectiveComment);
+        } catch (e) {
+            throw mapZipError(e, 'Failed to set the archive comment');
+        }
     }
 
     try {

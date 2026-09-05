@@ -16,6 +16,7 @@ import { emitJsonReport, serializeJson } from '../utils/projection.js';
 import { guard } from '../utils/ziperr.js';
 import {
     commonOptions,
+    bytesToHex,
     decodeComment,
     openArchive,
     parseFormat,
@@ -31,6 +32,8 @@ export interface ListReport {
         readonly isZip64: boolean;
         readonly comment: string;
         readonly commentBytes: number;
+        /** Raw comment bytes, hex — present when the archive has a comment. */
+        readonly commentHex?: string;
     };
     readonly entries: readonly EntryRow[];
     readonly diagnostics: readonly unknown[];
@@ -109,6 +112,7 @@ export async function list(args: ParsedArgs): Promise<void> {
             isZip64: reader.isZip64,
             comment: decodeComment(reader.comment),
             commentBytes: reader.comment.length,
+            ...(reader.comment.length > 0 ? { commentHex: bytesToHex(reader.comment) } : {}),
         },
         entries: rows,
         diagnostics: sink.diagnostics,

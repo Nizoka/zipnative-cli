@@ -113,6 +113,24 @@ const entryRowSchema: JsonSchema = {
             type: 'array',
             items: { type: 'object', properties: { id: { type: 'integer' }, idHex: { type: 'string' }, name: { type: ['string', 'null'] }, length: { type: 'integer' }, hex: { type: 'string' } } },
         },
+        rawNameHex: { type: 'string', pattern: '^([0-9a-f]{2})*$', description: 'Present with --long: the stored name bytes (cp437 / invalid-UTF-8 forensics).' },
+        commentHex: { type: 'string', pattern: '^([0-9a-f]{2})*$', description: 'Present with --long when the entry has a comment: its raw bytes.' },
+    },
+};
+
+/** Manifest `extraFields` item: `{ id, hex | base64 }` (create entries, modify add/replace/add-dir). */
+const extraFieldsInputSchema: JsonSchema = {
+    type: 'array',
+    description: 'Raw extra fields written verbatim: id (0-65535 or "0x5455") plus exactly one of hex / base64 (at most 65531 bytes each).',
+    items: {
+        type: 'object',
+        required: ['id'],
+        additionalProperties: false,
+        properties: {
+            id: { anyOf: [{ type: 'integer', minimum: 0, maximum: 65535 }, { type: 'string', pattern: '^0x[0-9a-fA-F]{1,4}$' }] },
+            hex: { type: 'string', pattern: '^([0-9a-fA-F]{2})*$' },
+            base64: { type: 'string' },
+        },
     },
 };
 
@@ -128,8 +146,9 @@ function createManifestSchema(): JsonSchema {
         properties: {
             version: { const: 1 },
             comment: { type: 'string' },
-            order: { enum: ['canonical', 'insertion'] },
-            date: { type: 'string', description: '"epoch" (default), "now", or an ISO 8601 date.' },
+            commentBase64: { type: 'string', description: 'Raw archive comment bytes (exclusive with comment; at most 65535 bytes).' },
+            order: { enum: ['canonical', 'insertion'], description: 'insertion = the manifest order (first entry first, e.g. an EPUB mimetype).' },
+            date: { type: 'string', description: '"epoch" (default), "now", or an ISO 8601 date (UTC wall-clock).' },
             compression: { type: 'object', additionalProperties: false, properties: compressionProps },
             entries: {
                 type: 'array',
@@ -147,6 +166,7 @@ function createManifestSchema(): JsonSchema {
                         date: { type: 'string' },
                         comment: { type: 'string' },
                         mode: { type: 'string', pattern: '^0?[0-7]{3,4}$', description: 'POSIX mode, octal (e.g. "0755").' },
+                        extraFields: extraFieldsInputSchema,
                     },
                 },
             },
@@ -166,6 +186,7 @@ function modifyManifestSchema(): JsonSchema {
         properties: {
             version: { const: 1 },
             comment: { type: 'string' },
+            commentBase64: { type: 'string', description: 'Raw archive comment bytes (exclusive with comment; at most 65535 bytes).' },
             edits: {
                 type: 'array',
                 items: {
@@ -182,6 +203,8 @@ function modifyManifestSchema(): JsonSchema {
                         ...compressionProps,
                         date: { type: 'string', format: 'date-time' },
                         comment: { type: 'string' },
+                        mode: { type: 'string', pattern: '^0?[0-7]{3,4}$', description: 'POSIX mode, octal (add / replace / add-dir).' },
+                        extraFields: extraFieldsInputSchema,
                     },
                 },
             },
@@ -242,7 +265,7 @@ function entriesSchema(): JsonSchema {
             archive: {
                 type: 'object',
                 required: ['bytes', 'entryCount', 'isZip64', 'comment', 'commentBytes'],
-                properties: { bytes: { type: 'integer' }, entryCount: { type: 'integer' }, isZip64: { type: 'boolean' }, comment: { type: 'string' }, commentBytes: { type: 'integer' } },
+                properties: { bytes: { type: 'integer' }, entryCount: { type: 'integer' }, isZip64: { type: 'boolean' }, comment: { type: 'string' }, commentBytes: { type: 'integer' }, commentHex: { type: 'string', description: 'Present when commentBytes > 0: the raw comment bytes.' } },
             },
             entries: { type: 'array', items: entryRowSchema },
             diagnostics: { type: 'array', items: diagnosticSchema },
@@ -365,6 +388,7 @@ function verifySchema(): JsonSchema {
             failed: { type: 'integer' },
             skipped: { type: 'integer' },
             strict: { type: 'boolean' },
+            selected: { type: 'array', items: { type: 'string' }, description: 'Present under --entry: the names verified; entries lists only those.' },
         },
     };
 }
@@ -379,7 +403,7 @@ function verifySummarySchema(): JsonSchema {
         additionalProperties: false,
         properties: {
             ok: { type: 'boolean' }, entries: { type: 'integer' }, failed: { type: 'integer' },
-            skipped: { type: 'integer' }, diagnostics: { type: 'integer' }, error: { enum: ZIP_CODES },
+            skipped: { type: 'integer' }, diagnostics: { type: 'integer' }, selected: { type: 'integer' }, error: { enum: ZIP_CODES },
         },
     };
 }
@@ -540,6 +564,7 @@ function statusSchema(): JsonSchema {
             outputDir: { type: 'string' },
             bytes: { type: 'integer' },
             bytesIn: { type: 'integer' },
+            bytesConsumed: { type: 'integer', description: 'inflate: compressed bytes the stream occupied (bytesIn minus leftover on the streaming path).' },
             bytesOut: { type: 'integer' },
             entries: { anyOf: [{ type: 'integer' }, { type: 'array', items: { type: 'string' } }] },
             files: { type: 'integer' },

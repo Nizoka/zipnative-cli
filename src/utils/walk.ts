@@ -3,8 +3,8 @@
 //   • Entry names are `/`-separated paths relative to `--base` (default: each
 //     positional's parent directory, so `create src/` yields `src/a.ts`).
 //   • `readdir` output is sorted by name so the walk order is identical on
-//     every platform (the writer re-sorts canonically anyway; this keeps
-//     `--order insertion` reproducible too).
+//     every platform; the final list is name-sorted too unless
+//     `preserveInputOrder` keeps the argv order (`--order insertion`).
 //   • Symlinks (files and directories, detected with `lstat`) are SKIPPED by
 //     default and reported; `--follow-symlinks` dereferences them with a
 //     realpath cycle guard. No symlink entries are ever written.
@@ -46,6 +46,12 @@ export interface WalkOptions {
     /** Emit explicit directory entries (`dir/`) for every walked directory. */
     readonly dirEntries?: boolean;
     readonly filter?: NameFilter;
+    /**
+     * Keep the argv order of the inputs (each directory still walks in sorted
+     * `readdir` order) instead of the global name sort — `--order insertion`,
+     * e.g. an EPUB whose `mimetype` must be the first entry.
+     */
+    readonly preserveInputOrder?: boolean;
 }
 
 export interface WalkResult {
@@ -187,8 +193,11 @@ export async function walkPaths(inputs: readonly string[], options: WalkOptions 
         await visit(abs, rootBase);
     }
 
-    // Deterministic output regardless of input order.
-    files.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    // Deterministic output regardless of input order — unless the caller asked
+    // for the argv order (the writer's `order: 'insertion'` then honours it).
+    if (options.preserveInputOrder !== true) {
+        files.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    }
     return { files, skipped };
 }
 

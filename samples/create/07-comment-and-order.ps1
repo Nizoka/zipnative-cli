@@ -1,7 +1,8 @@
 # create/07-comment-and-order.ps1 — archive/entry comments, --order, --date
 #
 # --comment sets the archive comment, --entry-comment <name>=<text> a
-# per-entry one. --order insertion keeps the walk order instead of the
+# per-entry one. --order insertion keeps the argv order (directories walk
+# name-sorted) instead of the
 # canonical raw-name-byte sort, and --date pins every timestamp to an ISO
 # instant (DOS time has 2-second resolution) instead of the epoch default —
 # both are legitimate choices that `inspect` will report as non-deterministic.

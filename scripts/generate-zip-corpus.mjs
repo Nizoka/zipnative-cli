@@ -283,6 +283,8 @@ function writeSourceTree() {
     put(INPUTS_DIR, 'zeros.bin', new Uint8Array(1024 * 1024));
     put(INPUTS_DIR, 'stdin-payload.bin', pattern.subarray(0, 1024));
     put(INPUTS_DIR, 'sfx-stub.sh', '#!/bin/sh\necho stub\n');
+    // "café, corpus" in Latin-1: a legal archive comment that is NOT valid UTF-8.
+    put(INPUTS_DIR, 'comment-latin1.bin', Uint8Array.from([0x63, 0x61, 0x66, 0xe9, 0x2c, 0x20, 0x63, 0x6f, 0x72, 0x70, 0x75, 0x73]));
 }
 
 function manifestFile(name, doc) {
@@ -381,6 +383,51 @@ const CORPUS = [
                 { name: 'notes.md', path: src('text/notes.md'), comment: 'commentaire d’entrée — UTF-8' },
             ],
         }), '-o', dest(f)]),
+    },
+    {
+        // A binary (non-UTF-8) archive comment through --comment-file: the EOCD
+        // comment is opaque bytes for the format; the CLI reports it as commentHex.
+        file: 'comment-binary.zip',
+        run: (f) => cli(f, ['create', src('text'), '-o', dest(f), '--base', SRC_DIR, '--comment-file', input('comment-latin1.bin')]),
+        after: (f) => {
+            const archive = listJson(f).archive;
+            const expected = Buffer.from(readFileSync(input('comment-latin1.bin'))).toString('hex');
+            if (archive.commentHex !== expected) fail(f, [`--comment-file: commentHex ${archive.commentHex} ≠ ${expected}`]);
+        },
+    },
+    {
+        // EPUB-style layout: `order: insertion` keeps the manifest order so the
+        // stored `mimetype` entry comes first (OCF requirement).
+        file: 'order-insertion-epub.zip',
+        run: (f) => cli(f, ['create', '--from-manifest', manifestFile('epub-order.json', {
+            order: 'insertion',
+            entries: [
+                { name: 'mimetype', data: 'application/epub+zip', method: 'store' },
+                { name: 'META-INF/container.xml', data: '<?xml version="1.0"?><container version="1.0"/>\n' },
+                { name: 'OEBPS/chapter1.xhtml', path: src('text/notes.md') },
+            ],
+        }), '-o', dest(f)]),
+        after: (f) => {
+            const names = inspectEntries(f).map((e) => e.name);
+            if (names[0] !== 'mimetype') fail(f, [`order: insertion — first entry is ${names[0]}, expected mimetype`]);
+            if (names.join(',') !== 'mimetype,META-INF/container.xml,OEBPS/chapter1.xhtml') fail(f, [`order: insertion — got ${names.join(',')}`]);
+        },
+    },
+    {
+        // Custom extra fields from a manifest (private ids, written verbatim).
+        file: 'extra-fields-manifest.zip',
+        run: (f) => cli(f, ['create', '--from-manifest', manifestFile('extra-fields.json', {
+            entries: [
+                { name: 'readme.txt', path: src('text/readme.txt'), extraFields: [{ id: '0x6a6a', hex: 'deadbeef' }] },
+                { name: 'notes.md', path: src('text/notes.md'), extraFields: [{ id: 0x5a5a, base64: 'AQIDBA==' }, { id: '0x6b6b', hex: '' }] },
+            ],
+        }), '-o', dest(f)]),
+        after: (f) => {
+            const rows = listJson(f, ['--long']).entries;
+            const ids = (name) => (rows.find((e) => e.name === name)?.extraFields ?? []).map((x) => `${x.id}:${x.length}`).join(',');
+            if (ids('readme.txt') !== '27242:4') fail(f, [`extraFields readme.txt: ${ids('readme.txt')} ≠ 27242:4`]);
+            if (ids('notes.md') !== '23130:4,27499:0') fail(f, [`extraFields notes.md: ${ids('notes.md')} ≠ 23130:4,27499:0`]);
+        },
     },
     {
         file: 'deterministic-a.zip',
@@ -606,6 +653,12 @@ const CORPUS = [
 
 function assertIdentical(a, b, what) {
     if (!bytesOf(a).equals(bytesOf(b))) fail(b, [`${what}: ${a} and ${b} are not byte-identical`]);
+}
+
+/** `list --format json` document (archive + entry rows), optionally with extra flags. */
+function listJson(file, extra = []) {
+    const r = cli(`${file} (list)`, ['list', dest(file), '--format', 'json', ...extra]);
+    return JSON.parse(r.stdout);
 }
 
 /** Long-form entry rows from `inspect --format json --entries`. */

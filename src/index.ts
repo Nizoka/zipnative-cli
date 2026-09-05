@@ -99,9 +99,10 @@ Inputs:
   <path>...           Files and directories (directories are walked recursively)
   --input,   -i       Same as a positional (repeatable; useful in manifests)
   --stdin-name <n>    Read stdin as one entry named <n>
-  --from-manifest <f> JSON manifest ({ entries: [{ name, path|data|dataBase64|
-                      directory, method, level, date, comment, mode }] }) —
-                      see \`zipnative schema create-manifest\`
+  --from-manifest <f> JSON manifest ({ comment|commentBase64, order, date,
+                      compression, entries: [{ name, path|data|dataBase64|
+                      directory, method, level, date, comment, mode,
+                      extraFields }] }) — see \`zipnative schema create-manifest\`
   --output,  -o       Output path (default: stdout)
   --overwrite         Replace an existing output file (default: refuse, E_IO)
 
@@ -119,7 +120,9 @@ Compression & determinism:
   --method store|deflate   (default deflate)
   --level 0-9              (default 6)
   --deterministic          Pin the pure-TS encoder: identical SHA-256 on every runtime
-  --order canonical|insertion   Entry order (default canonical raw-name bytes)
+  --order canonical|insertion   Entry order (default canonical raw-name bytes;
+                           insertion = argv order, directories walked name-
+                           sorted — e.g. an EPUB "mimetype" first)
   --date epoch|now|<ISO>   Timestamp for entries (default: DOS epoch,
                            reproducible). An ISO date is UTC wall-clock time
                            (a string without a zone is read as UTC), so the
@@ -128,6 +131,8 @@ Compression & determinism:
   --mtime                  Use each file's modification time (local time,
                            non-reproducible)
   --comment <text>         Archive comment
+  --comment-file <path>    Archive comment from a file, raw bytes ("-" = stdin;
+                           exclusive with --comment; at most 65535 bytes)
   --entry-comment <name>=<text>   Per-entry comment (repeatable)
   --preserve-mode          Store POSIX mode bits (no setuid/setgid/sticky)
   --store-ext png,jpg,zip  Store (no deflate) entries with these extensions
@@ -247,6 +252,8 @@ Options:
   --skip-unsafe       SKIP entries whose names cannot be made safe instead of
                       failing (zip-slip, absolute, drive/UNC, NUL, ADS, device
                       names). Nothing unsafe is ever written.
+  --skip-unsupported  SKIP encrypted entries and methods with no registered
+                      codec (reason "unsupported") instead of failing
   --allow-symlinks    Write a symlink entry's TARGET TEXT as a regular file
                       (a symlink is never materialised). Default: refuse.
   --skip-symlinks     Drop symlink entries silently
@@ -305,7 +312,12 @@ Edits (applied in this fixed order regardless of argv order):
   --add <name>=<path>        Add a new entry (repeatable; a bare <path> uses its basename)
   --add-dir <name>           Add an explicit directory entry (repeatable)
   --comment <text>           Set the archive comment ("" clears it)
-  --from-manifest <f>        JSON edits — see \`zipnative schema modify-manifest\`
+  --comment-file <path>      Set the archive comment from a file, raw bytes
+                             ("-" = stdin; exclusive with --comment)
+  --from-manifest <f>        JSON edits ({ comment|commentBase64, edits: [{ op,
+                             name, to, path|data|dataBase64, method, level,
+                             date, comment, mode, extraFields }] }) —
+                             see \`zipnative schema modify-manifest\`
 
 Options:
   --method/--level/--deterministic   Compression for NEW payloads
@@ -337,16 +349,20 @@ Usage:
 
 Options:
   --input,   -i       Archive path (default: stdin)
+  --entry,   -e       Verify only the named entries (repeatable): CRC-32, sizes
+                      and local header of each, after the eager structural
+                      check; the report lists them under "selected". An unknown
+                      name is E_NOT_FOUND before any output.
   --format, -f text|json  (default text; json under --json)
   --strict            Also fail when any diagnostic was emitted
-  --summary           { ok, entries, failed, skipped, diagnostics, error? }
+  --summary           { ok, entries, failed, skipped, diagnostics, selected?, error? }
   --fields a,b.c      Dot-path projection
 
 Report = zipnative's ZipVerificationReport ({ ok, error, entryCount, entries[
 { name, ok, crcMatch, sizeMatch, localHeaderMatch, skipped? }], diagnostics })
-plus { failed, skipped, strict }. Encrypted entries are honestly "skipped",
-never faked as verified. Exit 1 / E_VERIFY_FAILED when ok is false; the error
-envelope carries zipCode = report.error.code for structural refusals.
+plus { failed, skipped, strict, selected? }. Encrypted entries are honestly
+"skipped", never faked as verified. Exit 1 / E_VERIFY_FAILED when ok is false;
+the error envelope carries zipCode = report.error.code for structural refusals.
 `;
 
 const CRC32_USAGE = `\

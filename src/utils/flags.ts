@@ -25,7 +25,7 @@ export const COMMAND_BOOLEAN_FLAGS: Readonly<Record<string, readonly string[]>> 
     list: ['long', 'summary'],
     inspect: ['entries', 'extra', 'summary'],
     cat: ['raw', 'no-verify-crc', 'overwrite'],
-    extract: ['overwrite', 'skip-unsafe', 'allow-symlinks', 'skip-symlinks', 'flat', 'buffered', 'preserve-mode', 'preserve-mtime'],
+    extract: ['overwrite', 'skip-unsafe', 'skip-unsupported', 'allow-symlinks', 'skip-symlinks', 'flat', 'buffered', 'preserve-mode', 'preserve-mtime'],
     stream: ['list', 'long', 'overwrite', 'skip-unsafe', 'skip-unsupported', 'flat', 'preserve-mtime', 'summary'],
     verify: ['summary'],
     crc32: [],

@@ -28,6 +28,7 @@ import {
     type EntryVerification,
     type ZipCompressionOptions,
     type ZipEntry,
+    type ZipExtraField,
     type ZipModifierOptions,
     type ZipReader,
 } from '../core-bridge/index.js';
@@ -38,11 +39,17 @@ import { readJsonInput, readStdin, unlinkQuiet, validatePath, writeOutput } from
 import { mapZipError } from '../utils/ziperr.js';
 import {
     commonOptions,
+    describeComment,
+    externalAttributesFor,
     openArchive,
+    parseArchiveComment,
     parseCompression,
     parseDateFlag,
+    parseExtraFields,
     parseFromEqualsTo,
     parseIsoDateUtc,
+    parseManifestComment,
+    parseMode,
     parseNameEqualsPath,
     readArchiveBytes,
 } from '../utils/zipops.js';
@@ -88,18 +95,27 @@ async function loadPayload(path: string, baseDir: string | undefined, stdinUsed:
     }
 }
 
-function entryOptions(compression: ZipCompressionOptions | undefined, comment?: string, date?: Date): AddEntryOptions | undefined {
+interface EntryExtras {
+    readonly comment?: string;
+    readonly date?: Date;
+    readonly externalAttributes?: number;
+    readonly extraFields?: readonly ZipExtraField[];
+}
+
+function entryOptions(compression: ZipCompressionOptions | undefined, extras: EntryExtras = {}): AddEntryOptions | undefined {
     const out: { -readonly [K in keyof AddEntryOptions]: AddEntryOptions[K] } = {};
     if (compression !== undefined) out.compression = compression;
-    if (comment !== undefined) out.comment = comment;
-    if (date !== undefined) out.date = date;
+    if (extras.comment !== undefined) out.comment = extras.comment;
+    if (extras.date !== undefined) out.date = extras.date;
+    if (extras.externalAttributes !== undefined) out.externalAttributes = extras.externalAttributes;
+    if (extras.extraFields !== undefined) out.extraFields = extras.extraFields;
     return Object.keys(out).length > 0 ? out : undefined;
 }
 
-const MANIFEST_KEYS = new Set(['version', 'comment', 'edits']);
-const EDIT_KEYS = new Set(['op', 'name', 'to', 'path', 'data', 'dataBase64', 'method', 'level', 'deterministic', 'date', 'comment']);
+const MANIFEST_KEYS = new Set(['version', 'comment', 'commentBase64', 'edits']);
+const EDIT_KEYS = new Set(['op', 'name', 'to', 'path', 'data', 'dataBase64', 'method', 'level', 'deterministic', 'date', 'comment', 'mode', 'extraFields']);
 
-async function editsFromManifest(manifestPath: string, stdinUsed: { used: boolean }): Promise<{ edits: Edit[]; comment: string | undefined }> {
+async function editsFromManifest(manifestPath: string, stdinUsed: { used: boolean }): Promise<{ edits: Edit[]; comment: string | Uint8Array | undefined }> {
     const parsed = await readJsonInput(manifestPath, 'manifest');
     if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
         throw new CliError('--from-manifest must be a JSON object: { "edits": [...] }.', 1, ErrorCode.INPUT);
@@ -112,7 +128,7 @@ async function editsFromManifest(manifestPath: string, stdinUsed: { used: boolea
         throw new CliError(`Unsupported manifest version ${String(m['version'])} (expected 1).`, 1, ErrorCode.INPUT);
     }
     if (!Array.isArray(m['edits'])) throw new CliError('Manifest "edits" must be an array.', 1, ErrorCode.INPUT);
-    if (m['comment'] !== undefined && typeof m['comment'] !== 'string') throw new CliError('Manifest "comment" must be a string.', 1, ErrorCode.INPUT);
+    const archiveComment = parseManifestComment(m, 'manifest');
     const baseDir = manifestPath === '-' ? process.cwd() : dirname(resolve(manifestPath));
 
     const edits: Edit[] = [];
@@ -157,7 +173,12 @@ async function editsFromManifest(manifestPath: string, stdinUsed: { used: boolea
         }
         const comment = e['comment'];
         if (comment !== undefined && typeof comment !== 'string') throw new CliError(`${where}: "comment" must be a string.`, 1, ErrorCode.INPUT);
-        const options = entryOptions(Object.keys(compression).length > 0 ? compression : undefined, comment as string | undefined, date);
+        const extras: { -readonly [K in keyof EntryExtras]: EntryExtras[K] } = {};
+        if (comment !== undefined) extras.comment = comment;
+        if (date !== undefined) extras.date = date;
+        if (e['mode'] !== undefined) extras.externalAttributes = externalAttributesFor(parseMode(e['mode'], where), op === 'add-dir');
+        if (e['extraFields'] !== undefined) extras.extraFields = parseExtraFields(e['extraFields'], where);
+        const options = entryOptions(Object.keys(compression).length > 0 ? compression : undefined, extras);
 
         if (op === 'add' || op === 'replace') {
             const sources = ['path', 'data', 'dataBase64'].filter((k) => e[k] !== undefined);
@@ -176,7 +197,7 @@ async function editsFromManifest(manifestPath: string, stdinUsed: { used: boolea
             edits.push({ op, name });
         }
     }
-    return { edits, comment: typeof m['comment'] === 'string' ? m['comment'] : undefined };
+    return { edits, comment: archiveComment };
 }
 
 export async function modify(args: ParsedArgs): Promise<void> {
@@ -199,7 +220,7 @@ export async function modify(args: ParsedArgs): Promise<void> {
     // ── Collect edits (flags), or from the manifest.
     const stdinUsed = { used: inputPath === '-' };
     const edits: Edit[] = [];
-    let comment = getStringFlag(args.flags, 'comment');
+    let comment: string | Uint8Array | undefined = await parseArchiveComment(args);
     const flagEdits =
         getStringFlagAll(args.flags, 'add').length
         + getStringFlagAll(args.flags, 'add-dir').length
@@ -207,7 +228,7 @@ export async function modify(args: ParsedArgs): Promise<void> {
         + getStringFlagAll(args.flags, 'remove').length
         + getStringFlagAll(args.flags, 'rename').length;
     if (manifestPath !== undefined && (flagEdits > 0 || comment !== undefined)) {
-        throw new CliError('--from-manifest is mutually exclusive with --add/--replace/--remove/--rename/--add-dir/--comment.', 2);
+        throw new CliError('--from-manifest is mutually exclusive with --add/--replace/--remove/--rename/--add-dir/--comment/--comment-file.', 2);
     }
     if (manifestPath !== undefined) {
         const m = await editsFromManifest(manifestPath, stdinUsed);
@@ -235,7 +256,7 @@ export async function modify(args: ParsedArgs): Promise<void> {
         }
     }
     if (edits.length === 0 && comment === undefined) {
-        throw new CliError('modify requires at least one edit: --add, --replace, --remove, --rename, --add-dir, --comment or --from-manifest.', 2);
+        throw new CliError('modify requires at least one edit: --add, --replace, --remove, --rename, --add-dir, --comment, --comment-file or --from-manifest.', 2);
     }
 
     // ── Open (eagerly: overlap / CD↔LFH structure is checked before any
@@ -289,8 +310,12 @@ export async function modify(args: ParsedArgs): Promise<void> {
         applied.push({ op: e.op, name: e.name, ...(e.to !== undefined ? { to: e.to } : {}) });
     }
     if (comment !== undefined) {
-        modifier.setComment(comment);
-        applied.push({ op: 'comment', name: comment });
+        try {
+            modifier.setComment(comment);
+        } catch (e) {
+            throw mapZipError(e, 'Failed to set the archive comment');
+        }
+        applied.push({ op: 'comment', name: describeComment(comment) });
     }
 
     // ── Verify every entry that will be re-emitted VERBATIM. The modifier

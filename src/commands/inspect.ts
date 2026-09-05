@@ -24,6 +24,7 @@ import { formatBytes, parseByteSize, parseCount } from '../utils/sizes.js';
 import { guard } from '../utils/ziperr.js';
 import {
     commonOptions,
+    bytesToHex,
     decodeComment,
     openArchive,
     parseFormat,
@@ -41,6 +42,8 @@ export interface InspectReport {
         readonly isZip64: boolean;
         readonly comment: string;
         readonly commentBytes: number;
+        /** Raw comment bytes, hex — present when the archive has a comment. */
+        readonly commentHex?: string;
         readonly prependedData: boolean;
         readonly multipleEocd: boolean;
     };
@@ -356,6 +359,7 @@ export async function inspect(args: ParsedArgs): Promise<void> {
         isZip64: reader.isZip64,
         comment: decodeComment(reader.comment),
         commentBytes: reader.comment.length,
+        ...(reader.comment.length > 0 ? { commentHex: bytesToHex(reader.comment) } : {}),
         prependedData: sink.diagnostics.some((d) => d.code === 'ZIP_PREPENDED_DATA'),
         multipleEocd: sink.diagnostics.some((d) => d.code === 'ZIP_MULTIPLE_EOCD'),
     };

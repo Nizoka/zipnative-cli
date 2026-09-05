@@ -9,13 +9,20 @@
 
 import { type ParsedArgs, getStringFlag, getStringFlagAll, hasFlag } from '../utils/args.js';
 import { emitStatus, isDryRun } from '../utils/agent.js';
-import type { ZipEntry } from '../core-bridge/index.js';
+import { METHOD_DEFLATE, METHOD_STORE, getCodec, type ZipEntry } from '../core-bridge/index.js';
 import { createDiagnosticSink } from '../utils/diagnostics.js';
 import { prepareEngine } from '../utils/engine.js';
 import { CliError, ErrorCode } from '../utils/error.js';
 import { unlinkQuiet, writeStreamingOutput } from '../utils/io.js';
 import { mapZipError } from '../utils/ziperr.js';
 import { commonOptions, openArchive, readArchiveBytes } from '../utils/zipops.js';
+
+/** True for a `--codec` method that decompresses synchronously only. */
+function isSyncOnlyCodec(method: number): boolean {
+    if (method === METHOD_STORE || method === METHOD_DEFLATE) return false;
+    const codec = getCodec(method);
+    return codec !== null && codec.decompressStream === undefined && codec.decompressSync !== undefined;
+}
 
 export async function cat(args: ParsedArgs): Promise<void> {
     await prepareEngine(args);
@@ -78,6 +85,10 @@ export async function cat(args: ParsedArgs): Promise<void> {
             current = entry.name;
             if (raw) {
                 yield reader.readEntryRaw(entry);
+            } else if (isSyncOnlyCodec(entry.compressionMethod)) {
+                // A registered codec with decompressSync but no decompressStream
+                // cannot feed readEntryStream(); readEntry() buffers this one entry.
+                yield reader.readEntry(entry, { verifyCrc });
             } else {
                 for await (const chunk of reader.readEntryStream(entry, { verifyCrc })) yield chunk;
             }

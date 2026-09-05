@@ -56,6 +56,7 @@ export async function inflate(args: ParsedArgs): Promise<void> {
     let bytesIn = 0;
     let bytesOut = 0;
     let leftover = 0;
+    let bytesConsumed = 0;
 
     try {
         if (method === METHOD_DEFLATE && !sync) {
@@ -75,6 +76,7 @@ export async function inflate(args: ParsedArgs): Promise<void> {
                     if (inflator.finished) leftover += inflator.leftover.length;
                 }
                 inflator.end();
+                bytesConsumed = inflator.bytesConsumed;
             }
             await writeStreamingOutput(pieces(), outputPath, write);
         } else {
@@ -103,6 +105,7 @@ export async function inflate(args: ParsedArgs): Promise<void> {
                 }
             }
             bytesOut = out.length;
+            bytesConsumed = bytesIn; // a whole-buffer codec has no notion of a stream end
             await writeOutput(out, outputPath, write);
         }
     } catch (e) {
@@ -122,6 +125,7 @@ export async function inflate(args: ParsedArgs): Promise<void> {
         method,
         methodName: methodName(method),
         bytesIn,
+        bytesConsumed,
         bytesOut,
         leftover,
         maxOutput: bound,

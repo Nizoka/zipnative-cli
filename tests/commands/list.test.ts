@@ -116,7 +116,7 @@ describe('list', () => {
         const zip = await fixture();
         const doc = await runJson(['--input', zip, '--format', 'json']);
         const size = (await readFile(zip)).length;
-        expect(doc.archive).toEqual({ bytes: size, entryCount: 4, isZip64: false, comment: 'list me', commentBytes: 7 });
+        expect(doc.archive).toEqual({ bytes: size, entryCount: 4, isZip64: false, comment: 'list me', commentBytes: 7, commentHex: Buffer.from('list me').toString('hex') });
         expect(doc.diagnostics).toEqual([]);
         expect(doc.entries.map((e) => e.name)).toEqual(['a.txt', 'dir/b.txt', 'dir/c.bin', 'empty/']);
         const a = doc.entries[0] as EntryRow;

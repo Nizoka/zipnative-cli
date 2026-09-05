@@ -9,6 +9,7 @@ import type {
     OpenZipOptions,
     ZipCommonOptions,
     ZipCompressionOptions,
+    ZipExtraField,
     ZipReader,
 } from '../core-bridge/index.js';
 import { openZip } from '../core-bridge/index.js';
@@ -232,4 +233,141 @@ export function openArchive(bytes: Uint8Array, options: OpenZipOptions): ZipRead
 export function decodeComment(raw: Uint8Array): string {
     if (raw.length === 0) return '';
     return new TextDecoder('utf-8', { fatal: false }).decode(raw);
+}
+
+// ── Entry attributes, extra fields and comments shared by create / modify ──
+
+const S_IFREG = 0o100000;
+const S_IFDIR = 0o040000;
+const DOS_ATTR_DIRECTORY = 0x10;
+
+/** External-attributes word for a POSIX mode (setuid/setgid/sticky never propagate). */
+export function externalAttributesFor(mode: number, isDirectory: boolean): number {
+    const perm = mode & 0o777;
+    if (isDirectory) return (((S_IFDIR | perm) << 16) >>> 0) | DOS_ATTR_DIRECTORY;
+    return ((S_IFREG | perm) << 16) >>> 0;
+}
+
+/** Manifest `mode`: an octal string ("0644") or an integer ≤ 0o7777. */
+export function parseMode(raw: unknown, where: string): number {
+    if (typeof raw === 'number' && Number.isInteger(raw) && raw >= 0 && raw <= 0o7777) return raw;
+    if (typeof raw === 'string' && /^0?[0-7]{3,4}$/.test(raw)) return Number.parseInt(raw, 8);
+    throw new CliError(`${where}: "mode" must be an octal string like "0644" or "0755".`, 1, ErrorCode.INPUT);
+}
+
+/** Largest extra-field payload: the 16-bit length minus the 4-byte header. */
+const MAX_EXTRA_FIELD_DATA = 0xffff - 4;
+
+/**
+ * Manifest `extraFields`: `[{ id, hex | base64 }]` → the engine's
+ * `ZipExtraField[]` (raw, preserved verbatim by the writer). `id` is an
+ * integer 0–65535 or a `"0x5455"` string; exactly one of `hex` / `base64`.
+ */
+export function parseExtraFields(raw: unknown, where: string): ZipExtraField[] {
+    if (!Array.isArray(raw)) {
+        throw new CliError(`${where}: "extraFields" must be an array of { id, hex | base64 }.`, 1, ErrorCode.INPUT);
+    }
+    return raw.map((item, i) => {
+        const at = `${where}.extraFields[${i}]`;
+        if (item === null || typeof item !== 'object' || Array.isArray(item)) {
+            throw new CliError(`${at}: must be an object { id, hex | base64 }.`, 1, ErrorCode.INPUT);
+        }
+        const f = item as Record<string, unknown>;
+        for (const key of Object.keys(f)) {
+            if (key !== 'id' && key !== 'hex' && key !== 'base64') {
+                throw new CliError(`${at}: unknown key "${key}". Valid: id, hex, base64.`, 1, ErrorCode.INPUT);
+            }
+        }
+        let id: number;
+        if (typeof f['id'] === 'number' && Number.isInteger(f['id'])) id = f['id'];
+        else if (typeof f['id'] === 'string' && /^0x[0-9a-fA-F]{1,4}$/.test(f['id'])) id = Number.parseInt(f['id'].slice(2), 16);
+        else throw new CliError(`${at}: "id" must be an integer 0-65535 or a hex string like "0x5455".`, 1, ErrorCode.INPUT);
+        if (id < 0 || id > 0xffff) throw new CliError(`${at}: "id" must be 0-65535.`, 1, ErrorCode.INPUT);
+        const hex = f['hex'];
+        const base64 = f['base64'];
+        if ((hex === undefined) === (base64 === undefined)) {
+            throw new CliError(`${at}: exactly one of "hex" or "base64" is required.`, 1, ErrorCode.INPUT);
+        }
+        let data: Uint8Array;
+        if (hex !== undefined) {
+            if (typeof hex !== 'string' || !/^([0-9a-fA-F]{2})*$/.test(hex)) {
+                throw new CliError(`${at}: "hex" must be an even-length hexadecimal string.`, 1, ErrorCode.INPUT);
+            }
+            data = new Uint8Array(Buffer.from(hex, 'hex'));
+        } else {
+            if (typeof base64 !== 'string' || !/^[A-Za-z0-9+/]*={0,2}$/.test(base64)) {
+                throw new CliError(`${at}: "base64" must be a base64 string.`, 1, ErrorCode.INPUT);
+            }
+            data = new Uint8Array(Buffer.from(base64, 'base64'));
+        }
+        if (data.length > MAX_EXTRA_FIELD_DATA) {
+            throw new CliError(`${at}: extra-field data is ${data.length} bytes; the format allows at most ${MAX_EXTRA_FIELD_DATA}.`, 1, ErrorCode.INPUT);
+        }
+        return { id, data };
+    });
+}
+
+/** The ZIP format caps the archive comment at a 16-bit length. */
+export const MAX_COMMENT_BYTES = 0xffff;
+
+/**
+ * `--comment <text>` | `--comment-file <path>` (raw bytes, `-` = stdin):
+ * mutually exclusive; the file form is how a binary or non-UTF-8 comment
+ * reaches `setComment(Uint8Array)`.
+ */
+export async function parseArchiveComment(args: ParsedArgs): Promise<string | Uint8Array | undefined> {
+    const text = getStringFlag(args.flags, 'comment');
+    const file = getStringFlag(args.flags, 'comment-file');
+    if (text !== undefined && file !== undefined) {
+        throw new CliError('--comment and --comment-file are mutually exclusive.', 2);
+    }
+    if (file === undefined) return text;
+    let buf: Buffer;
+    try {
+        buf = await readFileOrStdin(file, MAX_COMMENT_BYTES + 1);
+    } catch (e) {
+        if (e instanceof CliError) {
+            if (e.code === ErrorCode.LIMIT) {
+                throw new CliError(`--comment-file ${file} exceeds the ${MAX_COMMENT_BYTES}-byte archive-comment limit.`, 1, ErrorCode.INPUT);
+            }
+            throw e;
+        }
+        throw new CliError(`Cannot read --comment-file ${file}: ${e instanceof Error ? e.message : String(e)}`, 1, ErrorCode.IO);
+    }
+    if (buf.length > MAX_COMMENT_BYTES) {
+        throw new CliError(`--comment-file ${file} exceeds the ${MAX_COMMENT_BYTES}-byte archive-comment limit.`, 1, ErrorCode.INPUT);
+    }
+    return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+}
+
+/** Manifest `comment` (string) | `commentBase64` (raw bytes): mutually exclusive. */
+export function parseManifestComment(m: Record<string, unknown>, where: string): string | Uint8Array | undefined {
+    const text = m['comment'];
+    const b64 = m['commentBase64'];
+    if (text !== undefined && b64 !== undefined) {
+        throw new CliError(`${where}: "comment" and "commentBase64" are mutually exclusive.`, 1, ErrorCode.INPUT);
+    }
+    if (text !== undefined) {
+        if (typeof text !== 'string') throw new CliError(`${where}: "comment" must be a string.`, 1, ErrorCode.INPUT);
+        return text;
+    }
+    if (b64 === undefined) return undefined;
+    if (typeof b64 !== 'string' || !/^[A-Za-z0-9+/]*={0,2}$/.test(b64)) {
+        throw new CliError(`${where}: "commentBase64" must be a base64 string.`, 1, ErrorCode.INPUT);
+    }
+    const data = new Uint8Array(Buffer.from(b64, 'base64'));
+    if (data.length > MAX_COMMENT_BYTES) {
+        throw new CliError(`${where}: "commentBase64" decodes to ${data.length} bytes; the format allows at most ${MAX_COMMENT_BYTES}.`, 1, ErrorCode.INPUT);
+    }
+    return data;
+}
+
+/** Lower-case hex of raw bytes (names, comments) for forensic output. */
+export function bytesToHex(raw: Uint8Array): string {
+    return Buffer.from(raw).toString('hex');
+}
+
+/** Human label for an applied comment edit (a binary comment is described, not dumped). */
+export function describeComment(comment: string | Uint8Array): string {
+    return typeof comment === 'string' ? comment : `<${comment.length} bytes>`;
 }

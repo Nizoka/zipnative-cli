@@ -47,7 +47,7 @@ export const COMMANDS: readonly CommandSpec[] = [
         flags: [
             '--input', '--output', '--stdin-name', '--from-manifest', '--base', '--prefix', '--dir-entries',
             ...FILTER_FLAGS, '--follow-symlinks', ...COMPRESSION_FLAGS, '--order', '--date', '--mtime',
-            '--comment', '--entry-comment', '--preserve-mode', '--store-ext', '--stream', '--chunk-size',
+            '--comment', '--comment-file', '--entry-comment', '--preserve-mode', '--store-ext', '--stream', '--chunk-size',
             '--parallel', '--workers', '--min-job-size', '--job-timeout', '--overwrite',
         ],
     },
@@ -56,7 +56,7 @@ export const COMMANDS: readonly CommandSpec[] = [
         group: 'Create & modify',
         summary: 'Incremental edits: add/replace/remove/rename/comment, append-only or compact',
         flags: [
-            '--input', '--output', '--add', '--add-dir', '--replace', '--remove', '--rename', '--comment',
+            '--input', '--output', '--add', '--add-dir', '--replace', '--remove', '--rename', '--comment', '--comment-file',
             ...COMPRESSION_FLAGS, '--date', '--compact', '--in-place', '--from-manifest', '--overwrite',
         ],
     },
@@ -84,7 +84,7 @@ export const COMMANDS: readonly CommandSpec[] = [
         summary: 'Extract to a directory (zip-slip, symlink, bomb and duplicate guards on by default)',
         flags: [
             '--input', '--output-dir', ...FILTER_FLAGS, '--entry', '--overwrite', '--on-duplicate',
-            '--skip-unsafe', '--allow-symlinks', '--skip-symlinks', '--flat', '--buffered',
+            '--skip-unsafe', '--skip-unsupported', '--allow-symlinks', '--skip-symlinks', '--flat', '--buffered',
             '--preserve-mode', '--preserve-mtime',
         ],
     },
@@ -102,7 +102,7 @@ export const COMMANDS: readonly CommandSpec[] = [
         name: 'verify',
         group: 'Integrity & codecs',
         summary: 'Deep integrity verification (CRC, sizes, local headers, diagnostics)',
-        flags: ['--input', '--format', ...PROJECTION_FLAGS],
+        flags: ['--input', '--entry', '--format', ...PROJECTION_FLAGS],
     },
     {
         name: 'crc32',
