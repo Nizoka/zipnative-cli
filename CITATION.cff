@@ -33,7 +33,7 @@ repository-code: "https://github.com/Nizoka/zipnative-cli"
 url: "https://zipnative.dev"
 license: MIT
 version: 1.0.0
-date-released: "2026-09-03"
+date-released: "2026-09-05"
 keywords:
   - zip
   - unzip

@@ -170,7 +170,7 @@ describe.skipIf(!existsSync(BIN))('integration: built binary smoke (dist/cli.cjs
             expect(stderr).not.toContain('EPIPE');
         }
     });
-    it.skipIf(process.platform === 'win32')('SIGINT during a write removes the in-flight output and exits 130 (A-43)', async () => {
+    it.skipIf(process.platform === 'win32')('SIGINT during a write removes the in-flight output and exits 130 (A-38)', async () => {
         // Windows has no POSIX signals for child processes; the handler is
         // exercised on Linux/macOS only. `--stream` opens the output at once
         // and stdin never ends, so the archive is in flight when the signal lands.

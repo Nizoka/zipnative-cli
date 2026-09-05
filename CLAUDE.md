@@ -38,11 +38,13 @@ this file wins on Claude-Code workflow specifics.
    only place allowed to read `err.code`. Agent mode is a thin presentation
    layer, never a second runtime.
 5. **Never loosen a security default.** `rejectTraversal`, `rejectSymlinks`,
-   `onDuplicate: 'error'`, every `ZipLimits` bound, the sink containment
-   (`safeJoin`), the overwrite refusal, the `--codec` argv-only rule and the
-   manifest `--allow-codec-load` gate stay as they are unless a human records
-   the decision. Opt-outs skip; they never write anything unsafe. A symlink is
-   never materialised.
+   `onDuplicate: 'error'`, every `ZipLimits` bound, `--max-input-size`, the
+   sink containment (`safeJoin` + realpath re-check + exclusive open in
+   `src/utils/sink.ts`), the uniform overwrite refusal, `modify`'s
+   verification of every re-emitted entry (no opt-out), the `--codec`
+   argv-only rule and the manifest `--allow-codec-load` gate stay as they are
+   unless a human records the decision. Opt-outs skip; they never write
+   anything unsafe. A symlink is never materialised.
 6. **Offline, always.** No command opens a socket, and no change may add one.
    There is no network opt-in to extend.
 7. **ESM-first TypeScript strict.** Relative imports carry the `.js`
@@ -59,18 +61,28 @@ this file wins on Claude-Code workflow specifics.
 - `src/commands/*.ts` — one file per command (15), each exporting a single
   `async function <name>(args: ParsedArgs): Promise<void>`; `completion.ts`
   holds the `COMMANDS` table (the single source of truth for the surface).
-- `src/utils/*.ts` — arg parsing, io (`validatePath`, `safeJoin`, streams),
-  error codes, `ziperr` (the 39-code mapping), `limits` (the eight `--max-*`
-  flags), `engine` (`prepareEngine`), `codecs` (`--codec`), `diagnostics`
-  (the sink), `entryfmt` (the `EntryRow`), `zipops` (shared flag → option
-  translation), `manifest`, `projection`, `agent`, `config`, `governance`.
+- `src/utils/*.ts` — `args` (arg parsing), `flags` (the boolean-flag table:
+  which flags take no value, global + per command), `io` (`validatePath` for
+  manifest-supplied values only — argv paths are never second-guessed —,
+  `safeJoin`, exclusive writes, the `--max-input-size`-bounded reads,
+  `captureStdout`), `sink` (the extraction sink shared by `extract` and
+  `stream`: lexical + realpath containment, duplicate policy, exclusive open,
+  partial-file removal), `inflight` (SIGINT / SIGTERM cleanup of the files
+  being written, exit 130 / 143), error codes, `ziperr` (the 39-code
+  mapping), `limits` (the eight `--max-*` flags + `--max-input-size`),
+  `engine` (`prepareEngine`), `codecs` (`--codec`), `diagnostics` (the
+  diagnostic sink), `entryfmt` (the `EntryRow`), `zipops` (shared flag →
+  option translation, UTC dates, extra fields), `manifest`, `projection`,
+  `agent`, `colors`, `config`, `governance`.
 - `src/core-bridge/index.ts` — the single import point of `zipnative` /
   `zipnative/worker` (+ `ensureCodecsReady()`, `loadParallelZip()`).
 - `scripts/` — `generate-zip-corpus.mjs` + `validate-zip.mjs` (veraZIP) +
   `helpers/interop-tools.mjs`.
 - `tests/**` — vitest, in-process (stdout/stderr captured via
   `tests/helpers/capture.ts`); one spawn smoke test against `dist/cli.cjs`;
-  `tests/docs/consistency.test.ts` pins the docs to the code.
+  `tests/docs/consistency.test.ts` pins the docs to the code and
+  `tests/utils/governance-sync.test.ts` pins `govern policy` / `govern rules`
+  to `.github/ai-governance.json` / `.github/AGENT_RULES.md`.
 - `samples/**` — dual-shell (`.sh` + `.ps1`) runnable demos per command.
 
 ## Adding or changing a command (checklist)
@@ -88,7 +100,10 @@ A new command touches **all** of these — miss one and it half-works:
 3. `src/commands/completion.ts` — add the command with its `group` and flags
    to the `COMMANDS` table; add it to `DRY_RUN_COMMANDS` if it honours
    `--dry-run`. All four shells, `schema manifest`, `doctor`'s command count
-   and the docs test derive from this table. Also `src/utils/config.ts`
+   and the docs test derive from this table. Every **boolean** flag also goes
+   into `COMMAND_BOOLEAN_FLAGS` in `src/utils/flags.ts` (otherwise the parser
+   makes it consume the next token); a path-valued flag goes into
+   `PATH_FLAGS` so the shells complete files. Also `src/utils/config.ts`
    `KNOWN_COMMANDS`, `src/utils/projection.ts` `PROJECTED_COMMANDS` if it
    emits a JSON report, and `src/utils/manifest.ts` `MANIFEST_COMMANDS` +
    `batch.ts` `loadTaskCommand()` if it may run inside a manifest.
@@ -118,9 +133,9 @@ A new command touches **all** of these — miss one and it half-works:
 
 ```bash
 npm run typecheck:all   # tsc for src + tests — must be clean
-npm run lint            # eslint src/ — 0 errors
+npm run lint            # eslint src/ tests/ — 0 errors (tests use a relaxed override)
 npm run test            # vitest run — all pass; keep coverage ≥ thresholds
-npm run build           # tsup → dist/cli.cjs (the bin)
+npm run build           # tsup → dist/cli.cjs (the bin — the only artefact)
 npm run validate:zip    # veraZIP gate: build + corpus:zip + scripts/validate-zip.mjs
                         #   level 0 (ISO/IEC 21320-1 clauses, no external tool) ALWAYS runs
                         #   level 1 (unzip/7z/python/bsdtar/jar integrity) SKIPs absent tools
@@ -128,13 +143,17 @@ npm run validate:zip    # veraZIP gate: build + corpus:zip + scripts/validate-zi
                         #   VERAZIP_REQUIRED=1 (CI) fails closed when no level-1 tool exists
 ```
 
-Coverage thresholds live in `vitest.config.ts` (statements 85 / branches 75 /
-functions 85 / lines 85). Do not lower them to make a change pass — add tests.
+Coverage thresholds live in `vitest.config.ts` (statements 93 / branches 88 /
+functions 94 / lines 93 — ratcheted after the 1.0.0 audit pass, three points
+below the measured actuals). Do not lower them to make a change pass — add
+tests.
 
-> **Bundle gotcha:** tsup flattens `src/**` into one `dist/cli.cjs`, so a path
-> relative to a source file (`../../package.json`) resolves differently at
-> runtime. Resolve versions via `src/utils/version.ts` (which probes candidates
-> and name-guards), never with an ad-hoc `require('../…/package.json')`.
+> **Bundle gotcha:** tsup flattens `src/**` into one `dist/cli.cjs` — the
+> package's only artefact (no ESM build, no `.d.ts`, no source maps; it is a
+> bin, not a library) — so a path relative to a source file
+> (`../../package.json`) resolves differently at runtime. Resolve versions via
+> `src/utils/version.ts` (which probes candidates and name-guards), never with
+> an ad-hoc `require('../…/package.json')`.
 > `zipnative` and `zipnative/worker` **must stay external** in `tsup.config.ts`
 > (`noExternal: []`): the worker subpath resolves `./zip-worker.js` next to its
 > own bundle, and `loadParallelZip()` resolves the script through the exports

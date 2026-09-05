@@ -1,10 +1,12 @@
 # zipnative-cli — Samples
 
-A comprehensive collection of runnable samples covering every command of zipnative-cli, organized by command. Each sample is a **`.sh` + `.ps1` pair** with identical behaviour, plus a dependency-free runner that exercises the same invocations from Node.js.
+A comprehensive collection of runnable samples covering every command of zipnative-cli, organized by command: **41 demos**, each a **`.sh` + `.ps1` pair** with identical behaviour, plus a dependency-free runner (`run-all.js`, **73 jobs**) that exercises the same invocations from Node.js.
 
 > **Generated archives are not committed.** All output goes to `samples/output/` which is git-ignored. The committed inputs under `samples/input/` are tiny, deterministic and text-only (except one 4 KiB pattern binary), so every `--deterministic` build hashes the same on every machine.
 
 Every sample is **offline** (no command in zipnative-cli can open a socket) and needs **no `unzip` / `7z`** — the CLI is the only archive tool involved. Scripts call `zipnative` when it is on `PATH` and fall back to the local build (`node dist/cli.cjs`) otherwise.
+
+> **Re-running.** The CLI never overwrites an existing file without `--overwrite` (`E_IO`, uniformly on `create` / `modify` / `cat` / `inflate --output`, `extract`, `stream --output-dir` and `batch`). Delete `samples/output/` — or pass `--clean` to `run-all.js` — before a second run; a script that reuses an archive from an earlier step only builds it when it is missing.
 
 ---
 
@@ -101,9 +103,9 @@ Build a deterministic ZIP from files, directories, stdin or a manifest.
 | [02-store-vs-deflate.sh](create/02-store-vs-deflate.sh) / [.ps1](create/02-store-vs-deflate.ps1) | `--method store`, `--method deflate --level 9`, `--store-ext bin`; size comparison |
 | [03-deterministic.sh](create/03-deterministic.sh) / [.ps1](create/03-deterministic.ps1) | **Reproducible builds** — build twice with `--deterministic`, compare SHA-256, gate with `inspect --check deterministic` |
 | [04-from-manifest.sh](create/04-from-manifest.sh) / [.ps1](create/04-from-manifest.ps1) | `--from-manifest`: file path (manifest-relative), inline `data`, `dataBase64`, `directory`, `mode`, `comment`; empty manifest |
-| [05-stdin-stream.sh](create/05-stdin-stream.sh) / [.ps1](create/05-stdin-stream.ps1) | Pipe a file into `--stdin-name <name> --stream --chunk-size`; data-descriptor layout; CRC round trip |
+| [05-stdin-stream.sh](create/05-stdin-stream.sh) / [.ps1](create/05-stdin-stream.ps1) | Pipe a file into `--stdin-name <name> --stream --chunk-size`; the data-descriptor layout (same content as the buffered writer, different bytes — `inspect` reports `canonicalLayout: false`); CRC round trip |
 | [06-parallel.sh](create/06-parallel.sh) / [.ps1](create/06-parallel.ps1) | `--parallel --workers 2 --min-job-size 1k`; proves byte identity with the sequential writer |
-| [07-comment-and-order.sh](create/07-comment-and-order.sh) / [.ps1](create/07-comment-and-order.ps1) | `--comment`, `--entry-comment name=text`, `--order insertion`, `--date <ISO>`; what `inspect` reports |
+| [07-comment-and-order.sh](create/07-comment-and-order.sh) / [.ps1](create/07-comment-and-order.ps1) | `--comment`, `--entry-comment name=text`, `--order insertion` (the **argv order**, directories still name-sorted — how an EPUB gets `mimetype` first), `--date <ISO>` (UTC wall-clock, 2-second resolution); what `inspect` reports for each |
 
 ## list Samples
 
@@ -111,7 +113,7 @@ List archive entries without decompressing anything.
 
 | File | Description |
 |------|-------------|
-| [01-table.sh](list/01-table.sh) / [.ps1](list/01-table.ps1) | Text table, `--long` (mode + flags), `--validate eager`, `--include` glob. Note the `-l <file>` pitfall in the header |
+| [01-table.sh](list/01-table.sh) / [.ps1](list/01-table.ps1) | Text table, `--long` (mode + flags; no `-l` short form — flags and positionals are order-independent), `--validate eager`, `--include` glob |
 | [02-json-fields.sh](list/02-json-fields.sh) / [.ps1](list/02-json-fields.ps1) | `--format json`, `--summary`, `--fields entries.name,entries.uncompressedSize`, compact vs `--pretty` under `--json` |
 | [03-ndjson.sh](list/03-ndjson.sh) / [.ps1](list/03-ndjson.ps1) | `--format ndjson` — one row per line, filtered with `--exclude` and a shell / `ConvertFrom-Json` pipeline |
 
@@ -134,7 +136,7 @@ Extract to a directory — zip-slip, symlink, bomb and duplicate guards on by de
 | [01-basic.sh](extract/01-basic.sh) / [.ps1](extract/01-basic.ps1) | `--output-dir` extraction with `--json`; UTF-8 names round-trip; byte check against the source |
 | [02-filter-and-flat.sh](extract/02-filter-and-flat.sh) / [.ps1](extract/02-filter-and-flat.ps1) | `--include` / `--exclude` globs, `--entry`, `--flat` |
 | [03-dry-run-plan.sh](extract/03-dry-run-plan.sh) / [.ps1](extract/03-dry-run-plan.ps1) | `--dry-run` plan (text and JSON); proves the output directory is never created |
-| [04-refusals.sh](extract/04-refusals.sh) / [.ps1](extract/04-refusals.ps1) | Overwrite refusal (`E_IO`) → `--overwrite`; `--skip-unsafe --skip-symlinks` tolerance; refusal catalogue. Hostile shapes are exercised byte-for-byte in `tests/integration/refusal-posture.test.ts` |
+| [04-refusals.sh](extract/04-refusals.sh) / [.ps1](extract/04-refusals.ps1) | Overwrite refusal (`E_IO`, the existing file is left intact) → `--overwrite`; `--skip-unsafe --skip-symlinks` tolerance (skip, never write); refusal catalogue. Hostile shapes are exercised byte-for-byte in `tests/integration/refusal-posture.test.ts` |
 
 ## cat Samples
 
@@ -167,7 +169,7 @@ Incremental edits without recompressing untouched entries.
 |------|-------------|
 | [01-append-only.sh](modify/01-append-only.sh) / [.ps1](modify/01-append-only.ps1) | `--add` / `--replace` / `--remove`; the default **append-only** layout, data remanence and the `ZIP_MULTIPLE_EOCD` diagnostic it leaves behind |
 | [02-compact.sh](modify/02-compact.sh) / [.ps1](modify/02-compact.ps1) | `--compact` canonical rewrite (true deletion) vs append-only: sizes, `multipleEocd`, both verify |
-| [03-rename-and-comment.sh](modify/03-rename-and-comment.sh) / [.ps1](modify/03-rename-and-comment.ps1) | `--rename from=to`, `--add-dir`, `--comment`, `--dry-run`, `--in-place` (temp file + atomic rename) |
+| [03-rename-and-comment.sh](modify/03-rename-and-comment.sh) / [.ps1](modify/03-rename-and-comment.ps1) | `--rename from=to`, `--add-dir`, `--comment`, `--dry-run`, `--in-place` (exclusively created temp file + atomic rename). Every untouched entry is verified before it is copied — see `verified` in the envelope |
 | [04-from-manifest.sh](modify/04-from-manifest.sh) / [.ps1](modify/04-from-manifest.ps1) | `--from-manifest` with [input/manifest/edits.json](input/manifest/edits.json) |
 
 ## crc32 Samples
@@ -186,15 +188,15 @@ Incremental edits without recompressing untouched entries.
 
 | File | Description |
 |------|-------------|
-| [01-directory-mode.sh](batch/01-directory-mode.sh) / [.ps1](batch/01-directory-mode.ps1) | `--input-dir` subfolders → one archive each (`--deterministic --concurrency 2`), then `--task verify` on the folder |
-| [02-manifest-pipeline.sh](batch/02-manifest-pipeline.sh) / [.ps1](batch/02-manifest-pipeline.ps1) | `--manifest` pipeline with `@id` references: create → verify → inspect → extract → crc32 (staged under `output/batch/02-pipeline/` because manifest paths are anchored to the manifest's directory) |
+| [01-directory-mode.sh](batch/01-directory-mode.sh) / [.ps1](batch/01-directory-mode.ps1) | `--input-dir` subfolders → one archive each (`--deterministic --concurrency 2`; every `create` flag is forwarded), then `--task verify` on the folder |
+| [02-manifest-pipeline.sh](batch/02-manifest-pipeline.sh) / [.ps1](batch/02-manifest-pipeline.ps1) | `--manifest` pipeline with `@id` references: create → verify → inspect → extract → crc32 (staged under `output/batch/02-pipeline/` because manifest paths are anchored to the manifest's directory and refused on `..`). Under `--json` stdout is one batch document with each task's report inside |
 | [03-dry-run.sh](batch/03-dry-run.sh) / [.ps1](batch/03-dry-run.ps1) | `--dry-run` for both modes: validates structure, whitelist, `@id` graph and codec policy; writes nothing |
 
 ## doctor Samples
 
 | File | Description |
 |------|-------------|
-| [01-doctor.sh](doctor/01-doctor.sh) / [.ps1](doctor/01-doctor.ps1) | Text and JSON preflight; `--pure-codecs` + `--max-*` overrides reflected in the report; `--version --json` |
+| [01-doctor.sh](doctor/01-doctor.sh) / [.ps1](doctor/01-doctor.ps1) | Text and JSON preflight; `--pure-codecs` + `--max-*` overrides reflected in the report (the `limits` check carries the numbers under `data`); `--version --json` |
 
 ## schema Samples
 
@@ -206,7 +208,7 @@ Incremental edits without recompressing untouched entries.
 
 | File | Description |
 |------|-------------|
-| [01-generate.sh](completion/01-generate.sh) / [.ps1](completion/01-generate.ps1) | Generate bash / zsh / fish / powershell completers into `output/completion/`; install one-liners in the header |
+| [01-generate.sh](completion/01-generate.sh) / [.ps1](completion/01-generate.ps1) | Generate bash / zsh / fish / powershell completers into `output/completion/` (path flags such as `--input` complete files); install one-liners in the header |
 
 ## config Samples
 
@@ -220,8 +222,8 @@ The agent-native contract: stdout carries the artefact, stderr carries one JSON 
 
 | File | Description |
 |------|-------------|
-| [01-json-and-dry-run.sh](agent/01-json-and-dry-run.sh) / [.ps1](agent/01-json-and-dry-run.ps1) | `--json` status envelope, `--dry-run` (nothing written), capturing stderr separately, `--pretty` |
-| [02-error-envelope.sh](agent/02-error-envelope.sh) / [.ps1](agent/02-error-envelope.ps1) | Deterministic failures: `E_NOT_FOUND`, `E_PARSE` + `zipCode`, `E_IO`, `E_USAGE` (exit 2), `E_INPUT`, `E_DATA` + `detail` |
+| [01-json-and-dry-run.sh](agent/01-json-and-dry-run.sh) / [.ps1](agent/01-json-and-dry-run.ps1) | `--json` status envelope (anywhere on the command line — flags and positionals are order-independent), `--dry-run` (nothing written), capturing stderr separately, `--pretty` |
+| [02-error-envelope.sh](agent/02-error-envelope.sh) / [.ps1](agent/02-error-envelope.ps1) | Deterministic failures: `E_NOT_FOUND` (+ `ZIP_ENTRY_NOT_FOUND`), `E_PARSE` + `zipCode`, `E_IO`, `E_USAGE` (exit 2), `E_INPUT`, `E_DATA` + `detail` |
 | [03-token-economy.sh](agent/03-token-economy.sh) / [.ps1](agent/03-token-economy.ps1) | Six report sizes side by side: pretty vs compact, `--summary`, `--fields`, `list --fields entries.name` |
 
 ## govern Samples
@@ -240,7 +242,7 @@ AI-governance / Human-in-the-Loop contract.
 `samples/run-all.js` executes a declarative table of CLI invocations (one or more per sample) directly with Node.js — no shell needed — and asserts what the scripts assert: byte identity for the deterministic and parallel builds, `stream` vs `extract` parity, and the expected exit code + `E_*` code for every failure demo.
 
 ```bash
-node samples/run-all.js                     # every job (currently 73)
+node samples/run-all.js                     # every job (73 jobs across the 41 demos)
 node samples/run-all.js --category extract  # one directory's jobs
 node samples/run-all.js --clean             # wipe samples/output/ first
 node samples/run-all.js --verbose           # echo every command line

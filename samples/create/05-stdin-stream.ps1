@@ -4,8 +4,8 @@
 # `--stream` selects the constant-memory writer: the entry is compressed as it
 # arrives and written with a data descriptor (sizes and CRC after the payload),
 # so nothing is buffered. The resulting layout is valid for every reader but
-# is NOT byte-identical to the buffered writer — `inspect` reports the data
-# descriptor and `deterministic: false` for that reason.
+# is NOT byte-identical to the buffered writer — `inspect` reports it as
+# `deterministic: true` (reproducible run-to-run) but `canonicalLayout: false`.
 #
 # PowerShell note: bytes only survive a pipe when BOTH sides are native
 # commands (PowerShell 7.4+), so the file is streamed by a tiny `node -e`

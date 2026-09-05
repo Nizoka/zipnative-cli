@@ -220,3 +220,161 @@ describe('agent-surface lists', () => {
         for (const cmd of DRY_RUN_COMMANDS) expect(llms, cmd).toContain(`\`${cmd}\``);
     });
 });
+
+// ── Phase-2 invariants (audit A-28): the docs quote flags, env vars, exit
+// codes and shapes that live in the source; pin them too.
+
+import { GLOBAL_FLAGS, PATH_FLAGS } from '../../src/commands/completion.js';
+import { BOOLEAN_FLAGS } from '../../src/utils/flags.js';
+
+const indexSrc = read('src/index.ts');
+
+/** Every `<NAME>_USAGE` template literal in src/index.ts, keyed by command name. */
+function usageBlocks(): Map<string, string> {
+    const out = new Map<string, string>();
+    for (const m of indexSrc.matchAll(/const ([A-Z0-9_]+)_USAGE = `([\s\S]*?)`;/g)) {
+        out.set((m[1] as string).toLowerCase(), m[2] as string);
+    }
+    return out;
+}
+
+function globalUsage(): string {
+    return (indexSrc.match(/const GLOBAL_USAGE = `([\s\S]*?)`;/) as RegExpMatchArray)[1] as string;
+}
+
+/** `--flag` tokens that open an option definition line in a USAGE block. */
+function usageFlags(block: string): Set<string> {
+    const flags = new Set<string>();
+    for (const m of block.matchAll(/^\s{2,}(--[a-z][a-z0-9-]*)/gm)) flags.add(m[1] as string);
+    for (const m of block.matchAll(/^\s{2,}(--[a-z0-9-]+(?:\/--[a-z0-9-]+)+)/gm)) {
+        for (const f of (m[1] as string).split('/')) flags.add(f);
+    }
+    return flags;
+}
+
+describe('USAGE strings ↔ COMMANDS ↔ flag table (A-28, A-18)', () => {
+    const blocks = usageBlocks();
+
+    it('every command has a USAGE block and every COMMANDS flag appears in it', () => {
+        for (const c of COMMANDS) {
+            const block = blocks.get(c.name);
+            expect(block, `${c.name}: no ${c.name.toUpperCase()}_USAGE`).toBeDefined();
+            const defined = usageFlags(block as string);
+            for (const flag of c.flags) {
+                expect(defined.has(flag) || (block as string).includes(flag), `${c.name}: USAGE lacks ${flag}`).toBe(true);
+            }
+        }
+    });
+
+    it('no USAGE line exceeds 80 columns', () => {
+        for (const [name, block] of [...blocks, ['global', globalUsage()] as const]) {
+            for (const line of block.split('\n')) {
+                expect(line.length, `${name}: "${line.slice(0, 40)}" is ${line.length} columns`).toBeLessThanOrEqual(80);
+            }
+        }
+    });
+
+    it('a boolean flag is never shown with a <value> placeholder in its USAGE', () => {
+        for (const c of COMMANDS) {
+            const block = blocks.get(c.name) as string;
+            for (const flag of c.flags) {
+                const bare = flag.replace(/^--/, '');
+                if (!BOOLEAN_FLAGS.has(bare)) continue;
+                const def = block.split('\n').find((l) => new RegExp(`^\\s{2,}${flag}(?![a-z0-9-])`).test(l));
+                if (def === undefined) continue;
+                expect(/^\s{2,}--[a-z0-9-]+(?:,\s+-[a-zA-Z])?\s+</.test(def), `${c.name} ${flag} is boolean but USAGE shows a value`).toBe(false);
+            }
+        }
+    });
+
+    it('PATH_FLAGS are value flags of the surface', () => {
+        const all = new Set([...GLOBAL_FLAGS, ...COMMANDS.flatMap((c) => c.flags)]);
+        for (const f of PATH_FLAGS) {
+            expect(all.has(f), f).toBe(true);
+            expect(BOOLEAN_FLAGS.has(f.replace(/^--/, '')), `${f} is boolean`).toBe(false);
+        }
+    });
+
+    it('the global USAGE documents every bound, --max-input-size, the exit codes and every environment variable read by src/', () => {
+        const global = globalUsage();
+        for (const spec of LIMIT_FLAGS) expect(global).toContain(`--${spec.flag}`);
+        expect(global).toContain('--max-input-size');
+        expect(global).toContain('Exit codes:');
+        expect(global).toContain('130 / 143');
+        const envVars = new Set<string>();
+        for (const file of ['src/index.ts', 'src/utils/agent.ts', 'src/utils/engine.ts', 'src/utils/colors.ts']) {
+            for (const m of read(file).matchAll(/process\.env\['(ZIPNATIVE_[A-Z_]+|NO_COLOR|FORCE_COLOR|TERM)'\]/g)) envVars.add(m[1] as string);
+        }
+        expect(envVars.size).toBeGreaterThanOrEqual(8);
+        for (const v of envVars) {
+            expect(global, `GLOBAL_USAGE lacks ${v}`).toContain(v);
+            expect(readme, `README lacks ${v}`).toContain(v);
+        }
+    });
+});
+
+describe('README / knowledge-base command tables ↔ COMMANDS flags', () => {
+    it('every flag of every command appears in its README section and in the knowledge base', () => {
+        for (const c of COMMANDS) {
+            const block = section(readme, `### \`zipnative ${c.name}\``);
+            for (const flag of c.flags) {
+                expect(block, `README ${c.name} lacks ${flag}`).toContain(flag);
+                expect(kb, `KNOWLEDGE_BASE lacks ${flag}`).toContain(flag);
+            }
+        }
+    });
+
+    it('the README global options table has a --max-input-size row with its default and CWE', () => {
+        const globals = section(readme, '### Global options');
+        const row = globals.split('\n').find((l) => l.includes('`--max-input-size '));
+        expect(row).toBeDefined();
+        expect(row).toContain('4');
+        expect(row).toContain('CWE-400');
+    });
+});
+
+describe('status envelope ↔ emitStatus callers', () => {
+    it('the status schema command enum equals the set of commands that call emitStatus()', () => {
+        const callers = new Set<string>();
+        for (const c of COMMANDS) {
+            if (read(`src/commands/${c.name}.ts`).includes('emitStatus(')) callers.add(c.name);
+        }
+        const statusSchema = read('src/commands/schema.ts').split("$id: id('status')")[1] as string;
+        const enumMatch = statusSchema.match(/command: \{ enum: \[([^\]]+)\] \}/) as RegExpMatchArray;
+        const listed = (enumMatch[1] as string).split(',').map((x) => x.trim().replace(/'/g, ''));
+        expect([...callers].sort()).toEqual([...listed].sort());
+    });
+});
+
+describe('release metadata', () => {
+    it('CITATION.cff and package.json agree on the version', () => {
+        const pkg = JSON.parse(read('package.json')) as { version: string };
+        expect(docs['CITATION.cff']).toContain(`version: ${pkg.version}`);
+    });
+
+    it('every diagnostic in docs/data/errors.json names the commands that raise it', () => {
+        const data = JSON.parse(read('docs/data/errors.json')) as { diagnostics: { code: string; raisedBy?: string[] }[] };
+        for (const d of data.diagnostics) {
+            expect(Array.isArray(d.raisedBy) && d.raisedBy.length > 0, `${d.code} lacks raisedBy`).toBe(true);
+            for (const cmd of d.raisedBy as string[]) expect([...COMMAND_NAMES, 'any-reader', 'any-writer'], `${d.code}: ${cmd}`).toContain(cmd);
+        }
+    });
+
+    it('the phrase "read-side only" is gone from every document (audit B-07)', () => {
+        for (const file of ['README.md', 'SECURITY.md', 'docs/KNOWLEDGE_BASE.md', 'AGENTS.md', 'llms.txt', 'CHANGELOG.md', 'release-notes/v1.0.0.md', '.github/copilot-instructions.md', 'src/index.ts', 'src/utils/codecs.ts']) {
+            expect(read(file).toLowerCase(), file).not.toContain('read-side only');
+        }
+    });
+
+    it('every relative path in the llms.txt Docs section is shipped in the tarball (package.json files)', () => {
+        const pkg = JSON.parse(read('package.json')) as { files: string[] };
+        const shipped = new Set(pkg.files.filter((f) => !f.startsWith('!')));
+        const docsSection = section(llms, '## Docs');
+        for (const m of docsSection.matchAll(/\]\(([^)]+)\)/g)) {
+            const target = m[1] as string;
+            if (/^https?:\/\//.test(target)) continue;
+            const top = (target.replace(/^\.\//, '').split('#')[0] as string);
+            expect(shipped.has(top) || shipped.has(top.split('/')[0] as string), `llms.txt links ${target}, not in package.json files`).toBe(true);
+        }
+    });
+});

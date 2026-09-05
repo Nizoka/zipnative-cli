@@ -1,8 +1,8 @@
 {
-  "$comment": "Copy of zipnative docs/data/errors.json (the frozen 39-code error vocabulary and 11 diagnostic codes, with raisedWhen/remedy per code) plus, per error code, the CLI mapping \"cli\": { code: E_*, exitCode } taken from src/utils/ziperr.ts (ZIP_TO_CLI). The --json error envelope carries error.code (the E_* class) and error.zipCode (the ZIP_* cause, verbatim). tests/docs/consistency.test.ts enforces sync with the source table.",
+  "$comment": "Copy of zipnative docs/data/errors.json (the frozen 39-code error vocabulary and 11 diagnostic codes, with raisedWhen/remedy per code) plus, per error code, the CLI mapping \"cli\": { code: E_*, exitCode } taken from src/utils/ziperr.ts (ZIP_TO_CLI), and, per diagnostic, \"raisedBy\": the CLI commands whose engine paths can emit it (batch surfaces whatever its tasks raise). The --json error envelope carries error.code (the E_* class) and error.zipCode (the ZIP_* cause, verbatim). tests/docs/consistency.test.ts enforces sync with the source table.",
   "package": "zipnative",
   "zipnativeVersion": "1.0.0",
-  "verifiedOn": "2026-09-02",
+  "verifiedOn": "2026-09-05",
   "errors": [
     {
       "code": "ZIP_INVALID_OPTION",
@@ -454,72 +454,153 @@
       "code": "ZIP_PREPENDED_DATA",
       "severity": "info",
       "raisedWhen": "Bytes precede the archive (self-extractor stub or concatenation); all offsets were shifted accordingly.",
-      "remedy": "Verify the prefix is expected for this file."
+      "remedy": "Verify the prefix is expected for this file.",
+      "raisedBy": [
+        "list",
+        "inspect",
+        "cat",
+        "extract",
+        "verify",
+        "modify"
+      ],
+      "raisedByNote": "EOCD location on every random-access open (openZip); the forward reader (stream) never sees the EOCD."
     },
     {
       "code": "ZIP_MULTIPLE_EOCD",
       "severity": "info",
       "raisedWhen": "More than one end-of-central-directory signature exists; the last self-consistent candidate was used.",
-      "remedy": "Expected for archives whose comment embeds the signature; otherwise inspect the file."
+      "remedy": "Expected for archives whose comment embeds the signature; otherwise inspect the file.",
+      "raisedBy": [
+        "list",
+        "inspect",
+        "cat",
+        "extract",
+        "verify",
+        "modify"
+      ],
+      "raisedByNote": "EOCD location on every random-access open (openZip); an append-only modify output or a nested zip typically carries one."
     },
     {
       "code": "ZIP_NAME_MISMATCH",
       "severity": "warning",
       "raisedWhen": "A local header's filename bytes differ from the central directory's; the central directory wins.",
-      "remedy": "Rebuild the archive with a sane tool if the divergence is unexpected."
+      "remedy": "Rebuild the archive with a sane tool if the divergence is unexpected.",
+      "raisedBy": [
+        "cat",
+        "extract",
+        "verify",
+        "modify"
+      ],
+      "raisedByNote": "Read paths only (prepareRead): list and inspect never compare local-header names; modify raises it while verifying survivors or copying under --compact."
     },
     {
       "code": "ZIP_UNICODE_PATH_CONFLICT",
       "severity": "warning",
       "raisedWhen": "The 0x7075 Unicode Path extra field disagrees with the header name; the header name wins (0x7075 is never acted on).",
-      "remedy": "None needed — informational about the producer's inconsistency."
+      "remedy": "None needed — informational about the producer's inconsistency.",
+      "raisedBy": [
+        "list",
+        "inspect",
+        "cat",
+        "extract",
+        "verify",
+        "modify"
+      ],
+      "raisedByNote": "Central-directory parse: every random-access reader."
     },
     {
       "code": "ZIP_INVALID_UTF8_NAME",
       "severity": "warning",
       "raisedWhen": "Flag bit 11 claims UTF-8 but the name bytes are invalid UTF-8; decoded as CP437 instead.",
-      "remedy": "The producer lied about the encoding — verify names look right."
+      "remedy": "The producer lied about the encoding — verify names look right.",
+      "raisedBy": [
+        "list",
+        "inspect",
+        "cat",
+        "extract",
+        "verify",
+        "modify",
+        "stream"
+      ],
+      "raisedByNote": "Central-directory parse (every random-access reader) and the forward reader (stream, local headers)."
     },
     {
       "code": "ZIP_DUPLICATE_NAME",
       "severity": "warning",
       "raisedWhen": "The central directory holds duplicate entry names; getEntry() returns the last.",
-      "remedy": "Iterate entries() to see every duplicate; extraction under onDuplicate: 'error' throws."
+      "remedy": "Iterate entries() to see every duplicate; extraction under onDuplicate: 'error' throws.",
+      "raisedBy": [
+        "cat",
+        "inspect",
+        "verify"
+      ],
+      "raisedByNote": "Name-keyed lookups only (the reader builds its name index): cat, inspect --entry, verify --entry. list, inspect and whole-archive verify iterate without it; inspect counts stats.duplicateNames and --check no-duplicates gates them."
     },
     {
       "code": "ZIP_EXTRA_FIELD_MALFORMED",
       "severity": "warning",
       "raisedWhen": "An extra field overruns its declared length and was skipped.",
-      "remedy": "None needed — the malformed field is ignored, the rest is parsed."
+      "remedy": "None needed — the malformed field is ignored, the rest is parsed.",
+      "raisedBy": [
+        "list",
+        "inspect",
+        "cat",
+        "extract",
+        "verify",
+        "modify"
+      ],
+      "raisedByNote": "Central-directory parse: every random-access reader."
     },
     {
       "code": "ZIP_ZIP64_EXTRA_IGNORED",
       "severity": "warning",
       "raisedWhen": "A zip64 extra supplied a value for a non-sentinel classic field; the header value wins.",
-      "remedy": "Producer inconsistency — rebuild if unexpected."
+      "remedy": "Producer inconsistency — rebuild if unexpected.",
+      "raisedBy": [
+        "list",
+        "inspect",
+        "cat",
+        "extract",
+        "verify",
+        "modify"
+      ],
+      "raisedByNote": "Central-directory parse: every random-access reader."
     },
     {
       "code": "ZIP_TIMESTAMP_NOT_PINNED",
       "severity": "info",
       "raisedWhen": "defaultDate: 'now' makes the output non-reproducible.",
-      "remedy": "Pin a Date (or accept the DOS-epoch default) for deterministic bytes."
+      "remedy": "Pin a Date (or accept the DOS-epoch default) for deterministic bytes.",
+      "raisedBy": [
+        "create",
+        "modify"
+      ],
+      "raisedByNote": "--date now on create (also --parallel and batch --task create) and modify."
     },
     {
       "code": "ZIP_NONDETERMINISTIC_CODEC",
       "severity": "info",
       "raisedWhen": "Timestamps are pinned but a platform codec is in use — bytes are stable per environment, not across zlib builds.",
-      "remedy": "Pass deterministic: true to pin the pure-TS encoder for cross-runtime identical bytes."
+      "remedy": "Pass deterministic: true to pin the pure-TS encoder for cross-runtime identical bytes.",
+      "raisedBy": [
+        "create"
+      ],
+      "raisedByNote": "create with a pinned --date <ISO> on a non-pure deflate tier without --deterministic (also --parallel and batch --task create); modify does not emit it."
     },
     {
       "code": "ZIP_DEAD_BYTES_RATIO",
       "severity": "info",
       "raisedWhen": "An incremental save() left more than 50% dead bytes; removed/replaced content remains recoverable in the file.",
-      "remedy": "Use saveCompact() for true deletion and a canonical layout."
+      "remedy": "Use saveCompact() for true deletion and a canonical layout.",
+      "raisedBy": [
+        "modify"
+      ],
+      "raisedByNote": "Append-only save() of modify (not --compact)."
     }
   ],
   "sink": {
     "errors": "Thrown; every message starts 'zipnative: ' and names the remedy; err.code is the stable machine key, err.name/instanceof give the class.",
     "diagnostics": "console.warn deduplicated per code per operation by default; onDiagnostic receives all; strict: true throws ZipError code ZIP_STRICT_DIAGNOSTIC.",
-    "cli": "Every core call is wrapped by mapZipError(): error.code = the E_* class, error.zipCode = the ZIP_* code verbatim, plus entryName and code-specific detail when the core knows them. Diagnostics go to stderr as text (suppressed by --quiet) or travel in the --json envelope / report; --strict escalates the first one into ZIP_STRICT_DIAGNOSTIC -> E_CHECK_FAILED."
+    "cli": "Every core call is wrapped by mapZipError(): error.code = the E_* class, error.zipCode = the ZIP_* code verbatim, plus entryName and code-specific detail when the core knows them. Diagnostics go to stderr as text (suppressed by --quiet) or travel in the --json envelope / report, deduplicated by (code, entryName) per run; --strict escalates the first one into ZIP_STRICT_DIAGNOSTIC -> E_CHECK_FAILED (verify --strict prints the report, then E_VERIFY_FAILED)."
   }
 }

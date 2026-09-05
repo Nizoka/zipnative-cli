@@ -26,8 +26,8 @@ Official CLI for the [`zipnative`](https://github.com/Nizoka/zipnative) engine �
 > `govern` (manifest pipelines, environment preflight, JSON Schemas and a capability manifest,
 > four shells, the AI-governance contract). A global **`--json`** envelope carries a stable
 > **`E_*`** class **and** zipnative's frozen **`ZIP_*`** code verbatim; **`--dry-run`**,
-> **`--summary`** / **`--fields`**, **`--strict`** and eight **`--max-*`** security bounds
-> complete the agent contract. Every archive the CLI writes is validated against
+> **`--summary`** / **`--fields`**, **`--strict`**, eight **`--max-*`** security bounds and
+> **`--max-input-size`** complete the agent contract. Every archive the CLI writes is validated against
 > **ISO/IEC 21320-1:2015** in CI (the veraZIP gate). **Node ≥ 22**.
 > See [release notes](release-notes/v1.0.0.md) and [AGENTS.md](AGENTS.md).
 >
@@ -40,17 +40,20 @@ Official CLI for the [`zipnative`](https://github.com/Nizoka/zipnative) engine �
   by default, **`--deterministic`** to pin the pure-TS encoder (identical SHA-256 on every
   runtime), **`--stream`** for a constant-memory writer (streamed inputs, data-descriptor layout),
   **`--parallel`** to fan deflate out across a worker pool (`zipnative/worker`), `--include` /
-  `--exclude` globs, `--store-ext`, `--preserve-mode`, per-entry comments, and a `--dry-run` plan.
+  `--exclude` globs, `--order insertion` (argv order — an EPUB `mimetype` first), `--store-ext`,
+  `--preserve-mode`, archive and per-entry comments (`--comment-file` for raw bytes), and a
+  `--dry-run` plan. An existing output file is refused without `--overwrite`.
 - **`list` / `inspect`** — list entries without decompressing anything (`text` | `json` |
   `ndjson`, `--long` for flags, offsets and extra fields), or open the archive **eagerly** for a
   forensic report — per-method statistics, a determinism verdict, every engine diagnostic — and
   turn it into a CI gate with repeatable **`--check`** assertions (`deterministic`,
   `no-encryption`, `no-symlinks`, `max-ratio=N`, `has=<name>`, …; exit 1 / `E_CHECK_FAILED`).
 - **`extract`** — secure by default. The engine sanitises every path; the CLI is the filesystem
-  sink and re-proves containment under `--output-dir` before writing a byte. Zip-slip, Windows
-  device names, symlink entries, overlapping entries, central-directory / local-header
-  disagreement, duplicate output paths and decompression bombs are **refused**, each with its
-  `ZIP_*` code. Opt-outs are skip-not-write (`--skip-unsafe`, `--skip-symlinks`;
+  sink and re-proves containment under `--output-dir` — lexically and physically (`realpath`)
+  — before writing a byte, and opens every file exclusively. Zip-slip, Windows device names,
+  symlink entries, overlapping entries, central-directory / local-header disagreement,
+  duplicate output paths and decompression bombs are **refused**, each with its `ZIP_*` code.
+  Opt-outs are skip-not-write (`--skip-unsafe`, `--skip-symlinks`, `--skip-unsupported`;
   `--allow-symlinks` writes the link *target text* as a plain file — a symlink is never
   materialised). Existing files are never overwritten without `--overwrite`.
 - **`cat`** — stream one or more entries to stdout (or `--output`) by random access: a single
@@ -66,9 +69,11 @@ Official CLI for the [`zipnative`](https://github.com/Nizoka/zipnative) engine �
   `zipCode` set for structural refusals). Encrypted entries are honestly reported as *skipped*,
   never faked as verified. `--strict` also fails on any diagnostic.
 - **`modify`** — add, replace, remove, rename entries or set the comment **without
-  recompressing untouched entries**. The default save is append-only (original bytes verbatim);
-  **`--compact`** rewrites canonically so removed content is truly gone. `--in-place` writes back
-  through a temp file + rename.
+  recompressing untouched entries**. Every untouched entry is **verified** (CRC-32, sizes,
+  local header) before it is re-emitted verbatim — a lying record is refused, never laundered.
+  The default save is append-only (original bytes verbatim); **`--compact`** rewrites
+  canonically so removed content is truly gone. `--in-place` writes back through an
+  exclusively created temp file + atomic rename.
 - **`crc32` / `inflate`** — the ZIP checksum of files or stdin in constant memory (`--expect`
   turns it into a check, `--seed` continues a running value), and a raw-DEFLATE decoder with a
   **mandatory output bound** driven by zipnative's resumable inflater (`--method <id>` for
@@ -76,12 +81,14 @@ Official CLI for the [`zipnative`](https://github.com/Nizoka/zipnative) engine �
 - **`batch`** — archive every subdirectory of a folder (the full `create` command per
   directory, bounded concurrency), verify every `*.zip` in a folder, or run a declarative
   **`--manifest`** pipeline (`create` → `verify` → `extract` → …) with `@<id>` output references
-  and a codec-load policy (`--allow-codec-load`).
+  and a codec-load policy (`--allow-codec-load`). Under `--json` stdout is **one** batch
+  document with every task's captured report inside.
 - **`doctor`** — an offline capability preflight: CLI / Node / zipnative versions (package vs
   the engine's `VERSION` export), the active deflate tier (`node-zlib` expected, `pure` under
   `--pure-codecs`), the pinned tier used by `--deterministic`, platform streaming codecs,
   worker-thread availability for `create --parallel`, registered codecs, the **effective
-  security limits**, and the command count. Text or `--format json`; exit 0/1.
+  security limits** (as numbers under `data`, `--max-input-size` included), and the command
+  count. Text or `--format json`; exit 0/1.
 - **`schema`** — 22 versioned JSON Schemas (Draft 2020-12) for every input and output shape
   plus the machine-readable **capability manifest** (`schema manifest`) and
   [`llms.txt`](llms.txt), so agents can self-validate and discover the tool at runtime.
@@ -96,15 +103,17 @@ Official CLI for the [`zipnative`](https://github.com/Nizoka/zipnative) engine �
   **`--fields a,b.c`**, compact JSON under `--json`). See [AGENTS.md](AGENTS.md).
 - **Bounded by default** — the engine's eight CWE-tagged `ZipLimits` are exposed as
   `--max-entries`, `--max-entry-size`, `--max-total-size`, `--max-ratio`, `--max-name-bytes`,
-  `--max-extra-bytes`, `--max-comment-bytes` and `--max-cd-bytes` (`none` disables a bound, with
-  a visible warning).
+  `--max-extra-bytes`, `--max-comment-bytes` and `--max-cd-bytes`; the CLI adds
+  `--max-input-size` (4 GiB) on every buffered read (`none` disables a bound, with a visible
+  warning).
 - **`.zipnativerc.json`** — optional config file for default flags (global + per-command);
   precedence is CLI flags > config > built-in. `codec` is refused from config files.
 - **Zero extra dependencies** — `zipnative` is the sole runtime dependency; all ZIP logic lives
   there. No ZIP parsing in the CLI.
 - **Offline, always** — no command can open a socket. There is no network opt-in to forget.
 - **Stdin / stdout by default** — every command is shell-pipeline friendly.
-- **ESM-first, TypeScript strict** — built with tsup, typed declarations included.
+- **TypeScript strict, ESM source** — bundled by tsup into one CommonJS bin (`dist/cli.cjs`).
+  The package is a command-line tool only: no programmatic entry point, no type declarations.
 - **npm provenance** — Trusted Publishing (OIDC) with provenance attestations and a CycloneDX
   SBOM per release.
 
@@ -113,18 +122,18 @@ Official CLI for the [`zipnative`](https://github.com/Nizoka/zipnative) engine �
 | Feature | Status | Notes |
 |---------|--------|-------|
 | **Commands** | | |
-| `create` deterministic archives | ✅ | Files, directories, stdin, `--from-manifest`; `--method`, `--level`, `--deterministic`, `--order`, `--date`, `--stream`, `--parallel`, `--include`/`--exclude`, `--store-ext`, `--preserve-mode`, `--dir-entries` |
-| `modify` incremental edits | ✅ | `--add`, `--add-dir`, `--replace`, `--remove`, `--rename`, `--comment`, `--from-manifest`; append-only `save()` or `--compact`; `--in-place` |
-| `list` entries | ✅ | `text` \| `json` \| `ndjson`, `--long`, `--validate eager`, globs, `--summary` / `--fields` |
-| `inspect` forensic report | ✅ | Eager open, stats, determinism verdict, diagnostics, `--entries` / `--entry` / `--extra`, 19 `--check` assertions |
-| `cat` entries to stdout | ✅ | Random access, `--raw` (compressed payload), `--no-verify-crc`, `--output` |
-| `extract` to a directory | ✅ | Guards on by default; `--skip-unsafe`, `--allow-symlinks`, `--skip-symlinks`, `--on-duplicate`, `--overwrite`, `--flat`, `--buffered`, `--preserve-mode`, `--preserve-mtime` |
-| `stream` forward-only reader | ✅ | stdin/pipes; `--list` (default), `--output-dir`, `--cat`; `trust: "local-headers-only"`; `--skip-unsupported` |
-| `verify` deep integrity | ✅ | `verifyZip` report + `failed` / `skipped` / `strict`; exit 1 / `E_VERIFY_FAILED` |
+| `create` deterministic archives | ✅ | Files, directories, stdin, `--from-manifest`; `--method`, `--level`, `--deterministic`, `--order canonical\|insertion`, `--date` (UTC), `--stream`, `--parallel`, `--include`/`--exclude`, `--store-ext`, `--preserve-mode`, `--dir-entries`, `--comment` / `--comment-file`, `--overwrite` |
+| `modify` incremental edits | ✅ | `--add`, `--add-dir`, `--replace`, `--remove`, `--rename`, `--comment` / `--comment-file`, `--from-manifest`; every untouched entry verified before re-emission; append-only `save()` or `--compact`; `--in-place`, `--overwrite` |
+| `list` entries | ✅ | `text` \| `json` \| `ndjson`, `--long` (with `rawNameHex` / `commentHex`), `--validate eager`, globs, `--summary` / `--fields` |
+| `inspect` forensic report | ✅ | Eager open, stats, determinism verdict (`deterministic` = reproducibility, `canonicalLayout` = form), diagnostics, `--entries` / `--entry` / `--extra`, 19 `--check` assertions |
+| `cat` entries to stdout | ✅ | Random access, `--raw` (compressed payload), `--no-verify-crc`, `--output` (+ `--overwrite`) |
+| `extract` to a directory | ✅ | Guards on by default; `--skip-unsafe`, `--skip-unsupported`, `--allow-symlinks`, `--skip-symlinks`, `--on-duplicate`, `--overwrite`, `--flat`, `--buffered`, `--preserve-mode`, `--preserve-mtime` |
+| `stream` forward-only reader | ✅ | stdin/pipes; `--list` (default), `--output-dir`, `--cat`; `trust: "local-headers-only"`; `--skip-unsafe`, `--skip-unsupported` |
+| `verify` deep integrity | ✅ | `verifyZip` report + `failed` / `skipped` / `strict`; `--entry` verifies selected entries; exit 1 / `E_VERIFY_FAILED` |
 | `crc32` checksum | ✅ | Files or stdin, 64 KiB chunks; `--seed`, `--expect` (exit 1 / `E_CHECK_FAILED`) |
-| `inflate` raw DEFLATE | ✅ | Resumable inflater, mandatory `--max-output`, `--sync`, `--method <id>` for registered codecs |
-| `batch` orchestration | ✅ | Directory mode (`--task create` \| `verify`, `--concurrency`, `--fail-fast`) or `--manifest` pipelines (10 whitelisted manifest commands) |
-| `doctor` preflight | ✅ | Versions, deflate tiers, web streams, workers, codecs, effective limits, command count; text or `--json` |
+| `inflate` raw DEFLATE | ✅ | Resumable inflater, mandatory `--max-output`, `--sync`, `--method <id>` for registered codecs; envelope reports `bytesConsumed` / `leftover`; `--overwrite` |
+| `batch` orchestration | ✅ | Directory mode (`--task create` \| `verify`, `--concurrency` 1–64, `--fail-fast`, `--overwrite`) or `--manifest` pipelines (10 whitelisted manifest commands); one JSON document on stdout under `--json` |
+| `doctor` preflight | ✅ | Versions, deflate tiers, web streams, workers, codecs, effective limits (numbers under `data`), command count; text or `--json` |
 | `schema` JSON Schema export | ✅ | 22 subjects incl. `errors`, `limits`, `diagnostics`, `status`, `error` and the capability `manifest` |
 | `completion` shell scripts | ✅ | `bash` / `zsh` / `fish` / `powershell` |
 | `govern` AI-governance / HITL | ✅ | `rules` / `policy` / `verify-issue`; gates drafts with `E_POLICY` |
@@ -147,8 +156,9 @@ Official CLI for the [`zipnative`](https://github.com/Nizoka/zipnative) engine �
 | Duplicate output paths | ✅ | CWE-694 — `ZIP_EXTRACT_DUPLICATE_PATH`; `--on-duplicate error\|first\|last` |
 | Ambiguous EOCD / trailing garbage | ✅ | `ZIP_EOCD_NOT_FOUND` — refused, never guessed |
 | Integer overflow (> 2^53) | ✅ | CWE-190 — `ZIP_VALUE_UNREPRESENTABLE` |
-| Sink containment (CLI) | ✅ | `safeJoin(root, path)` re-proves every destination stays under `--output-dir` (`E_SECURITY`); case-fold collisions refused on win32/darwin |
-| Existing files | ✅ | Never overwritten without `--overwrite` (`E_IO`) |
+| Sink containment (CLI) | ✅ | `safeJoin(root, path)` re-proves every destination stays under `--output-dir` lexically, then the nearest existing ancestor is `realpath`-checked under the root's `realpath` before any `mkdir` (a planted symlink / junction is `E_SECURITY`); files are opened exclusively (`wx`); case-fold collisions refused on win32/darwin |
+| Existing files | ✅ | Never overwritten without `--overwrite` (`E_IO`) — uniform on `create` / `modify` / `cat` / `inflate --output`, `extract`, `stream --output-dir` and `batch` |
+| Buffered input bound (CLI) | ✅ | CWE-400 — `--max-input-size` (4 GiB) caps every archive or payload read into memory; `E_LIMIT` with `detail.limit = "maxInputSize"` |
 | **Determinism** | | |
 | Canonical entry order, DOS-epoch timestamps, UTF-8 names | ✅ | The engine's defaults — structurally reproducible everywhere |
 | Cross-runtime byte identity | ✅ | `--deterministic` pins the pure-TS encoder (`tier: "pure-pinned"`); default tier is byte-stable per environment |
@@ -171,18 +181,19 @@ ZIP has no veraPDF, so the CLI ships its own gate — **veraZIP**: an ISO/IEC 21
 (`zipnative/scripts/validate-zip.ts`, commit `4f1bc36`) that **raw-parses the bytes with its own
 EOCD / central-directory / local-header reader and never imports `zipnative`** — a validator that
 shared the engine's parser would attest the engine with the engine. `npm run validate:zip` builds
-the CLI, drives the **built binary** to write a **34-archive corpus** (30 conformant archives
-across every writer path — buffered, `--stream`, `--parallel`, `--deterministic`, `modify`
-append-only and `--compact`, manifests — plus **4 raw-crafted negative canaries** the validator
-must reject with a declared clause id), then validates every file clause by clause. Three of the
-conformant archives are **hostile-but-conformant** (zip-slip, a Windows device name, duplicate
-paths): the ISO profile constrains the container, not the meaning of names, so they PASS the
-validator and `extract` **must refuse** them — the gate checks both. Level 0 (the ISO clauses)
+the CLI, drives the **built binary** to write a **37-archive corpus** (33 conformant archives —
+30 across every writer path: buffered, `--stream`, `--parallel`, `--deterministic`, `--order
+insertion`, manifest extra fields, binary comments, `modify` append-only and `--compact` — plus
+**4 raw-crafted negative canaries** the validator must reject with a declared clause id), then
+validates every file clause by clause. Three of the conformant archives are
+**hostile-but-conformant** (zip-slip, a Windows device name, duplicate paths): the ISO profile
+constrains the container, not the meaning of names, so they PASS the validator and `extract`
+**must refuse** them — the gate checks both (`33 PASS, 4 XFAIL, 0 FAIL`). Level 0 (the ISO clauses)
 needs no external tool and always runs; level 1 re-tests every conformant archive with the
 foreign integrity tools present on the machine (`unzip -t`, `7z t`, `python -m zipfile -t`,
 `tar -tf`, `jar tf`) and **skips** the absent ones visibly; `VERAZIP_REQUIRED=1` (set in CI)
-fails closed. Blocking in [`verazip.yml`](.github/workflows/verazip.yml) on Linux and Windows and
-again before every publish. See [CONTRIBUTING.md](CONTRIBUTING.md#conformance-validation-verazip).
+fails closed. Blocking in [`verazip.yml`](.github/workflows/verazip.yml) on Linux and Windows on
+every pull request (no path filter) and again before every publish. See [CONTRIBUTING.md](CONTRIBUTING.md#conformance-validation-verazip).
 Not a certification — validation evidence against a specific validator revision, and
 **conformant does not mean safe**.
 
@@ -198,7 +209,9 @@ Or run without installing:
 npx zipnative-cli create src/ --output src.zip
 ```
 
-**Requirements:** Node.js ≥ 22 (CI runs 22 and 24 on Ubuntu, 22 on Windows) | Bun | Deno (`node dist/cli.cjs`)
+**Requirements:** Node.js ≥ 22 (CI runs 22 and 24 on Ubuntu and Windows, 22 on macOS). The
+package ships one CommonJS bin (`dist/cli.cjs`) plus `README.md`, `AGENTS.md`, `llms.txt` and
+`docs/data/errors.json` — it is a command-line tool, not a library.
 
 ## Documentation
 
@@ -243,12 +256,21 @@ zipnative create dist/ --deterministic -o b.zip
 sha256sum a.zip b.zip          # identical
 
 # Prove it from the archive itself (exit 1 / E_CHECK_FAILED otherwise)
-zipnative inspect --input a.zip --check deterministic,no-data-descriptor
+zipnative inspect --input a.zip --check deterministic,canonical-layout
 ```
 
 Without `--deterministic` the bytes are stable per environment (same Node + zlib build) but may
 differ across zlib builds; timestamps default to the DOS epoch and entries are sorted by raw name
 bytes either way.
+
+**Dates.** `--date <ISO 8601>` (and a manifest `date`) is **UTC wall-clock**: a string without a
+zone designator is read as UTC, a date-only string gets `T00:00:00Z`, and the stored DOS fields
+are identical on every host whatever its `TZ`. DOS time has a 2-second resolution (odd seconds
+are floored, with a warning) and a 1980–2107 range (a warning outside it). `--date now` and
+`--mtime` use local time and are **not** reproducible. `inspect` separates the two verdicts:
+`determinism.deterministic` (epoch timestamps + canonical order + UTF-8 flags — run-to-run
+reproducibility) and `determinism.canonicalLayout` (no data descriptors — the buffered layout).
+A `create --stream` archive is reproducible but not canonical.
 
 ### List and inspect
 
@@ -283,8 +305,9 @@ zipnative extract --input a.zip --output-dir out/
 zipnative extract --input a.zip -d out/ --dry-run
 zipnative extract --input a.zip -d out/ --include 'docs/**' --exclude '*.png'
 
-# Hostile archive: skip the unsafe names instead of failing (nothing unsafe is ever written)
-zipnative extract --input untrusted.zip -d out/ --skip-unsafe --skip-symlinks
+# Hostile archive: skip the unsafe names instead of failing (nothing unsafe is ever written);
+# --skip-unsupported also skips encrypted / unknown-method entries
+zipnative extract --input untrusted.zip -d out/ --skip-unsafe --skip-symlinks --skip-unsupported
 
 # Tighter bounds for untrusted input
 zipnative extract --input upload.zip -d out/ --max-total-size 512m --max-ratio 50 --max-entries 5000
@@ -312,12 +335,14 @@ Prefer `list` / `extract` whenever the whole file is available.
 zipnative verify --input a.zip                  # text verdict, exit 0/1
 zipnative verify --input a.zip --strict          # also fail on any diagnostic
 zipnative verify --input a.zip --json --summary  # {"ok":true,"entries":12,"failed":0,"skipped":0,"diagnostics":0}
+zipnative verify --input a.zip -e docs/a.md      # only the named entries (after the structural check)
 ```
 
 ### Modify without recompressing
 
 ```bash
-# Append-only save: untouched entries are never recompressed; original bytes stay verbatim
+# Append-only save: untouched entries are verified (CRC, sizes, local header) and copied
+# verbatim — never recompressed
 zipnative modify --input a.zip --output b.zip --replace docs/index.md=new.md --add CHANGELOG.md
 
 # Removed / replaced content stays recoverable after an append-only save (and 7-Zip's CLI
@@ -350,7 +375,7 @@ zipnative batch --input-dir archives/ --task verify --json --summary
 
 # Declarative pipeline with @id references (schema: `zipnative schema batch-manifest`)
 zipnative batch --manifest tasks.json --dry-run
-zipnative batch --manifest tasks.json --json
+zipnative batch --manifest tasks.json --json     # ONE JSON document on stdout, task reports inside
 ```
 
 ### AI-governance / Human-in-the-Loop
@@ -366,12 +391,13 @@ zipnative govern verify-issue ./draft.md        # exit 1 / E_POLICY on a violati
 
 ## Examples
 
-Ready-to-run examples are in [`samples/`](samples/), one directory per command, each script
-shipped as a Bash (`.sh`) **and** a PowerShell (`.ps1`) pair:
+Ready-to-run examples are in [`samples/`](samples/), one directory per command — 41 demos,
+each shipped as a Bash (`.sh`) **and** a PowerShell (`.ps1`) pair, plus a dependency-free runner
+that replays them as 73 jobs:
 
 | Category | Description |
 |----------|-------------|
-| [`create/`](samples/create/) | Directory, stdin, manifest, deterministic + SHA-256 twice, `--stream`, `--parallel`, globs |
+| [`create/`](samples/create/) | Directory, store vs deflate, deterministic + SHA-256 twice, manifest, stdin `--stream`, `--parallel`, comments + `--order insertion` + `--date` |
 | [`modify/`](samples/modify/) | Replace / add / remove / rename, append-only vs `--compact`, `--in-place`, edits manifest |
 | [`list/`](samples/list/) | Text, `--long`, JSON, NDJSON, `--summary` / `--fields` |
 | [`inspect/`](samples/inspect/) | Forensic report, `--entries --extra`, `--check` gates |
@@ -385,8 +411,9 @@ shipped as a Bash (`.sh`) **and** a PowerShell (`.ps1`) pair:
 | [`doctor/`](samples/doctor/) | Environment preflight, text and JSON |
 | [`schema/`](samples/schema/) | Subjects, the capability manifest |
 | [`completion/`](samples/completion/) | Install scripts for the four shells |
+| [`config/`](samples/config/) | `.zipnativerc.json` defaults, `--config`, `--no-config`, flag precedence |
 | [`govern/`](samples/govern/) | Rules, policy, `verify-issue` on a passing and a failing draft |
-| [`agent/`](samples/agent/) | The recommended agent loop: `doctor` → `inspect --summary` → `extract --dry-run` → `extract` |
+| [`agent/`](samples/agent/) | `--json` envelopes, `--dry-run`, deterministic error codes, token economy (`--summary` / `--fields`) |
 
 **Run all samples at once:**
 
@@ -422,8 +449,9 @@ cat file | zipnative create --stdin-name <name> -o <out.zip>
 | `<path>...` | — | Files and directories (directories are walked recursively, sorted by name) |
 | `--input <path>`, `-i` _(repeatable)_ | — | Same as a positional (useful in manifests) |
 | `--stdin-name <name>` | — | Read stdin as one entry named `<name>` |
-| `--from-manifest <file>` | — | JSON manifest `{ entries: [{ name, path\|data\|dataBase64\|directory, method, level, date, comment, mode }] }` — see `zipnative schema create-manifest`; mutually exclusive with paths / `--stdin-name` |
+| `--from-manifest <file>` | — | JSON manifest `{ comment\|commentBase64, order, date, compression, entries: [{ name, path\|data\|dataBase64\|directory, method, level, date, comment, mode, extraFields: [{ id, hex\|base64 }] }] }` — see `zipnative schema create-manifest`; entries are emitted in array order under `order: "insertion"`; mutually exclusive with paths / `--stdin-name` |
 | `--output <file>`, `-o` | stdout | Output path |
+| `--overwrite` | false | Replace an existing output file (default: refuse, `E_IO`, the file is left intact) |
 | `--base <dir>` | each input's parent directory | Entry names are relative to `<dir>` |
 | `--prefix <dir/>` | — | Prepend `<dir/>` to every entry name |
 | `--dir-entries` | false | Emit explicit directory entries (keeps empty directories) |
@@ -433,16 +461,17 @@ cat file | zipnative create --stdin-name <name> -o <out.zip>
 | `--method store\|deflate` | `deflate` | Compression method |
 | `--level 0-9` | `6` | Deflate level |
 | `--deterministic` | false | Pin the pure-TS encoder: identical SHA-256 on every runtime |
-| `--order canonical\|insertion` | `canonical` | Entry order (canonical = raw-name bytes; `insertion` preserves walk order, e.g. EPUB/JAR `mimetype` first) |
-| `--date epoch\|now\|<ISO 8601>` | `epoch` | Timestamp for entries (DOS epoch is reproducible; `now` emits `ZIP_TIMESTAMP_NOT_PINNED`) |
-| `--mtime` | false | Use each file's modification time (non-reproducible) |
+| `--order canonical\|insertion` | `canonical` | Entry order: `canonical` sorts by raw-name bytes; `insertion` keeps the **argv order** (each directory still walks name-sorted; a manifest keeps its `entries` order) — e.g. `zipnative create mimetype META-INF OEBPS --base book --order insertion` puts an EPUB `mimetype` first |
+| `--date epoch\|now\|<ISO 8601>` | `epoch` | Timestamp for entries. `epoch` = DOS epoch 1980-01-01 (reproducible); an ISO date is **UTC wall-clock** (no zone designator → UTC; 2-second resolution, 1980–2107); `now` is local time and non-reproducible (`ZIP_TIMESTAMP_NOT_PINNED`) |
+| `--mtime` | false | Use each file's modification time (local, non-reproducible) |
 | `--comment <text>` | — | Archive comment |
+| `--comment-file <path>` | — | Archive comment from a file, raw bytes (`-` = stdin; exclusive with `--comment`; at most 65535 bytes, `E_INPUT` beyond) |
 | `--entry-comment <name>=<text>` _(repeatable)_ | — | Per-entry comment |
 | `--preserve-mode` | false | Store POSIX mode bits (never setuid/setgid/sticky; no effect on Windows) |
 | `--store-ext png,jpg,zip` | — | Store (no deflate) entries with these extensions |
 | `--stream` | false | Constant-memory writer: file inputs are streamed (data-descriptor layout — same content as the buffered layout, not the same bytes); entries > 4 GiB are refused (`ZIP_UNSUPPORTED_ZIP64_STREAMING`) |
-| `--chunk-size <size>` | `65536` | Chunk size for `--stream` |
-| `--parallel` | false | Deflate across a worker pool (`zipnative/worker`); byte-identical to the sequential writer per tier |
+| `--chunk-size <size>` | `65536` | Output chunk size for the chunked writer (`--stream` or `--stdin-name`; refused otherwise; a warning outside 1 KiB–16 MiB) |
+| `--parallel` | false | Deflate across a worker pool (`zipnative/worker`); byte-identical to the sequential writer per tier. Refused (exit 2) with a `--codec` module that registers method 0/8, or a `deflateImpl` without `--deterministic` — the workers never see the module |
 | `--workers <n>` | cores − 1, max 8 | Worker count (`0` = main thread); requires `--parallel` |
 | `--min-job-size <size>` | `32k` | Minimum entry size dispatched to a worker; requires `--parallel` |
 | `--job-timeout <ms>` | `60000` | Per-job cap before inline fallback; requires `--parallel` |
@@ -451,10 +480,15 @@ cat file | zipnative create --stdin-name <name> -o <out.zip>
 `--parallel` resolves `node:zlib` inside its worker bundle, so `--pure-codecs` cannot govern it —
 combining the two requires `--deterministic` (exit 2 otherwise). Every entry name is pre-checked
 with the engine's `sanitizeEntryPath()`: a name that could not be extracted safely (reserved
-device name, traversal, empty segment) is refused at creation time (`E_INPUT`).
+device name, traversal, empty segment) is refused at creation time (`E_INPUT`, with
+`entryName`). Any streamed input (`--stream`, `--stdin-name`) uses the data-descriptor layout:
+same content as the buffered writer, different bytes; `--stream --deterministic` buffers one
+entry at a time (the pinned encoder is whole-buffer). Argv paths (`../src`, `-o ../out.zip`)
+are ordinary shell paths; only `path` values inside a manifest are refused on `..`.
 
 Status envelope (`--json`): `{ ok, command, output, entries, files, directories, bytes, bytesIn,
-method, level, deterministic, tier, order, stream, parallel, skipped, diagnostics }`.
+method, level, deterministic, tier, order, stream, layout: "buffered" | "data-descriptor",
+parallel, skipped, diagnostics }`.
 
 ### `zipnative modify`
 
@@ -469,20 +503,22 @@ Edits are applied in a **fixed order** regardless of argv order: `remove` → `r
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--input <file>`, `-i` | — **(required)** | Source archive (a positional path also works) |
+| `--input <file>`, `-i` | — **(required)** | Source archive (a positional path also works). Opened **eagerly**: overlap and CD ↔ local-header structure are checked before any edit |
 | `--output <file>`, `-o` | stdout | Output path |
-| `--in-place` | false | Write back to the input path (temp file + rename); mutually exclusive with `--output`, requires a file input |
+| `--overwrite` | false | Replace an existing `--output` file (default: refuse, `E_IO`) |
+| `--in-place` | false | Write back to the input path through an exclusively created temp file (`<input>.tmp-<pid>-<12 hex>`) + atomic rename; mutually exclusive with `--output`, requires a file input |
 | `--remove <name>` _(repeatable)_ | — | Remove an entry |
 | `--rename <from>=<to>` _(repeatable)_ | — | Rename an entry (never overwrites implicitly) |
 | `--replace <name>=<path>` _(repeatable)_ | — | Replace an entry's content (path `-` = stdin) |
-| `--add <name>=<path>` _(repeatable)_ | — | Add a new entry (a bare `<path>` uses its basename) |
+| `--add <name>=<path>` _(repeatable)_ | — | Add a new entry (a bare `<path>` uses its basename). A name ending in `/` with a payload is `E_INPUT` — use `--add-dir` |
 | `--add-dir <name>` _(repeatable)_ | — | Add an explicit directory entry |
 | `--comment <text>` | — | Set the archive comment (`""` clears it) |
-| `--from-manifest <file>` | — | JSON edits — see `zipnative schema modify-manifest`; mutually exclusive with the edit flags |
+| `--comment-file <path>` | — | Set the archive comment from a file, raw bytes (`-` = stdin; exclusive with `--comment`; at most 65535 bytes) |
+| `--from-manifest <file>` | — | JSON edits `{ comment\|commentBase64, edits: [{ op, name, to, path\|data\|dataBase64, method, level, date, comment, mode, extraFields }] }` — see `zipnative schema modify-manifest`; mutually exclusive with the edit flags |
 | `--method` / `--level` / `--deterministic` | engine defaults | Compression for **new** payloads |
-| `--date epoch\|now\|<ISO>` | `epoch` | Timestamp for new payloads |
+| `--date epoch\|now\|<ISO>` | `epoch` | Timestamp for new payloads (an ISO date is UTC wall-clock, as in `create`) |
 | `--compact` | false | Canonical rewrite (`saveCompact`): removed data is truly gone, still no recompression |
-| `--dry-run` | false | Validate edits against the archive; write nothing |
+| `--dry-run` | false | Validate edits against the archive (including the verification pass below); write nothing |
 
 The default save is **append-only**: original bytes verbatim + appended entries + a new central
 directory. Removed / replaced content **remains recoverable** (data remanence), and 7-Zip's CLI is
@@ -490,8 +526,19 @@ known to mis-read this layout — pass `--compact` when either matters (the CLI 
 line whenever a destructive edit is saved append-only). Archives with duplicate entry names cannot
 be modified incrementally (`ZIP_DUPLICATE_ENTRY_NAME`).
 
+**Every re-emitted entry is verified.** Before `save()` / `saveCompact()`, each entry that is
+copied verbatim (not removed or replaced; renamed entries are checked under their original
+record) goes through `verifyEntry()`: CRC-32, sizes and local header vs central directory — one
+decompress pass over the untouched entries, never a recompress. A lying record is refused
+instead of laundered: local-header disagreement → `E_SECURITY` / `ZIP_CD_LFH_MISMATCH`, a CRC
+lie → `E_DATA` / `ZIP_CRC_MISMATCH`, a size lie → `E_DATA` / `ZIP_SIZE_MISMATCH`, each with
+`entryName`. Encrypted entries and entries whose registered codec has no `decompressSync` cannot
+be verified: they are copied as-is and counted in `verifySkipped`. An entry with no registered
+codec is `E_UNSUPPORTED` (load `--codec`). There is no opt-out.
+
 Status envelope: `{ ok, command, output, bytes, edits: [{ op, name, to? }], layout:
-"append-only" | "compact", changed, diagnostics }`.
+"append-only" | "compact", changed, verified, verifySkipped, tier, diagnostics }` (a binary
+comment shows as `"<N bytes>"` in `edits`).
 
 ### `zipnative list`
 
@@ -503,14 +550,17 @@ zipnative list <a.zip> [options]
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--input <file>`, `-i` | stdin | Archive path |
-| `--format text\|json\|ndjson` | `text` (`json` under `--json`) | Output format; `ndjson` is one `EntryRow` per line |
-| `--long`, `-l` | false | Add mode, flags, versions, offsets and extra fields |
+| `--format text\|json\|ndjson`, `-f` | `text` (`json` under `--json`) | Output format; `ndjson` is one `EntryRow` per line |
+| `--long` | false | Add mode, flags, versions, offsets and extra fields (no `-l` short form) |
 | `--validate lazy\|eager` | `lazy` | Cross-check every local header up front (`eager`) |
 | `--include <glob>` / `--exclude <glob>` _(repeatable)_ | — | Name filters |
 | `--summary` | — | `{ entries, files, directories, compressedSize, uncompressedSize, zip64, encrypted }` |
 | `--fields a,b.c` | — | Dot-path projection of the JSON report |
 
-Nothing is decompressed. JSON shape: `zipnative schema entries`.
+Nothing is decompressed. JSON shape: `zipnative schema entries`. `--long` rows carry
+`rawNameHex` (the name bytes, always) and `commentHex` (when the entry has a comment);
+`unixMode` is four octal digits (`"0644"`, `"4755"`). The `--format json` `archive` object
+carries `commentHex` whenever `commentBytes > 0` (`comment` stays the lossy UTF-8 decode).
 
 ### `zipnative inspect`
 
@@ -521,19 +571,23 @@ zipnative inspect --input <a.zip> [--format json|text] [--check <assert>]...
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--input <file>`, `-i` | stdin | Archive path. Opened **eagerly**: every local header cross-checked, overlap table built up front |
-| `--format text\|json` | `text` (`json` under `--json`) | Output format |
-| `--entries` | false | Include every entry (long form) in the report |
-| `--entry <name>` _(repeatable)_ | — | Include only the named entries (`E_NOT_FOUND` if absent) |
+| `--format text\|json`, `-f` | `text` (`json` under `--json`) | Output format |
+| `--entries` | false | Include every entry (long form, with `rawNameHex` / `commentHex`) in the report |
+| `--entry <name>` _(repeatable)_ | — | Include only the named entries (`E_NOT_FOUND` / `ZIP_ENTRY_NOT_FOUND` if absent) |
 | `--extra` | false | Include extra-field payloads as hex |
 | `--check <assert>` _(repeatable, comma-separable)_ | — | Assertion; any failure prints the report then exits 1 with `E_CHECK_FAILED` |
-| `--summary` | — | `{ entries, bytes, uncompressedSize, zip64, encrypted, deterministic, diagnostics, checksPassed? }` |
+| `--summary` | — | `{ entries, bytes, uncompressedSize, zip64, encrypted, deterministic, canonicalLayout, diagnostics, checksPassed? }` |
 | `--fields a,b.c` | — | Dot-path projection |
 
 Assertions: `deterministic`, `epoch-timestamps`, `canonical-order`, `utf8-names`,
 `no-data-descriptor` / `canonical-layout`, `no-zip64`, `zip64`, `no-encryption`, `no-symlinks`, `no-duplicates`,
 `no-diagnostics`, `store-only`, `deflate-only`, `max-entries=N`, `min-entries=N`,
 `max-uncompressed=<size>`, `max-ratio=N`, `has=<name>`, `method=store|deflate|<id>`.
-JSON shape: `zipnative schema inspect`.
+The `determinism` verdict is `{ epochTimestamps, canonicalOrder, utf8Flags, noDataDescriptors,
+canonicalLayout, deterministic }` — `deterministic` (reproducibility) = epoch timestamps +
+canonical order + UTF-8 flags; `canonicalLayout` (form) = no data descriptors. The text report
+prints `Determinism: reproducible, layout canonical|data-descriptor`. JSON shape:
+`zipnative schema inspect`.
 
 ### `zipnative cat`
 
@@ -547,13 +601,16 @@ zipnative cat <a.zip> <name> [<name>...]
 | `--input <file>`, `-i` | — **(required)** | Archive path |
 | `--entry <name>`, `-e` _(repeatable)_ | — **(required)** | Entry name; entries are concatenated in order |
 | `--output <file>`, `-o` | stdout | Write to a file instead of stdout |
+| `--overwrite` | false | Replace an existing `--output` file (default: refuse, `E_IO`) |
 | `--raw` | false | Output the **compressed** payload (zero-copy), no decoding |
 | `--no-verify-crc` | false | Skip the CRC-32 check at the end of the stream |
 | `--dry-run` | false | Resolve the entries and report their sizes; output nothing |
 
 The CRC is verified at the **end** of the stream (like `unzip -p`), so stdout may already carry
 bytes when `E_DATA` fires; with `--output` the partial file is removed. Directory entries are
-refused (`E_INPUT`).
+refused (`E_INPUT`); an unknown name is `E_NOT_FOUND` with `zipCode: "ZIP_ENTRY_NOT_FOUND"`. A
+`--codec` method that offers `decompressSync` but no `decompressStream` is read through
+`readEntry()` (that one entry is buffered).
 
 ### `zipnative extract`
 
@@ -570,6 +627,7 @@ zipnative extract --input <a.zip> --output-dir <dir> [options]
 | `--overwrite` | false | Replace existing files (default: refuse, `E_IO`) |
 | `--on-duplicate error\|first\|last` | `error` | Same sanitised path twice |
 | `--skip-unsafe` | false | **Skip** entries whose names cannot be made safe instead of failing (zip-slip, absolute, drive/UNC, NUL, ADS, device names). Nothing unsafe is ever written |
+| `--skip-unsupported` | false | **Skip** encrypted entries and methods with no registered codec (reason `unsupported`) instead of failing |
 | `--allow-symlinks` | false | Write a symlink entry's **target text** as a regular file (a symlink is never materialised). Default: refuse |
 | `--skip-symlinks` | false | Drop symlink entries silently |
 | `--flat` | false | Drop directories, write basenames only |
@@ -581,9 +639,16 @@ zipnative extract --input <a.zip> --output-dir <dir> [options]
 Refusals (`E_SECURITY` + `zipCode`): `ZIP_PATH_TRAVERSAL`, `ZIP_SYMLINK_REJECTED`,
 `ZIP_EXTRACT_DUPLICATE_PATH`, `ZIP_ENTRY_OVERLAP`, `ZIP_CD_LFH_MISMATCH`. Bounds (`E_LIMIT`):
 `--max-entry-size`, `--max-total-size`, `--max-ratio`, `--max-entries`, … Extraction is
-two-phase: the plan is drained without decompressing anything, every destination is proven to
-stay under the root, existing files are checked; only then is each entry streamed into its file
-with backpressure (a CRC / size failure removes the partial file).
+two-phase: the plan is drained without decompressing anything and every destination is proven
+to stay under the root **lexically** (`safeJoin`); then, per file, the nearest existing ancestor
+of the target directory is `realpath`-checked under the root's `realpath` **before** `mkdir -p`
+and re-checked after (a symlink or junction planted inside the destination that points outside
+is `E_SECURITY`, and nothing is created beyond the link), the file is opened **exclusively**
+(`wx`, unless `--overwrite` — a file that appears between the plan and the write is refused like
+any pre-existing one), and the entry is streamed in with backpressure (a CRC / size failure
+removes the partial file). The only residual window is between `realpath` and `open`: use an
+empty or trusted destination. Skipped reasons: `unsafe-path | symlink | filtered | duplicate |
+unsupported`.
 
 Status envelope: `{ ok, command, outputDir, entries, files, directories, bytes, skipped:
 [{ name, reason }], symlinksAsData, diagnostics }`.
@@ -602,21 +667,25 @@ cat a.zip | zipnative stream --cat <name>
 | `--list` | default mode | List entries as they arrive |
 | `--output-dir <dir>`, `-d` | — | Extract under `<dir>` (`sanitizeEntryPath` + containment) |
 | `--cat <name>` _(repeatable)_ | — | Write the named entry's data to stdout; mutually exclusive with `--output-dir` |
-| `--format text\|json\|ndjson` | `text` (`ndjson` under `--json`) | Listing format |
-| `--long`, `-l` | false | Add flags, versions and extra fields to the rows |
-| `--include` / `--exclude`, `--overwrite`, `--on-duplicate`, `--flat`, `--preserve-mtime` | as in `extract` | Extraction controls |
+| `--format text\|json\|ndjson`, `-f` | `text` (`ndjson` under `--json`) | Listing format |
+| `--long` | false | Add flags, versions and extra fields to the rows (`rawNameHex` / `commentHex` included; no `-l` short form) |
+| `--include` / `--exclude`, `--overwrite`, `--on-duplicate`, `--flat`, `--preserve-mtime` | as in `extract` | Extraction controls (the same sink: realpath containment, exclusive open) |
 | `--skip-unsafe` | false | Skip unsafe names instead of failing |
 | `--skip-unsupported` | false | Skip encrypted / unknown-method entries instead of failing |
-| `--summary` / `--fields` | — | Projection of the `--format json` report (`{ entries, bytes, trust }`) |
+| `--summary` / `--fields` | — | Projection of the `--format json` report; `--summary` = `{ entries, bytes, descriptorEntries, bytesKnown, trust }` |
 | `--dry-run` | false | Iterate and plan; write nothing |
 
 **Trust caveat:** the forward reader parses local headers **alone**. There is no central directory
 to cross-check names, sizes, methods or attributes, so `--preserve-mode` / `--allow-symlinks` /
 `--skip-symlinks` are unavailable here (`E_USAGE`) and every JSON output carries
 `trust: "local-headers-only"`. A `warning:` line says so at start (suppressed by `--quiet`). Prefer
-`list` / `extract` whenever the whole file is available. Data-descriptor entries the engine
-cannot delimit without the central directory (store, encrypted or custom-codec + bit 3) are
-refused with `ZIP_UNSUPPORTED_CD_LESS_DESCRIPTOR`.
+`list` / `extract` whenever the whole file is available. Data-descriptor entries carry zero
+sizes in their local header (a `create --stream` archive, for one): the rows show them as such,
+`--summary` counts them in `descriptorEntries` and sets `bytesKnown: false` (`bytes` excludes
+them), and `--list` has to inflate each such entry to find its end. Data-descriptor entries the
+engine cannot delimit without the central directory (store, encrypted or custom-codec + bit 3)
+are refused with `ZIP_UNSUPPORTED_CD_LESS_DESCRIPTOR`. A `--cat` name that never arrives is
+`E_NOT_FOUND` / `ZIP_ENTRY_NOT_FOUND`.
 
 ### `zipnative verify`
 
@@ -627,16 +696,18 @@ zipnative verify --input <a.zip> [--format json|text] [--strict]
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--input <file>`, `-i` | stdin | Archive path |
-| `--format text\|json` | `text` (`json` under `--json`) | Output format |
+| `--entry <name>`, `-e` _(repeatable)_ | — | Verify only the named entries (CRC-32, sizes, local header of each) after the eager structural check; the report lists them under `selected`, `entries` holds only those, `entryCount` stays the archive total. An unknown name is `E_NOT_FOUND` / `ZIP_ENTRY_NOT_FOUND` before any output |
+| `--format text\|json`, `-f` | `text` (`json` under `--json`) | Output format |
 | `--strict` | false | Also fail when any diagnostic was emitted |
-| `--summary` | — | `{ ok, entries, failed, skipped, diagnostics, error? }` |
+| `--summary` | — | `{ ok, entries, failed, skipped, diagnostics, selected?, error? }` |
 | `--fields a,b.c` | — | Dot-path projection |
 
 The report is zipnative's `ZipVerificationReport` (`{ ok, error, entryCount, entries: [{ name,
 ok, crcMatch, sizeMatch, localHeaderMatch, skipped? }], diagnostics }`) plus `{ failed, skipped,
-strict }`. Encrypted entries are honestly `skipped`, never faked as verified. Exit 1 /
-`E_VERIFY_FAILED` when `ok` is false; the error envelope carries `zipCode = report.error.code` for
-structural refusals. The `--max-*` bounds apply.
+strict, selected? }`. Encrypted entries are honestly `skipped: "encrypted"` (a stream-only codec:
+`"stream-only-codec"`), never faked as verified. Exit 1 / `E_VERIFY_FAILED` when `ok` is false;
+the error envelope carries `zipCode = report.error.code` for structural refusals. The `--max-*`
+bounds apply.
 
 ### `zipnative crc32`
 
@@ -649,10 +720,11 @@ zipnative crc32 [<file>...] [--seed <hex>] [--expect <hex>] [--format text|json]
 | `<file>...` / `--input <file>`, `-i` _(repeatable)_ | stdin | Inputs |
 | `--seed <hex>` | `0` | Continue a running checksum from this value |
 | `--expect <hex>` | — | Single input: exit 1 / `E_CHECK_FAILED` on mismatch (`detail: { expectedCrc, actualCrc }`) |
-| `--format text\|json` | `text` (`json` under `--json`) | `text` is `"<crc>  <bytes>  <file>"`; JSON shape: `zipnative schema crc32` |
+| `--format text\|json`, `-f` | `text` (`json` under `--json`) | `text` is `"<crc>  <bytes>  <file>"`; JSON shape: `zipnative schema crc32` |
 
 Streams input in 64 KiB chunks through zipnative's incremental `crc32()` — constant memory for
-any size.
+any size (not bounded by `--max-input-size`). Under `--json` the report stays on stdout and a
+`{ ok, command: "crc32", files, bytes, expect?, matched? }` status envelope goes to stderr.
 
 ### `zipnative inflate`
 
@@ -664,15 +736,18 @@ zipnative inflate [--input <file>] [--output <file>] [--max-output <size>]
 |------|---------|-------------|
 | `--input <file>`, `-i` | stdin | Compressed input |
 | `--output <file>`, `-o` | stdout | Decompressed output |
+| `--overwrite` | false | Replace an existing `--output` file (default: refuse, `E_IO`) |
 | `--max-output <size>` | the effective `--max-entry-size` (1 GiB) | Hard output bound; `none` only for trusted input |
 | `--method deflate\|store\|<id>` | `deflate` | Codec (ids via `--codec`); `store` is a bounded pass-through |
-| `--sync` | false | Buffer the input and use the codec's `decompressSync` |
+| `--sync` | false | Buffer the input (bounded by `--max-input-size`) and use the codec's `decompressSync` |
 | `--allow-trailing` | false | Silence the warning about bytes after the stream end |
 | `--dry-run` | false | Report the plan; decompress nothing |
 
 Default path: zipnative's resumable inflater fed chunk by chunk — constant memory, exact
-`bytesConsumed`, trailing bytes reported as `leftover`. Errors: `ZIP_DEFLATE_CORRUPT` /
-`ZIP_DEFLATE_TRUNCATED` → `E_PARSE`, `ZIP_INFLATE_OUTPUT_OVERFLOW` → `E_DATA`.
+`bytesConsumed` (= `bytesIn` − `leftover`; equals `bytesIn` on the `--sync` / codec paths),
+trailing bytes reported as `leftover`. Errors: `ZIP_DEFLATE_CORRUPT` / `ZIP_DEFLATE_TRUNCATED` →
+`E_PARSE`, `ZIP_INFLATE_OUTPUT_OVERFLOW` → `E_DATA`. Status envelope: `{ ok, command, output,
+method, methodName, bytesIn, bytesConsumed, bytesOut, leftover, maxOutput, sync, tier }`.
 
 ### `zipnative batch`
 
@@ -689,23 +764,34 @@ zipnative batch --manifest <tasks.json> [--continue-on-error] [--allow-codec-loa
 | `--input-dir <dir>` | — **(required in directory mode)** | `--task create`: each immediate subdirectory becomes `<output-dir>/<name>.zip` through the full `create` command (every create flag is honoured); `--task verify`: every `*.zip` in the directory is verified |
 | `--output-dir <dir>` | — **(required for `--task create`)** | Destination directory (created if absent) |
 | `--task create\|verify` | `create` | Directory-mode task |
-| `--concurrency <n>` | `4` | Parallel workers |
+| `--overwrite` | false | Replace existing `<name>.zip` files (default: each is refused, `E_IO`) |
+| `--concurrency <n>` | `4` | Parallel workers, 1–64 (exit 2 outside) |
 | `--fail-fast` | false | Stop scheduling after the first failure |
+| `--method` / `--level` / `--deterministic`, `--order`, `--date`, `--comment` | `create` defaults | Directory mode forwards every `create` flag to each archive |
 | `--manifest <file>` | — | Ordered pipeline of whitelisted commands with `"@<id>"` output references; tasks run sequentially, fail-fast by default — see `zipnative schema batch-manifest` |
 | `--continue-on-error` | false | Keep running independent tasks after a failure (tasks depending on a failed task are skipped) |
 | `--allow-codec-load` | false | Permit a `codec` flag inside tasks (executes user code) |
-| `--format text\|json` | `text` (`json` under `--json`) | Summary format |
-| `--summary` | — | `{ ok, command, mode, task?, total, succeeded, failed, skipped? }` |
+| `--format text\|json`, `-f` | `text` (`json` under `--json`) | Report format |
+| `--summary` | — | `{ ok, command, mode, task?, dryRun?, total, succeeded, failed, skipped? }` |
 | `--fields a,b.c` | — | Dot-path projection |
 | `--dry-run` | false | Validate and print the plan; execute nothing |
 
 The manifest whitelist holds 10 manifest commands: `create`, `list`, `inspect`, `extract`,
 `cat`, `verify`, `stream`, `modify`, `crc32`, `inflate` — never `batch`, `govern`, `schema`,
 `completion` or `doctor`. A flag value `"@<id>"` references the resolved `output` (or
-`output-dir`) of an **earlier** task; relative paths resolve against the manifest's directory
-after the same traversal check the CLI applies to direct flags. Manifests are JSON-size-capped
-(50 MB) and bounded to 1 000 tasks. Exit 1 carries the **first failing task's** `E_*` code (and
-`zipCode`).
+`output-dir`) of an **earlier** task; relative paths resolve against the manifest's directory and
+are refused on `..` (`validatePath` — a manifest is data, not the invoking user). Manifests are
+JSON-size-capped (50 MB) and bounded to 1 000 tasks. Exit 1 carries the **first failing task's**
+`E_*` code (and `zipCode`).
+
+**`--json` / `--format json`: stdout is ONE batch document.** Each manifest task runs under
+stdout capture (64 MiB cap → `E_LIMIT` `{ limit: "captureBytes" }`); its output lands in
+`tasks[i].report` (the parsed JSON object, or an array of rows for NDJSON), `tasks[i].stdout`
+(text) and `tasks[i].stdoutBytes`. Tasks that would write their **artefact** to stdout —
+`create` / `modify` / `cat` / `inflate` without `output`, `stream --cat` — are refused at
+validation (`E_USAGE`, exit 2, also under `--dry-run`). Text mode keeps the interleaved
+per-task output. `batch` emits no status envelope: the batch document *is* the report
+(shape: `zipnative schema batch`).
 
 ### `zipnative doctor`
 
@@ -715,13 +801,17 @@ zipnative doctor [--format json|text]
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--format text\|json` | `text` (`json` under `--json`) | Output format |
+| `--format text\|json`, `-f` | `text` (`json` under `--json`) | Output format |
 
 Checks: `cli`, `node` (≥ 22), `zipnative` (package vs `VERSION` export), `deflate-tier`
 (`node-zlib` expected; `pure` under `--pure-codecs`), `deflate-pinned` (the tier used by
 `--deterministic`), `web-streams` (`CompressionStream` / `DecompressionStream`), `workers`
 (`create --parallel`), `codecs` (registered methods), `limits` (the effective bounds, with
-`--max-*` overrides), `commands`. Exit 0 when every check passes, 1 otherwise. Always offline.
+`--max-*` / `--max-input-size` overrides; under `--format json` the check carries `data { maxEntries,
+maxEntryUncompressedSize, maxTotalUncompressedSize, maxCompressionRatio, maxNameBytes,
+maxExtraFieldBytes, maxCommentBytes, maxCentralDirectoryBytes, maxInputSize }` as numbers, or
+`"none"` when disabled), `commands`. Exit 0 when every check passes, 1 otherwise. Always
+offline.
 
 ### `zipnative schema`
 
@@ -769,6 +859,11 @@ zipnative completion fish > ~/.config/fish/completions/zipnative.fish
 zipnative completion powershell >> $PROFILE   # Register-ArgumentCompleter
 ```
 
+The scripts are generated from the same command table as `schema manifest`. Path flags
+(`--input`, `--output`, `--output-dir`, `--input-dir`, `--base`, `--from-manifest`, `--manifest`,
+`--config`, `--codec`, `--comment-file`) complete files; other value flags require an argument;
+boolean flags take none.
+
 ### `zipnative govern`
 
 ```bash
@@ -780,7 +875,7 @@ zipnative govern verify-issue <draft.md>  # validate a draft; exit 1 / E_POLICY 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--input <file>`, `-i` | positional | Draft path (`-` = stdin), for `verify-issue` |
-| `--format json\|text` | `text` (`json` under `--json`) | Report format for `verify-issue` |
+| `--format json\|text`, `-f` | `text` (`json` under `--json`) | Report format for `verify-issue` |
 
 `verify-issue` fails a draft that proposes an external runtime dependency or omits a
 reproduction code block; missing recommended fields (environment, expected behaviour) and
@@ -794,8 +889,8 @@ passing check is **necessary but not sufficient** — the human review gate alwa
 | `--config <file>` | nearest `.zipnativerc.json` upward from cwd | Use a specific config file |
 | `--no-config` | — | Ignore any `.zipnativerc.json` |
 | `--quiet`, `-q` | — | Suppress progress output and text diagnostics on stderr (never envelopes or errors) |
-| `--no-color` | — | Disable ANSI colour (also respects the `NO_COLOR` env var) |
-| `--json` | — | Agent mode: emit a JSON status/error envelope on stderr (data stays on stdout). Errors carry a stable `E_*` code and zipnative's `ZIP_*` code verbatim |
+| `--no-color` | — | Disable ANSI colour on the stderr progress lines (sets `NO_COLOR`). Colour is decided on **stderr**: `NO_COLOR` (any value) off, `FORCE_COLOR` (not `0`/`false`) on, `TERM=dumb` off, otherwise on only when stderr is a TTY |
+| `--json` | — | Agent mode: emit a JSON status/error envelope on stderr (data stays on stdout). Errors carry a stable `E_*` code and zipnative's `ZIP_*` code verbatim. `batch` is the exception: its JSON report is the stdout document |
 | `--pretty` | — | Indent JSON output under `--json` |
 | `--dry-run` | — | Validate inputs and plan without writing output (`create`, `extract`, `modify`, `stream`, `cat`, `inflate`, `batch`) |
 | `--strict` | — | Escalate the first engine diagnostic into `E_CHECK_FAILED` before any output byte (`verify`: fail on any diagnostic, `E_VERIFY_FAILED`) |
@@ -807,6 +902,7 @@ passing check is **necessary but not sufficient** — the human review gate alwa
 | `--max-extra-bytes <size>` | `65535` | Maximum extra-field block length in bytes (CWE-400) |
 | `--max-comment-bytes <size>` | `65535` | Maximum comment length in bytes (CWE-400) |
 | `--max-cd-bytes <size>` | `268435456` (256 MiB) | Maximum central-directory size in bytes (CWE-400) |
+| `--max-input-size <size>` | `4294967296` (4 GiB) | CLI-owned bound on every **buffered** read (CWE-400): an archive or payload read from stdin (byte-counted, aborted) or a file (`stat` before reading) into memory — `list`, `inspect`, `verify`, `extract`, `cat`, `modify`, `create --stdin-name`, `inflate --sync`, `govern verify-issue`. Exceeding it is `E_LIMIT` with `detail { limit: "maxInputSize", configured, observed }`; `none` disables it with one warning. Not a `ZipLimits` key (`doctor` reports it under `limits`). The streaming commands (`stream`, `crc32`, `inflate`, `create --stream`) are not bounded by it |
 | `--pure-codecs` | — | Skip `node:zlib` and run the pure-TS codec tier |
 | `--codec <module>` | — | Load an ESM module exporting `{ codecs: ZipCodec[] }` (and optional `inflateImpl` / `deflateImpl`) and register it. A registered codec serves the reader for its method **and the writer** when it registers store (0) or deflate (8) — such a module replaces the built-in compressor for `create`/`modify` even under `--deterministic`; `deflateImpl` replaces the sync deflate tier (`tier: "injected"`) unless `--deterministic` pins the engine's encoder; `create --parallel` refuses either (workers cannot see the module). Executes user code: only accepted on the command line, never from a config file |
 | `--version --json` | — | `{ name, version, zipnative }` — machine-readable version output |
@@ -816,6 +912,67 @@ passing check is **necessary but not sufficient** — the human review gate alwa
 is printed — not recommended for untrusted input). Limits are also flat keys in
 `.zipnativerc.json` (global or command-scoped).
 
+#### Process contract
+
+- **Flags and positionals are order-independent.** A boolean flag never consumes the next
+  token, so `zipnative --json list a.zip` and `zipnative list --long a.zip` both work;
+  `--flag=false|0|no|off` is the explicit off form. Combined short flags (`-lq`) are refused
+  (exit 2). Short aliases that take a value: `-i`, `-o`, `-d`, `-e`, `-f`; boolean: `-q`, `-h`,
+  `-V`. There is no `-l`.
+- **Argv paths are ordinary shell paths.** `zipnative list ../a.zip`, `-o ../out.zip` and
+  `--output-dir ../x` are the invoking user's own filesystem authority and are not second-guessed.
+  Only values that arrive as *data* — path flags inside a `batch` manifest, `path` values inside a
+  `create` / `modify` manifest — are refused on `..` (`E_INPUT`). Entry **names** are always
+  checked with the engine's `sanitizeEntryPath()`.
+- **No input and stdin is a terminal** → `E_USAGE` (exit 2): `No input: pass --input <file> (or
+  a positional path), or pipe data on stdin.` An explicit `-` is never guarded.
+- **Overwrite policy** is uniform: `create -o`, `modify -o`, `cat -o`, `inflate -o`, `extract`,
+  `stream --output-dir` and `batch --task create` refuse an existing file with `E_IO`
+  (`Refusing to overwrite existing file <path> (pass --overwrite)`) and leave it intact;
+  `--overwrite` replaces it. Writing to stdout is unaffected.
+- **Closed pipe.** `EPIPE` on stdout or stderr (`| head`) ends the process quietly with exit 0.
+- **Interrupts.** On `SIGINT` / `SIGTERM` the CLI removes exactly the files it is writing at
+  that moment (never a completed output, never the original of `modify --in-place`) and exits
+  130 / 143. POSIX only in practice (Windows sends no signals to child processes; Ctrl+C in a
+  console still triggers Node's `SIGINT` emulation).
+- **Unknown command** → exit 2 / `E_USAGE` (also with `--help`); flags without a command
+  (`zipnative --json`) → exit 2 `No command given`; bare `zipnative` prints the usage, exit 0.
+
+#### Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success (also a closed pipe, `EPIPE`) |
+| `1` | Failure — every `E_*` class except `E_USAGE` (`E_INPUT`, `E_IO`, `E_SECURITY`, `E_DATA`, `E_LIMIT`, `E_VERIFY_FAILED`, `E_CHECK_FAILED`, `E_POLICY`, …) |
+| `2` | Usage error (`E_USAGE`): bad flags, missing required argument, unknown command, a refused combination |
+| `130` / `143` | Interrupted by `SIGINT` / `SIGTERM` (in-flight files removed) |
+
+#### Environment
+
+| Variable | Effect |
+|----------|--------|
+| `ZIPNATIVE_JSON` | Agent mode (set by `--json`; honoured when set by the caller — `create` / `extract --dry-run` then print no text plan) |
+| `ZIPNATIVE_DRY_RUN` | `--dry-run` |
+| `ZIPNATIVE_QUIET` | `--quiet` |
+| `ZIPNATIVE_STRICT` | `--strict` |
+| `ZIPNATIVE_PURE_CODECS` | `--pure-codecs` |
+| `NO_COLOR` | Any value disables colour on stderr (`--no-color` sets it) |
+| `FORCE_COLOR` | Any value but `0` / `false` forces colour on stderr |
+| `TERM` | `dumb` disables colour |
+| `ZIPNATIVE_DEBUG` | `1` adds the stack trace to an error |
+
+`VERAZIP_REQUIRED`, `VERAZIP_REPORT_DIR` and `VERAZIP_TOOLS` are read by the veraZIP scripts
+only, never by the CLI.
+
+#### Memory
+
+| Commands | Memory profile |
+|----------|----------------|
+| `list`, `inspect`, `cat`, `extract`, `verify`, `modify` | Random access: the whole archive is held in memory, bounded by `--max-input-size` (4 GiB) |
+| `stream`, `crc32`, `inflate` (default path), `create --stream` | Constant memory — chunked, not bounded by `--max-input-size` |
+| `create` (buffered), `create --stdin-name`, `inflate --sync` | Buffers the inputs / the payload (`--stdin-name` and `--sync` under `--max-input-size`) |
+| `create --stream --deterministic` | Constant memory per **entry**: the pinned encoder is whole-buffer, so each entry is buffered in turn |
+
 ## Driving from AI agents
 
 `zipnative-cli` is designed so an autonomous agent (or any program) can drive it
@@ -823,16 +980,22 @@ deterministically — no MCP server, no daemon, just the process contract:
 
 - **stdout = the artifact** (archive bytes, entry bytes, JSON report, text, schema, script);
   **stderr = diagnostics.**
-- Pass **`--json`** to get a single machine-readable envelope on stderr. On failure:
+- Pass **`--json`** (anywhere on the command line) to get a single machine-readable envelope on
+  stderr. On failure:
   `{ "ok": false, "command": "...", "error": { "code": "E_*", "message": "...", "zipCode"?: "ZIP_*", "entryName"?: "...", "detail"?: { ... } } }`.
   On success for `create` / `modify` / `extract` / `stream` / `cat` / `inflate` / `crc32`: a
-  `{ "ok": true, "command": "...", ... }` status line.
+  `{ "ok": true, "command": "...", ... }` status line. `list` / `inspect` / `verify` / `doctor` /
+  `batch` put their JSON report on stdout instead (`batch --json` = one document with every
+  task's captured report inside).
 - Branch on **`error.code`** for the *class* (`E_USAGE`, `E_INPUT`, `E_PARSE`, `E_IO`,
   `E_SECURITY`, `E_DATA`, `E_LIMIT`, `E_UNSUPPORTED`, `E_NOT_FOUND`, `E_VERIFY_FAILED`,
   `E_CHECK_FAILED`, `E_POLICY`, `E_RUNTIME`) and on **`error.zipCode`** for the exact *cause*
   (zipnative's frozen `ZIP_*` code, e.g. `ZIP_PATH_TRAVERSAL`, `ZIP_LIMIT_EXCEEDED`) — never on
-  the message text. Numeric **exit codes** stay `0` (success), `1` (runtime / check failure),
-  `2` (usage).
+  the message text. Every CLI-side `E_NOT_FOUND` (`cat`, `inspect --entry`, `stream --cat`,
+  `verify --entry`) carries `ZIP_ENTRY_NOT_FOUND`; an unsafe entry **name** given as data
+  (`modify --add`, `create --stdin-name`, manifests) is `E_INPUT` with `entryName`, while a
+  malformed **flag** stays `E_USAGE`. Numeric **exit codes** stay `0` (success), `1` (runtime /
+  check failure), `2` (usage).
 - Use **`--dry-run`** to validate input and print the plan without producing output.
 - Fetch a **`schema`** (or **`schema manifest`** / **`llms.txt`**) to discover and validate
   before calling, and run **`doctor --format json`** as a capability pre-flight.
@@ -844,18 +1007,30 @@ See [AGENTS.md](AGENTS.md) and the [`samples/agent/`](samples/agent) scripts.
 - **Offline, always** — no command can open a socket; there is no network opt-in to forget.
   `--dry-run`, `--json`, `govern`, `doctor` are all local.
 - **The CLI is the filesystem trust boundary.** The engine never touches the filesystem: it
-  returns sanitised paths and data. `extract` and `stream` re-prove containment of every
-  destination under `--output-dir` (`safeJoin`), refuse existing files without `--overwrite`,
-  and refuse case-fold collisions on case-insensitive filesystems. A symlink is never
+  returns sanitised paths and data. One extraction sink serves `extract` and `stream`: lexical
+  containment of every destination under `--output-dir` (`safeJoin`), **physical** containment
+  (the nearest existing ancestor is `realpath`-checked under the root's `realpath` before any
+  `mkdir`, and re-checked after — a planted symlink or junction is `E_SECURITY`), an
+  **exclusive** open (`wx`) unless `--overwrite`, removal of partial files on failure, and
+  case-fold collision refusal on case-insensitive filesystems. The only residual window is
+  between `realpath` and `open` — use an empty or trusted destination. A symlink is never
   materialised, whatever the flags.
+- **Overwrite refusal is uniform.** `create` / `modify` / `cat` / `inflate --output`, `extract`,
+  `stream --output-dir` and `batch` refuse an existing file (`E_IO`) unless `--overwrite`;
+  `modify --in-place` goes through an exclusively created, unpredictable temp file and an
+  atomic rename. An interrupted run (`SIGINT` / `SIGTERM`) removes only the files being written
+  at that moment and exits 130 / 143.
 - **Refusals, not guesses** — zip-slip and device names, symlink entries, overlapping entries,
   central/local header disagreement, Zip64 spoofing, duplicate output paths, ambiguous EOCDs and
   > 2^53 sizes are refused by default with their `ZIP_*` code. Opt-outs skip; they never write
   anything unsafe.
 - **Bounded by default** — the engine's eight CWE-tagged limits are always on (`--max-*` to
-  tune; `none` warns). `inflate` has a mandatory output bound.
+  tune; `none` warns), and the CLI bounds every buffered read with `--max-input-size` (4 GiB;
+  `E_LIMIT`). `inflate` has a mandatory output bound.
 - **Data remanence** — `modify` without `--compact` keeps removed / replaced bytes recoverable
-  in the output. Use `--compact` when deletion matters.
+  in the output. Use `--compact` when deletion matters. Either way `modify` verifies every entry
+  it re-emits (CRC-32, sizes, local header) and refuses a lying record — an append-only save
+  never launders a hostile archive into a clean-looking one.
 - **No encryption** — read or write, by engine policy in 1.x. Encrypted entries are detected,
   listed and reported as `skipped` by `verify`; reads fail with `ZIP_UNSUPPORTED_ENCRYPTION`.
 - **`--codec` is a trust boundary** — the CLI's only dynamic import of user code (same trust as
@@ -863,12 +1038,18 @@ See [AGENTS.md](AGENTS.md) and the [`samples/agent/`](samples/agent) scripts.
   without `--allow-codec-load`. A module that registers method 0/8 or exports `deflateImpl`
   also shapes what `create`/`modify` write — the envelope's `tier` and a `warning:` line say so,
   and `create --parallel` refuses to run with such a module loaded.
-- **Path traversal protection** — every file-path argument (and every path inside a manifest)
-  is validated against `../` before filesystem access.
+- **Path validation is scoped to data.** Paths typed on the command line (`../a.zip`,
+  `-o ../out.zip`) are the invoking user's own filesystem authority and are not second-guessed.
+  Values that arrive as data — path flags inside a `batch` manifest and `path` values inside a
+  `create` / `modify` manifest — are refused on `..` (`E_INPUT`); entry names are always checked
+  with the engine's `sanitizeEntryPath()`, and every extracted destination goes through the sink
+  above.
 - **JSON size cap** — manifests, drafts and JSON inputs are capped at 50 MB before parsing
   (config files at 1 MB).
 - Signed builds with npm provenance (Trusted Publishing / OIDC) and a CycloneDX SBOM per
-  release — verify with `npm audit signatures`.
+  release, itself attested with `actions/attest-build-provenance` — verify with
+  `npm audit signatures`. CI runs on Ubuntu 22/24, Windows 22/24 (blocking) and macOS 22; the
+  veraZIP gate runs on Linux and Windows for every pull request.
 
 See [SECURITY.md](SECURITY.md) for the full security policy and vulnerability disclosure procedure.
 

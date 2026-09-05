@@ -1,392 +1,547 @@
 {
-  "$comment": "Derived from zipnative docs/assets/api.json (1.0.0). One row per export of the two entry points; docs/KNOWLEDGE_BASE.md section 8 maps every name to a CLI touchpoint and tests/docs/consistency.test.ts enforces it. kind is derived from the export signature.",
+  "$comment": "Derived from zipnative docs/assets/api.json (1.0.0). One row per export of the two entry points; docs/KNOWLEDGE_BASE.md section 8 maps every name to a CLI touchpoint and tests/docs/consistency.test.ts enforces it. kind is derived from the export signature. reach grades the row per the 1.0.0 coverage audit: \"capability\" = the behaviour behind the export is exercisable from a command, \"type\" = re-exported (or aliased) for typing only; via names the touchpoint.",
   "zipnativeVersion": "1.0.0",
   "exportCount": 77,
   "exports": [
     {
       "name": "AddEntryOptions",
       "kind": "interface",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "create/modify per-entry compression, date, comment, externalAttributes (mode bits via --preserve-mode / manifest mode), extraFields (manifest extraFields on create entries and modify add/replace/add-dir edits)"
     },
     {
       "name": "ByteSource",
       "kind": "type",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "readableToByteSource() — stream input, create --stream file sources, create --stdin-name"
     },
     {
       "name": "CodecCompressOptions",
       "kind": "interface",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "{ level, deterministic } handed to compressSync of a --codec module registering method 0/8 (the writer only emits those methods)"
     },
     {
       "name": "CreateZipOptions",
       "kind": "interface",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "create: order (insertion = argv/manifest order), defaultDate (UTC wall-clock), compression, comment, strict, onDiagnostic, limits"
     },
     {
       "name": "DEFAULT_ZIP_LIMITS",
       "kind": "const",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "--help defaults, doctor limits, schema limits/manifest, inflate default --max-output"
     },
     {
       "name": "DeflateTier",
       "kind": "type",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "tier enum in schema status (create/modify/inflate envelopes, doctor)"
     },
     {
       "name": "EntryVerification",
       "kind": "interface",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "verify rows, verify --entry rows, modify survivor verification (verified/verifySkipped)"
     },
     {
       "name": "ExtractOptions",
       "kind": "interface",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "extract: rejectTraversal (--skip-unsafe), rejectSymlinks, onDuplicate, filter (--include/--exclude/--entry/--skip-unsupported), limits"
     },
     {
       "name": "ExtractedEntry",
       "kind": "interface",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "extract --buffered items"
     },
     {
       "name": "ExtractedStreamEntry",
       "kind": "interface",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "extract items (plan defers stream())"
     },
     {
       "name": "FLAG_DATA_DESCRIPTOR",
       "kind": "const",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "decodeFlags() --long rows, forward usesDataDescriptor / descriptorEntries"
     },
     {
       "name": "FLAG_ENCRYPTED",
       "kind": "const",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "decodeFlags() --long rows"
     },
     {
       "name": "FLAG_STRONG_ENCRYPTION",
       "kind": "const",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "decodeFlags() --long rows"
     },
     {
       "name": "FLAG_UTF8",
       "kind": "const",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "decodeFlags() --long rows, inspect UTF-8 verdict"
     },
     {
       "name": "Inflator",
       "kind": "interface",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "inflate: push/finished/leftover/bytesConsumed/end (bytesConsumed reported in the envelope)"
     },
     {
       "name": "IterateZipOptions",
       "kind": "type",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "commonOptions(args, sink) for stream (--strict, --max-*, diagnostics)"
     },
     {
       "name": "METHOD_DEFLATE",
       "kind": "const",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "methodName(), inspect --check, inflate --method, extract --skip-unsupported, doctor"
     },
     {
       "name": "METHOD_STORE",
       "kind": "const",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "methodName(), inspect --check, inflate --method store, extract --skip-unsupported, doctor"
     },
     {
       "name": "OpenZipOptions",
       "kind": "interface",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "list --validate; eager forced by inspect, modify, verify --entry"
     },
     {
       "name": "ReadEntryOptions",
       "kind": "interface",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "cat --no-verify-crc"
     },
     {
       "name": "StreamOptions",
       "kind": "interface",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "create --chunk-size with --stream or --stdin-name (clamp warned)"
     },
     {
       "name": "StreamedZipEntry",
       "kind": "interface",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "stream: header/data()/skip() per local entry (custom-method entries cannot be pumped — engine limitation)"
     },
     {
       "name": "StreamedZipHeader",
       "kind": "interface",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "rowFromHeader() forward EntryRow incl. rawNameHex under --long; descriptor headers carry zero sizes"
     },
     {
       "name": "VERSION",
       "kind": "const",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "doctor zipnative check; pins docs/data/*.json in the consistency test"
     },
     {
       "name": "VerifiedEntry",
       "kind": "interface",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "verify rows (skipped: encrypted | stream-only-codec)"
     },
     {
       "name": "VerifyZipOptions",
       "kind": "interface",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "verify / batch --task verify { limits }"
     },
     {
       "name": "ZipBaseErrorCode",
       "kind": "type",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "type",
+      "via": "the 7 base-code rows of ZIP_TO_CLI (4 reachable; ZIP_API_MISUSE and ZIP_INTERNAL unreachable by design, ZIP_INPUT_TOO_LARGE needs > 2 GiB)"
     },
     {
       "name": "ZipCodec",
       "kind": "interface",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "--codec module contract (isCodec()), inflate --method, sync-vs-stream decisions in cat/verify/modify"
     },
     {
       "name": "ZipCommonOptions",
       "kind": "interface",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "commonOptions(args, sink) = { strict, onDiagnostic, limits }"
     },
     {
       "name": "ZipCompressionOptions",
       "kind": "interface",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "--method/--level/--deterministic and manifest compression"
     },
     {
       "name": "ZipDataError",
       "kind": "class",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "mapZipError -> E_DATA with entryName and { expectedCrc, actualCrc }"
     },
     {
       "name": "ZipDataErrorCode",
       "kind": "type",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "type",
+      "via": "the 5 data-code rows of ZIP_TO_CLI (all reachable)"
     },
     {
       "name": "ZipDiagnostic",
       "kind": "interface",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "createDiagnosticSink() -> DiagnosticRow (dedup by code + entryName)"
     },
     {
       "name": "ZipDiagnosticCode",
       "kind": "type",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "ZIP_DIAGNOSTIC_CODES, schema diagnostics; every code reachable (raisedBy in errors.json)"
     },
     {
       "name": "ZipDiagnosticHandler",
       "kind": "type",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "the sink onDiagnostic"
     },
     {
       "name": "ZipEntry",
       "kind": "interface",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "rowFromEntry() incl. rawNameHex/commentHex, inspect stats, cat/extract/modify planning"
     },
     {
       "name": "ZipError",
       "kind": "class",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "mapZipError() instanceof root; err.code -> zipCode"
     },
     {
       "name": "ZipErrorCode",
       "kind": "type",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "type",
+      "via": "ZIP_TO_CLI satisfies Record<ZipErrorCode, ...> compile-time guard (the codes reach the envelope as zipCode)"
     },
     {
       "name": "ZipExtraField",
       "kind": "interface",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "read: extraFields rows (--long, inspect --extra hex); write: manifest extraFields"
     },
     {
       "name": "ZipFormatError",
       "kind": "class",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "mapZipError -> E_PARSE (E_INPUT for the two entry-name codes)"
     },
     {
       "name": "ZipFormatErrorCode",
       "kind": "type",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "type",
+      "via": "the 13 format-code rows of ZIP_TO_CLI (all reachable)"
     },
     {
       "name": "ZipLimitError",
       "kind": "class",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "mapZipError -> E_LIMIT with { limit, configured, observed }"
     },
     {
       "name": "ZipLimitErrorCode",
       "kind": "type",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "type",
+      "via": "the 2 limit-code rows of ZIP_TO_CLI (ZIP_LIMIT_INVALID pre-empted by the CLI)"
     },
     {
       "name": "ZipLimits",
       "kind": "interface",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "the eight --max-* flags, doctor limits data, schema limits"
     },
     {
       "name": "ZipModifier",
       "kind": "interface",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "modify: addEntry/replaceEntry/removeEntry/renameEntry/setComment(string | Uint8Array)/save/saveCompact"
     },
     {
       "name": "ZipModifierOptions",
       "kind": "interface",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "modify --method/--level/--deterministic/--date + common options"
     },
     {
       "name": "ZipReader",
       "kind": "interface",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "entries, getEntry, readEntryStream/readEntryRaw/readEntry (cat), verifyEntry (modify survivors, verify --entry), entryCount/isZip64/comment (commentHex)/bytes"
     },
     {
       "name": "ZipSecurityError",
       "kind": "class",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "mapZipError -> E_SECURITY with entryName"
     },
     {
       "name": "ZipSecurityErrorCode",
       "kind": "type",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "type",
+      "via": "the 6 security-code rows of ZIP_TO_CLI (all reachable)"
     },
     {
       "name": "ZipUnsupportedError",
       "kind": "class",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "mapZipError -> E_UNSUPPORTED with { feature }"
     },
     {
       "name": "ZipUnsupportedErrorCode",
       "kind": "type",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "type",
+      "via": "the 6 unsupported-code rows of ZIP_TO_CLI (ZIP_UNSUPPORTED_ZIP64_STREAMING needs > 4 GiB)"
     },
     {
       "name": "ZipUnsupportedFeature",
       "kind": "type",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "detail.feature in the E_UNSUPPORTED envelope"
     },
     {
       "name": "ZipVerificationReport",
       "kind": "interface",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "the verify report body (error carries { code, message }, no detail)"
     },
     {
       "name": "ZipWriter",
       "kind": "interface",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "create: add/addDirectory/addStream/toBytes/stream; setComment(Uint8Array) via --comment-file / commentBase64"
     },
     {
       "name": "activeDeflateTier",
       "kind": "function",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "tier in create/modify/inflate envelopes; doctor deflate-tier/deflate-pinned (never injected under --parallel)"
     },
     {
       "name": "crc32",
       "kind": "function",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "crc32 command (chunked, --seed, --expect)"
     },
     {
       "name": "createInflator",
       "kind": "function",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "inflate default resumable path (not affected by setInflateImpl)"
     },
     {
       "name": "createZip",
       "kind": "function",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "create (buffered and --stream), batch --task create"
     },
     {
       "name": "createZipModifier",
       "kind": "function",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "modify over an eagerly opened reader, survivors verified before save"
     },
     {
       "name": "extractZip",
       "kind": "function",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "extract --buffered"
     },
     {
       "name": "extractZipStream",
       "kind": "function",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "extract (default)"
     },
     {
       "name": "getCodec",
       "kind": "function",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "inflate --method, methodName(), doctor codecs, unsupported/verifiability checks in extract/cat/verify/modify"
     },
     {
       "name": "getUnixMode",
       "kind": "function",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "unixMode column (four octal digits), extract --preserve-mode (files)"
     },
     {
       "name": "initNodeZipCodecs",
       "kind": "function",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "ensureCodecsReady() in the bridge via prepareEngine() (skipped under --pure-codecs)"
     },
     {
       "name": "isSymlinkEntry",
       "kind": "function",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "isSymlink column, inspect --check no-symlinks, extract symlink policy"
     },
     {
       "name": "iterateZipEntries",
       "kind": "function",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "stream"
     },
     {
       "name": "openZip",
       "kind": "function",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "openArchive(): list, inspect, cat, extract, verify --entry, modify"
     },
     {
       "name": "registerCodec",
       "kind": "function",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "--codec <module>: reader for any method AND writer for methods 0/8 (overridesBuiltin, warning, refused by create --parallel)"
     },
     {
       "name": "sanitizeEntryPath",
       "kind": "function",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "name pre-checks in create/modify, extract directory entries, every stream name, basis of safeJoin"
     },
     {
       "name": "setDeflateImpl",
       "kind": "function",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "--codec deflateImpl: sync deflate tier of create/modify (tier injected) unless --deterministic; refused by create --parallel without --deterministic"
     },
     {
       "name": "setInflateImpl",
       "kind": "function",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "--codec inflateImpl: sync/streaming reader paths (cat, extract, verify, modify, inflate --sync); not createInflator nor the stream pump; no doctor row (ROADMAP)"
     },
     {
       "name": "verifyZip",
       "kind": "function",
-      "subpath": "."
+      "subpath": ".",
+      "reach": "capability",
+      "via": "verify (whole archive), batch --task verify"
     },
     {
       "name": "ByteSource",
       "kind": "type",
-      "subpath": "./worker"
+      "subpath": "./worker",
+      "reach": "type",
+      "via": "the worker subpath re-exports the root declaration; the bridge imports ByteSource from the root entry only"
     },
     {
       "name": "ParallelZipOptions",
       "kind": "interface",
-      "subpath": "./worker"
+      "subpath": "./worker",
+      "reach": "capability",
+      "via": "create --parallel --workers/--min-job-size/--job-timeout (+ CreateZipOptions); workerUrl bridge-owned by decision"
     },
     {
       "name": "ParallelZipWriter",
       "kind": "interface",
-      "subpath": "./worker"
+      "subpath": "./worker",
+      "reach": "capability",
+      "via": "the create writer under --parallel (toBytes awaited; stream() under --parallel --stream)"
     },
     {
       "name": "StreamOptions",
       "kind": "interface",
-      "subpath": "./worker"
+      "subpath": "./worker",
+      "reach": "type",
+      "via": "the worker subpath re-exports the root declaration; the bridge imports StreamOptions from the root entry only"
     },
     {
       "name": "createParallelZip",
       "kind": "function",
-      "subpath": "./worker"
+      "subpath": "./worker",
+      "reach": "capability",
+      "via": "create --parallel via loadParallelZip() (lazy, explicit workerUrl)"
     }
-  ]
+  ],
+  "verifiedOn": "2026-09-05"
 }

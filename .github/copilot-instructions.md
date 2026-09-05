@@ -20,8 +20,10 @@ ZIP bytes are hand-written only in `scripts/` (corpus canaries, vendored validat
 `tests/helpers/raw-zip-builder.ts` (hostile fixtures), and both are engine-independent by
 construction. The CLI is offline, always: no command can open a socket.
 
-**Targets:** Node.js ≥ 22, Bun, Deno (via `node dist/cli.cjs`). Linux and Windows are both
-blocking in CI (path separators, reserved device names, case-insensitive filesystems, CRLF).
+**Targets:** Node.js ≥ 22. The package is a CommonJS bin (`dist/cli.cjs`, the only build
+artefact — no ESM build, no `.d.ts`, no programmatic entry point). Ubuntu 22/24 and Windows 22/24
+are blocking in CI (path separators, reserved device names, case-insensitive filesystems, CRLF);
+macOS 22 runs too.
 
 ## Working Modes & Token Economy
 
@@ -64,21 +66,28 @@ src/
 │   ├── completion.ts  # COMMANDS metadata (single source of truth) → bash/zsh/fish/powershell scripts
 │   └── govern.ts      # AI-governance / HITL: rules | policy | verify-issue (E_POLICY gate)
 ├── utils/
-│   ├── args.ts        # Zero-dep argument parser (flags, positionals, = notation, repeatable flags)
-│   ├── error.ts       # CliError (exitCode, E_* code, zipCode, entryName, detail), die(), deprecate()
+│   ├── args.ts        # Zero-dep argument parser (flags, positionals, = notation, repeatable flags, boolean table)
+│   ├── flags.ts       # The boolean-flag table (global + per command): a listed flag never consumes the next token
+│   ├── error.ts       # CliError (exitCode, E_* code, zipCode, entryName, detail), deprecate()
 │   ├── ziperr.ts      # ZIP_* → E_* table (39 codes, `satisfies Record<ZipErrorCode>`), mapZipError / guard
 │   ├── agent.ts       # --json / --dry-run / --quiet / --strict env flags, error + status envelopes, progress()
-│   ├── io.ts          # stdin/stdout/file I/O, validatePath (traversal), safeJoin (containment), 50 MB JSON cap
+│   ├── io.ts          # stdin/stdout/file I/O, validatePath (MANIFEST values only), safeJoin (lexical containment),
+│   │                  #   exclusive writes (wx) unless --overwrite, --max-input-size-bounded reads, EPIPE → exit 0,
+│   │                  #   captureStdout (batch --json), 50 MB JSON cap
+│   ├── sink.ts        # The extraction sink (extract + stream): safeJoin → duplicate policy → realpath containment
+│   │                  #   of the nearest existing ancestor before mkdir (+ re-check) → exclusive open → unlink on failure
+│   ├── inflight.ts    # In-flight output registry; SIGINT/SIGTERM remove exactly those files, exit 130/143
 │   ├── projection.ts  # Agent output projection (compact JSON, --summary, --fields dot-paths)
 │   ├── config.ts      # `.zipnativerc.json` discovery + flag-default merge; refuses the `codec` key
 │   ├── version.ts     # CLI + engine version resolution (source layout and bundled dist/)
-│   ├── colors.ts      # NO_COLOR / TTY-aware ANSI helper
+│   ├── colors.ts      # ANSI helper decided on stderr: NO_COLOR off, FORCE_COLOR on, TERM=dumb off, else TTY
 │   ├── sizes.ts       # `<size>` (512k, 1GiB, none) and count parsing
-│   ├── limits.ts      # Eight --max-* flags → Partial<ZipLimits>, pre-validated (ZIP_LIMIT_INVALID unreachable)
+│   ├── limits.ts      # Eight --max-* flags → Partial<ZipLimits> (ZIP_LIMIT_INVALID unreachable) + --max-input-size
 │   ├── diagnostics.ts # Core diagnostic sink: text warning lines | collected into the --json envelope
 │   ├── engine.ts      # prepareEngine(): --codec modules (argv only) + node:zlib tier unless --pure-codecs
 │   ├── codecs.ts      # `--codec <module>` loader — the ONLY dynamic import of user code
-│   ├── zipops.ts      # Shared flag → core-option translation (open, compression, common options)
+│   ├── zipops.ts      # Shared flag → core-option translation (open, compression, common options, UTC dates,
+│   │                  #   extra fields, mode, --comment-file)
 │   ├── glob.ts        # Dependency-free `/`-separated glob matcher for --include / --exclude
 │   ├── walk.ts        # Deterministic filesystem walk for `create` (sorted, symlinks skipped, sanitizeEntryPath)
 │   ├── entryfmt.ts    # EntryRow shape + text table shared by list / inspect / stream
@@ -95,22 +104,34 @@ src/
 - `--help` / `-h` with no command prints usage and exits 0.
 - `--version` / `-V` prints the version from `package.json` (with `--json`:
   `{ name, version, zipnative }`) and exits 0.
-- Unknown command prints error to stderr and exits 1.
+- Unknown command → `E_USAGE`, exit 2 (also with `--help`). Flags but no command
+  (`zipnative --json`) → exit 2 "No command given". Bare `zipnative` → usage, exit 0.
 - Global flags are turned into env vars before dispatch: `--json` → `ZIPNATIVE_JSON=1`,
   `--dry-run` → `ZIPNATIVE_DRY_RUN=1`, `--quiet` → `ZIPNATIVE_QUIET=1`, `--strict` →
   `ZIPNATIVE_STRICT=1`, `--pure-codecs` → `ZIPNATIVE_PURE_CODECS=1`, `--no-color` → `NO_COLOR=1`.
+  The variables are also honoured when the caller sets them (an env-driven `--dry-run` prints
+  no text plan under `ZIPNATIVE_JSON`).
 - `.zipnativerc.json` defaults are merged unless `--no-config`; explicit flags always win.
 - Commands are lazy-imported so `--help` / `--version` stay fast.
+- `main()` installs the process handlers once: `EPIPE` on stdout/stderr → exit 0 quietly;
+  `SIGINT` / `SIGTERM` → remove the in-flight output files (`utils/inflight.ts`), exit 130 / 143.
+- No input path and stdin is a TTY → `E_USAGE` (exit 2) instead of blocking; an explicit `-`
+  is never guarded (`assertStdinNotTty` in `utils/io.ts`).
 - `CliError` is caught in `main()` — prints `.message` to stderr (or the `--json` envelope),
   exits `.exitCode`. All other unhandled errors exit 1. `ZIPNATIVE_DEBUG=1` adds the stack.
 - **Never uses `console.log`** — only `process.stdout.write` and `process.stderr.write`.
 
 ## Zero-Dep Arg Parser Contract (`src/utils/args.ts`)
 
-- `parseArgs(argv: string[]): ParsedArgs`
+- `parseArgs(argv: string[], { booleans }): ParsedArgs` — `booleans` is the flag table from
+  `utils/flags.ts` (`BOOLEAN_FLAGS`, re-exported by `completion.ts`).
 - `ParsedArgs = { flags: Record<string, string | boolean | readonly string[]>; positionals: string[] }`
 - Supports: `--flag value`, `--flag=value`, `-f value`, `--flag` (boolean true); a flag
   given twice becomes an array (`getStringFlagAll`).
+- A boolean flag NEVER consumes the next token, so flags and positionals are order-independent
+  (`--json list a.zip`, `list --long a.zip`); `--flag=false|0|no|off` is the explicit off form.
+  A token matching `-<digit>` is always a value. Combined short flags (`-lq`) are refused
+  with exit 2. Value short aliases: `-i -o -d -e -f`; boolean: `-q -h -V` (no `-l`).
 - `--` terminates flag parsing; all following tokens go into `positionals`.
 - Never throws on unknown flags — they are collected as-is.
 
@@ -119,37 +140,60 @@ src/
 - Each command exports a single async function: `export async function create(args: ParsedArgs): Promise<void>`
 - Every core-touching command calls `await prepareEngine(args)` **first** (`--codec` load +
   node:zlib tier); it is idempotent, so `batch` tasks may call it again.
-- Every core call is wrapped by `mapZipError` / `guard` / `guardAsync` (`utils/ziperr.ts`) so
-  the envelope always carries a stable `E_*` class and the verbatim `ZIP_*` `zipCode`.
-  `ziperr.ts` is the ONLY place that reads `err.code`.
-- `--input` for input file path; omit → read from stdin.
+- Every core call is wrapped by `mapZipError` / `guard` (`utils/ziperr.ts`) so the envelope
+  always carries a stable `E_*` class and the verbatim `ZIP_*` `zipCode`. `ziperr.ts` is the
+  ONLY place that reads `err.code`.
+- `--input` for input file path; omit → read from stdin (a TTY with nothing piped is refused).
 - `--output` for output file path; omit → write to stdout (binary via `process.stdout.write`).
+  An existing output file is refused with `E_IO` unless `--overwrite` — uniformly on `create`,
+  `modify`, `cat`, `inflate`, `extract`, `stream --output-dir` and `batch --task create`.
 - Usage errors (missing required flag) throw `CliError` with exit code 2; runtime errors exit 1.
-- Write commands (`create`, `modify`, `extract`, `stream`, `cat`, `inflate`, `batch`) call
-  `emitStatus({...})` on success — a no-op outside `--json`; stdout stays artifact-only.
+  An unsafe entry NAME that arrives as data (`--add`, `--stdin-name`, manifests) is `E_INPUT`
+  (exit 1) with `entryName`, not a usage error.
+- `create`, `modify`, `extract`, `stream`, `cat`, `inflate` and `crc32` call `emitStatus({...})`
+  on success — a no-op outside `--json`; stdout stays artifact-only. `batch` does NOT emit a
+  status envelope: its JSON report is the stdout document (under `--json` one document with
+  every task's captured stdout in `tasks[i].report` / `.stdout`). `list`, `inspect`, `verify`
+  and `doctor` likewise put their JSON report on stdout.
 - Core diagnostics go through `createDiagnosticSink()` (`utils/diagnostics.ts`): text
   `warning:` lines on stderr, or collected into the envelope / report under `--json`.
 
 ## Security Constraints
 
-- **Extraction sink** (`extract`, `stream --output-dir`) is the CLI's own trust boundary:
-  every path is re-checked with the core's `sanitizeEntryPath()`, contained with
-  `safeJoin(root, path)`, existing files are refused unless `--overwrite`, case-folded
-  collisions are refused on case-insensitive filesystems, symlink entries are **never
-  materialised** as links (`--allow-symlinks` writes the target TEXT as a regular file), and
-  `--preserve-mode` never applies setuid/setgid/sticky bits.
+- **Extraction sink** (`utils/sink.ts`, shared by `extract` and `stream --output-dir`) is the
+  CLI's own trust boundary: every path is re-checked with the core's `sanitizeEntryPath()`,
+  contained lexically with `safeJoin(root, path)`, then physically — the nearest EXISTING
+  ancestor of the target directory is `realpath`'d under the root's `realpath` BEFORE
+  `mkdir -p` and the created directory is re-checked after (a planted symlink / junction is
+  `E_SECURITY`, nothing is created beyond the link); files are opened exclusively (`wx`)
+  unless `--overwrite`, so a file appearing between plan and write is refused like any other;
+  partial files are removed on failure; case-folded collisions are refused on
+  case-insensitive filesystems; symlink entries are **never materialised** as links
+  (`--allow-symlinks` writes the target TEXT as a regular file); `--preserve-mode` never
+  applies setuid/setgid/sticky bits. The residual window between `realpath` and `open` is
+  documented posture ("use an empty or trusted destination"), not something to paper over.
+- **`modify` verifies every entry it re-emits** (`verifyEntry` on each untouched entry before
+  `save()` / `saveCompact()`; encrypted / sync-less-codec entries are copied and counted in
+  `verifySkipped`). No opt-out — an opt-out would write unverified bytes.
 - **Never loosen a core default silently.** `rejectTraversal`, `rejectSymlinks`,
   `onDuplicate`, every `ZipLimits` bound and the sink containment stay on. Opt-outs are
   named `--skip-*` / `--allow-*`, are argv-explicit, and are documented in SECURITY.md.
 - `--codec <module>` executes user code: honoured from **argv only** — `.zipnativerc.json`
   refuses the key, and a `batch` manifest task carrying `codec` is refused unless the
-  invocation passes `--allow-codec-load`. A codec registered for method 0/8 (or a
-  `deflateImpl`) also drives the writer: reported via `tier` / a `warning:` line, and
-  refused by `create --parallel` (its workers cannot see the module).
-- Path flags (`--input`, `--output`, `--output-dir`, manifest paths, `batch` positionals)
-  are validated against `..` traversal (`validatePath`) before any read/write.
+  invocation passes `--allow-codec-load`. A loaded codec is not confined to reading: the engine
+  resolves methods 0/8 through the registry, so a module registering them (or exporting a
+  `deflateImpl`) also drives what `create` / `modify` write — even under `--deterministic`
+  for method 0/8. Reported via `tier` / a `warning:` line (`assertCodecModulesHonest` in
+  `create.ts`), and refused by `create --parallel` (its workers cannot see the module).
+- Paths typed on the command line (`--input`, `--output`, `--output-dir`, positionals) are the
+  user's own filesystem authority and are NOT validated against `..`. `validatePath` applies
+  only to values that arrive as DATA: `batch` manifest path flags and `create` / `modify`
+  manifest `path` values. Entry NAMES always go through the core's `sanitizeEntryPath()`.
+- Every BUFFERED read (stdin or file into memory) is bounded by `--max-input-size` (4 GiB,
+  `E_LIMIT` `{ limit: 'maxInputSize' }`); streaming paths (`stream`, `crc32`, `inflate`,
+  `create --stream`) must never be routed through it.
 - Input JSON (manifests, drafts) is capped at 50 MB before `JSON.parse`; a `batch` manifest
-  is capped at 1000 tasks.
+  is capped at 1000 tasks; a captured task stdout (`batch --json`) at 64 MiB.
 - `--max-*` values are pre-validated so `ZIP_LIMIT_INVALID` is unreachable; `none` disables a
   bound with a visible warning.
 - `stream` parses local headers only: mode / symlink policy flags are refused with `E_USAGE`,
@@ -159,12 +203,17 @@ src/
 - **No ZIP byte parsing in `src/`** — a new format need is a core feature request, never a
   local parser.
 - `govern verify-issue` is a pure, fully offline validator; `E_POLICY` gates a bad draft.
+  `tests/utils/governance-sync.test.ts` keeps `govern policy` / `govern rules` identical to
+  `.github/ai-governance.json` / `.github/AGENT_RULES.md`.
 - No network capability anywhere: no command can open a socket.
 
 ## Code Style
 
 - **TypeScript strict mode** — `strict: true`.
-- **ESM-first** — all internal imports use `.js` extension.
+- **ESM-first source** — all internal imports use `.js` extension; tsup bundles it into the
+  single CommonJS bin `dist/cli.cjs` (`zipnative` / `zipnative/worker` stay external).
+- **Lint covers `src/` AND `tests/`** (`npm run lint`, tests under a relaxed override);
+  coverage thresholds are 93 / 88 / 94 / 93 (`vitest.config.ts`).
 - **`const` over `let`** — never use `var`.
 - **No `any`** — use `unknown` with type narrowing.
 - **No `console.log`** — use `process.stdout.write(msg + '\n')` / `process.stderr.write(msg + '\n')`.

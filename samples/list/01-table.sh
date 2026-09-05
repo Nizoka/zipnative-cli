@@ -4,8 +4,8 @@
 # `list` reads only the central directory — nothing is decompressed. --long
 # adds POSIX mode and the general-purpose flags (U = UTF-8 names, D = data
 # descriptor); --validate eager cross-checks every local header up front.
-# NOTE: -l takes no value, but the parser treats `-l <file>` as a flag with a
-# value — pass the archive with --input or put --long after the positional.
+# NOTE: --long has no short form; booleans never swallow the next token, so
+# `list --long a.zip` and `list a.zip --long` are equivalent.
 #
 # Usage:
 #   bash samples/list/01-table.sh

@@ -7,9 +7,14 @@ applyTo: "tests/**"
 ## Framework
 
 - **vitest** (native ESM). Run: `npm test`, `npm run test:watch`, `npm run test:coverage`.
+  `npm run lint` covers `tests/**` too (a relaxed override in `eslint.config.js`); keep it at
+  0 errors.
 - Tests mirror `src/`: `tests/commands/*.test.ts`, `tests/utils/*.test.ts`,
-  `tests/integration/*.test.ts`, plus `tests/docs/*.test.ts` (documentation counts),
-  `tests/scripts/*.test.ts` (vendored validator pins) and `tests/helpers/`.
+  `tests/integration/*.test.ts`, plus `tests/docs/*.test.ts` (documentation counts,
+  fixture policy), `tests/scripts/*.test.ts` (vendored validator pins) and `tests/helpers/`.
+  `tests/utils/governance-sync.test.ts` pins `govern policy` / `govern rules` to
+  `.github/ai-governance.json` / `.github/AGENT_RULES.md`; `tests/utils/sink.test.ts` covers
+  the extraction sink (realpath containment, exclusive open).
 
 ## Command test pattern
 
@@ -56,13 +61,17 @@ applyTo: "tests/**"
 - Append new cases before the final `});` of the relevant `describe`.
 - A test that touches `--json` asserts the parsed envelope, not a substring.
 - Exactly **one** spawn test exists: `tests/integration/built-binary-smoke.test.ts` runs the
-  built `dist/cli.cjs` (real argv, pipes, exit codes) and self-skips when `dist/` is absent;
-  CI runs it post-build. Every other test is in-process.
+  built `dist/cli.cjs` (real argv, pipes, exit codes, EPIPE, SIGINT cleanup) and self-skips
+  when `dist/` is absent; CI runs it post-build. Every other test is in-process.
+- A test that needs a TTY or a signal stubs `process.stdin.isTTY` / sends the signal to the
+  spawned binary; a case that a platform cannot express (signals on win32, symlink creation
+  without privilege) uses `skipIf` with the reason in the name.
 
 ## Coverage targets
 
 - Enforced thresholds live in `vitest.config.ts` (single source of truth):
-  Statements ≥ 85% · Branches ≥ 75% · Functions ≥ 85% · Lines ≥ 85%.
+  Statements ≥ 93% · Branches ≥ 88% · Functions ≥ 94% · Lines ≥ 93% (ratcheted after the
+  1.0.0 audit pass, three points below the measured actuals).
 - `src/index.ts` (dispatcher + USAGE strings, exercised by the spawn test) and
   `src/core-bridge/index.ts` (pure re-export barrel) are excluded.
 - Never lower a threshold to make a change pass — add tests.
