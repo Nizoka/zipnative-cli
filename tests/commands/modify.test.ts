@@ -536,9 +536,27 @@ describe('modify', () => {
         expect(r2.error).toMatchObject({ code: ErrorCode.PARSE });
     });
 
-    it('rejects a traversal in --output (E_INPUT)', async () => {
+    it('refuses an existing --output without --overwrite (E_IO, file intact) and replaces it with --overwrite', async () => {
         await setup();
-        const r = await run(() => modify(parseArgs(['--input', input, '--output', '../escape.zip', '--remove', 'a.txt'])));
-        expect(r.error).toMatchObject({ code: ErrorCode.INPUT });
+        await writeFile(output, 'not an archive, but mine');
+        const r = await run(() => modify(parseArgs(['--input', input, '--output', output, '--remove', 'a.txt'])));
+        expect(r.error).toMatchObject({ code: ErrorCode.IO, exitCode: 1 });
+        expect((r.error as Error).message).toBe(`Refusing to overwrite existing file ${output} (pass --overwrite).`);
+        expect((await readFile(output)).toString()).toBe('not an archive, but mine');
+        const r2 = await run(() => modify(parseArgs(['--input', input, '--output', output, '--remove', 'a.txt', '--overwrite'])));
+        expect(r2.error).toBeUndefined();
+        expect(snapshot(await result()).names).toEqual(['b.txt', 'c.txt']);
+    });
+
+    it('--in-place refuses a planted temp path instead of following it (unpredictable exclusive temp name)', async () => {
+        await setup();
+        // The temp name carries the pid and 12 random hex digits; a planted
+        // file at the *predictable* legacy name must not matter either way.
+        await writeFile(`${input}.tmp-${process.pid}`, 'planted');
+        const r = await run(() => modify(parseArgs(['--input', input, '--in-place', '--remove', 'c.txt'])));
+        expect(r.error).toBeUndefined();
+        expect(snapshot(new Uint8Array(await readFile(input))).names).toEqual(['a.txt', 'b.txt']);
+        const leftovers = (await readdir(dir)).filter((n) => n.startsWith('in.zip.tmp-') && n !== `in.zip.tmp-${process.pid}`);
+        expect(leftovers).toEqual([]);
     });
 });

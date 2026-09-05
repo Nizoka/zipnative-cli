@@ -37,10 +37,12 @@ import {
     readJsonInput,
     readStdin,
     readableToByteSource,
+    unlinkQuiet,
     validatePath,
     writeOutput,
     writeStreamingOutput,
 } from '../utils/io.js';
+import { parseInputSizeFlag } from '../utils/limits.js';
 import { parseByteSize } from '../utils/sizes.js';
 import { walkPaths, type SkippedPath } from '../utils/walk.js';
 import { mapZipError } from '../utils/ziperr.js';
@@ -396,7 +398,6 @@ export async function create(args: ParsedArgs): Promise<void> {
     if (!streaming && chunkSize !== undefined) {
         throw new CliError('--chunk-size requires --stream.', 2);
     }
-    if (outputPath !== undefined) validatePath(outputPath);
 
     const plan = manifestPath !== undefined
         ? await planFromManifest(manifestPath, storeExt)
@@ -405,7 +406,7 @@ export async function create(args: ParsedArgs): Promise<void> {
     const hasStdin = plan.entries.some((e) => e.source.kind === 'stdin');
     if (hasStdin && !streaming) {
         // Buffered stdin: read it now so toBytes() can size the entry.
-        const data = await readStdin();
+        const data = await readStdin(false, parseInputSizeFlag(args));
         const idx = plan.entries.findIndex((e) => e.source.kind === 'stdin');
         const prev = plan.entries[idx] as PlannedEntry;
         plan.entries[idx] = { ...prev, source: { kind: 'bytes', data: new Uint8Array(data.buffer, data.byteOffset, data.byteLength) } };
@@ -518,20 +519,24 @@ export async function create(args: ParsedArgs): Promise<void> {
         throw mapZipError(e, 'Failed to add entries');
     }
 
-    // ── Output
+    // ── Output (an existing file is refused unless --overwrite)
     let bytes = 0;
+    const write = { exclusive: !hasFlag(args.flags, 'overwrite') };
     try {
         if (streaming || hasStdin) {
             bytes = await writeStreamingOutput(
                 writer.stream(chunkSize !== undefined ? { chunkSize } : undefined),
                 outputPath,
+                write,
             );
         } else {
             const out = await writer.toBytes();
-            await writeOutput(out, outputPath);
+            await writeOutput(out, outputPath, write);
             bytes = out.length;
         }
     } catch (e) {
+        if (e instanceof CliError && e.code === ErrorCode.IO) throw e;
+        if (outputPath !== undefined && outputPath !== '-') await unlinkQuiet(outputPath);
         throw mapZipError(e, 'Failed to write archive');
     }
 

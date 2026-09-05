@@ -154,9 +154,11 @@ describe('walkPaths', () => {
         await expect(walkPaths([join(src, 'a.txt')], { base: join(src, 'a.txt') })).rejects.toMatchObject({ exitCode: 2 });
     });
 
-    it('rejects traversal in inputs and --base before touching the filesystem', async () => {
-        await expect(walkPaths(['../etc'])).rejects.toMatchObject({ code: 'E_INPUT' });
-        await expect(walkPaths([src], { base: '../x' })).rejects.toMatchObject({ code: 'E_INPUT' });
+    it('inputs and --base containing ".." are ordinary shell paths (resolved, not refused)', async () => {
+        const viaParent = join(src, 'nested', '..', 'a.txt');
+        const { files } = await walkPaths([viaParent], { base: join(src, 'nested', '..') });
+        expect(files.map((f) => f.name)).toEqual(['a.txt']);
+        await expect(walkPaths([join(src, '..', 'no-such-dir-zipnative')])).rejects.toMatchObject({ code: 'E_IO' });
     });
 
     it('refuses a name that could not be extracted safely (traversal via --prefix)', async () => {

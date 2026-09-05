@@ -12,6 +12,7 @@
 // does not preserve relative order across flags):
 //     remove → rename → replace → add / add-dir → comment
 
+import { randomBytes } from 'node:crypto';
 import { readFile, rename as fsRename, stat } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { type ParsedArgs, getStringFlag, getStringFlagAll, hasFlag } from '../utils/args.js';
@@ -26,7 +27,7 @@ import {
 import { createDiagnosticSink } from '../utils/diagnostics.js';
 import { prepareEngine } from '../utils/engine.js';
 import { CliError, ErrorCode } from '../utils/error.js';
-import { readJsonInput, readStdin, validatePath, writeOutput } from '../utils/io.js';
+import { readJsonInput, readStdin, unlinkQuiet, validatePath, writeOutput } from '../utils/io.js';
 import { mapZipError } from '../utils/ziperr.js';
 import {
     commonOptions,
@@ -66,7 +67,8 @@ async function loadPayload(path: string, baseDir: string | undefined, stdinUsed:
         const buf = await readStdin();
         return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
     }
-    validatePath(path);
+    // A manifest-supplied path is data, not the user: traversal-checked.
+    if (baseDir !== undefined) validatePath(path);
     const abs = baseDir !== undefined ? resolve(baseDir, path) : resolve(path);
     try {
         const st = await stat(abs);
@@ -186,7 +188,6 @@ export async function modify(args: ParsedArgs): Promise<void> {
     if (inPlace && outputFlag !== undefined) throw new CliError('--in-place and --output are mutually exclusive.', 2);
     if (inPlace && (inputPath === '-')) throw new CliError('--in-place requires a file input, not stdin.', 2);
     const outputPath = inPlace ? inputPath : outputFlag;
-    if (outputPath !== undefined) validatePath(outputPath);
 
     // ── Collect edits (flags), or from the manifest.
     const stdinUsed = { used: inputPath === '-' };
@@ -231,7 +232,7 @@ export async function modify(args: ParsedArgs): Promise<void> {
     }
 
     // ── Open + wrap.
-    const bytes = await readArchiveBytes(inputPath);
+    const bytes = await readArchiveBytes(inputPath, args);
     const sink = createDiagnosticSink();
     const reader = openArchive(bytes, commonOptions(args, sink));
     const modifierOptions: ZipModifierOptions = {
@@ -304,18 +305,20 @@ export async function modify(args: ParsedArgs): Promise<void> {
     const changed = out !== reader.bytes;
 
     if (inPlace) {
-        const tmp = `${outputPath}.tmp-${process.pid}`;
+        // Unpredictable, exclusively-created temp name next to the target, then
+        // an atomic rename: a pre-planted file or symlink at the temp path is
+        // refused (EEXIST) rather than followed.
+        const tmp = `${outputPath}.tmp-${process.pid}-${randomBytes(6).toString('hex')}`;
         try {
-            await writeOutput(out, tmp);
+            await writeOutput(out, tmp, { exclusive: true });
             await fsRename(tmp, outputPath as string);
         } catch (e) {
-            const { unlinkQuiet } = await import('../utils/io.js');
             await unlinkQuiet(tmp);
             throw mapZipError(e, 'Failed to write the modified archive');
         }
     } else {
         try {
-            await writeOutput(out, outputPath);
+            await writeOutput(out, outputPath, { exclusive: !hasFlag(args.flags, 'overwrite') });
         } catch (e) {
             throw mapZipError(e, 'Failed to write the modified archive');
         }

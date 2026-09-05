@@ -28,7 +28,7 @@ export interface CommandSpec {
 
 export const GLOBAL_FLAGS: readonly string[] = [
     '--help', '--version', '--json', '--dry-run', '--quiet', '--no-color', '--config', '--no-config', '--pretty',
-    '--strict', '--pure-codecs', '--codec',
+    '--strict', '--pure-codecs', '--codec', '--max-input-size',
     ...LIMIT_FLAG_NAMES,
 ];
 
@@ -48,7 +48,7 @@ export const COMMANDS: readonly CommandSpec[] = [
             '--input', '--output', '--stdin-name', '--from-manifest', '--base', '--prefix', '--dir-entries',
             ...FILTER_FLAGS, '--follow-symlinks', ...COMPRESSION_FLAGS, '--order', '--date', '--mtime',
             '--comment', '--entry-comment', '--preserve-mode', '--store-ext', '--stream', '--chunk-size',
-            '--parallel', '--workers', '--min-job-size', '--job-timeout',
+            '--parallel', '--workers', '--min-job-size', '--job-timeout', '--overwrite',
         ],
     },
     {
@@ -57,7 +57,7 @@ export const COMMANDS: readonly CommandSpec[] = [
         summary: 'Incremental edits: add/replace/remove/rename/comment, append-only or compact',
         flags: [
             '--input', '--output', '--add', '--add-dir', '--replace', '--remove', '--rename', '--comment',
-            ...COMPRESSION_FLAGS, '--date', '--compact', '--in-place', '--from-manifest',
+            ...COMPRESSION_FLAGS, '--date', '--compact', '--in-place', '--from-manifest', '--overwrite',
         ],
     },
     {
@@ -76,7 +76,7 @@ export const COMMANDS: readonly CommandSpec[] = [
         name: 'cat',
         group: 'Read & extract',
         summary: 'Stream one or more entries to stdout',
-        flags: ['--input', '--entry', '--output', '--raw', '--no-verify-crc'],
+        flags: ['--input', '--entry', '--output', '--raw', '--no-verify-crc', '--overwrite'],
     },
     {
         name: 'extract',
@@ -114,7 +114,7 @@ export const COMMANDS: readonly CommandSpec[] = [
         name: 'inflate',
         group: 'Integrity & codecs',
         summary: 'Decompress a raw DEFLATE (or registered-codec) stream',
-        flags: ['--input', '--output', '--method', '--max-output', '--sync', '--allow-trailing'],
+        flags: ['--input', '--output', '--method', '--max-output', '--sync', '--allow-trailing', '--overwrite'],
     },
     {
         name: 'batch',
@@ -123,7 +123,7 @@ export const COMMANDS: readonly CommandSpec[] = [
         flags: [
             '--input-dir', '--output-dir', '--task', '--concurrency', '--fail-fast', '--manifest',
             '--continue-on-error', '--allow-codec-load', '--format', ...PROJECTION_FLAGS,
-            ...COMPRESSION_FLAGS, '--order', '--date', '--comment',
+            ...COMPRESSION_FLAGS, '--order', '--date', '--comment', '--overwrite',
         ],
     },
     {

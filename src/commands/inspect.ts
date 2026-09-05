@@ -345,7 +345,7 @@ export async function inspect(args: ParsedArgs): Promise<void> {
     const extraHex = hasFlag(args.flags, 'extra');
 
     const inputPath = resolveInputPath(args);
-    const bytes = await readArchiveBytes(inputPath);
+    const bytes = await readArchiveBytes(inputPath, args);
     const sink = createDiagnosticSink(true);
     const reader = openArchive(bytes, { ...commonOptions(args, sink), validate: 'eager' });
     const entries: ZipEntry[] = guard('Failed to read the central directory', () => [...reader.entries()]);

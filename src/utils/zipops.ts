@@ -16,7 +16,7 @@ import type { DiagnosticSink } from './diagnostics.js';
 import { CliError, ErrorCode } from './error.js';
 import { buildFilter, isPassThrough, type NameFilter } from './glob.js';
 import { readFileOrStdin } from './io.js';
-import { parseLimitFlags } from './limits.js';
+import { parseInputSizeFlag, parseLimitFlags } from './limits.js';
 import { parseByteSize, parsePositiveInt } from './sizes.js';
 import { guard } from './ziperr.js';
 
@@ -207,11 +207,14 @@ export function resolveInputPath(args: ParsedArgs, positionalIndex = 0): string 
     return args.positionals[positionalIndex];
 }
 
-/** Read the whole archive (file or stdin) as a `Uint8Array`. */
-export async function readArchiveBytes(path: string | undefined): Promise<Uint8Array> {
+/**
+ * Read the whole archive (file or stdin) as a `Uint8Array`, bounded by
+ * `--max-input-size` (pass the parsed args; default 4 GiB).
+ */
+export async function readArchiveBytes(path: string | undefined, args?: ParsedArgs): Promise<Uint8Array> {
     let buf: Buffer;
     try {
-        buf = await readFileOrStdin(path);
+        buf = await readFileOrStdin(path, args !== undefined ? parseInputSizeFlag(args) : undefined);
     } catch (e) {
         if (e instanceof CliError) throw e;
         const message = e instanceof Error ? e.message : String(e);

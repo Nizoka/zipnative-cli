@@ -6,6 +6,9 @@ import {
     effectiveLimits,
     formatLimitValue,
     _resetLimitWarnings,
+    DEFAULT_MAX_INPUT_SIZE,
+    MAX_INPUT_SIZE_FLAG,
+    parseInputSizeFlag,
     type LimitFlag,
 } from '../../src/utils/limits.js';
 import { DEFAULT_ZIP_LIMITS, type ZipLimits } from '../../src/core-bridge/index.js';
@@ -184,5 +187,30 @@ describe('formatLimitValue', () => {
         expect(formatLimitValue(size, Infinity)).toBe('unlimited');
         expect(formatLimitValue(count, Infinity)).toBe('unlimited');
         expect(formatLimitValue(ratio, Infinity)).toBe('unlimited');
+    });
+});
+
+describe('parseInputSizeFlag (--max-input-size)', () => {
+    it('defaults to 4 GiB and is not a ZipLimits key', () => {
+        expect(DEFAULT_MAX_INPUT_SIZE).toBe(4 * 1024 ** 3);
+        expect(parseInputSizeFlag(parseArgs([]))).toBe(DEFAULT_MAX_INPUT_SIZE);
+        expect(LIMIT_FLAGS.some((l) => l.flag === MAX_INPUT_SIZE_FLAG)).toBe(false);
+    });
+
+    it('parses byte sizes', () => {
+        expect(parseInputSizeFlag(parseArgs(['--max-input-size', '1m']))).toBe(1024 * 1024);
+        expect(parseInputSizeFlag(parseArgs(['--max-input-size', '65536']))).toBe(65536);
+    });
+
+    it('"none" disables the bound with a single warning', () => {
+        const err = captureStderr();
+        expect(parseInputSizeFlag(parseArgs(['--max-input-size', 'none']))).toBe(Infinity);
+        expect(parseInputSizeFlag(parseArgs(['--max-input-size', 'none']))).toBe(Infinity);
+        expect(err.text().match(/--max-input-size none disables a security bound/g)).toHaveLength(1);
+    });
+
+    it('0 and garbage are usage errors', () => {
+        expectUsage(() => parseInputSizeFlag(parseArgs(['--max-input-size', '0'])), /must be positive/);
+        expectUsage(() => parseInputSizeFlag(parseArgs(['--max-input-size', 'lots'])));
     });
 });

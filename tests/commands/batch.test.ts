@@ -180,10 +180,13 @@ describe('batch (directory mode)', () => {
         process.env['ZIPNATIVE_QUIET'] = '1';
         const summary = await run(() => batch(parseArgs(['--input-dir', inputDir, '--output-dir', outputDir, '--format', 'json', '--summary'])));
         expect(JSON.parse(summary.text)).toEqual({ ok: true, command: 'batch', mode: 'directory', task: 'create', total: 2, succeeded: 2, failed: 0 });
-        const fields = await run(() => batch(parseArgs(['--input-dir', inputDir, '--output-dir', outputDir, '--format', 'json', '--fields', 'total,results.ok'])));
+        // The archives now exist: without --overwrite every task is refused (E_IO), with it they are replaced.
+        const refused = await run(() => batch(parseArgs(['--input-dir', inputDir, '--output-dir', outputDir, '--format', 'json', '--fields', 'total,results.ok,results.code'])));
+        expect(JSON.parse(refused.text)).toEqual({ total: 2, results: [{ ok: false, code: 'E_IO' }, { ok: false, code: 'E_IO' }] });
+        const fields = await run(() => batch(parseArgs(['--input-dir', inputDir, '--output-dir', outputDir, '--format', 'json', '--fields', 'total,results.ok', '--overwrite'])));
         expect(JSON.parse(fields.text)).toEqual({ total: 2, results: [{ ok: true }, { ok: true }] });
         process.env['ZIPNATIVE_JSON'] = '1';
-        const compact = await run(() => batch(parseArgs(['--input-dir', inputDir, '--output-dir', outputDir])));
+        const compact = await run(() => batch(parseArgs(['--input-dir', inputDir, '--output-dir', outputDir, '--overwrite'])));
         expect(compact.text.trimEnd()).not.toContain('\n');
         expect(JSON.parse(compact.text)).toMatchObject({ total: 2 });
     });

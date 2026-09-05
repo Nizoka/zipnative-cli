@@ -20,8 +20,8 @@ import {
 import { prepareEngine } from '../utils/engine.js';
 import { methodName } from '../utils/entryfmt.js';
 import { CliError, ErrorCode } from '../utils/error.js';
-import { openInputStream, readFileOrStdin, unlinkQuiet, validatePath, writeOutput, writeStreamingOutput } from '../utils/io.js';
-import { parseLimitFlags, effectiveLimits } from '../utils/limits.js';
+import { openInputStream, readFileOrStdin, unlinkQuiet, writeOutput, writeStreamingOutput } from '../utils/io.js';
+import { parseInputSizeFlag, parseLimitFlags, effectiveLimits } from '../utils/limits.js';
 import { parseByteSize } from '../utils/sizes.js';
 import { mapZipError } from '../utils/ziperr.js';
 
@@ -29,7 +29,6 @@ export async function inflate(args: ParsedArgs): Promise<void> {
     await prepareEngine(args);
     const inputPath = getStringFlag(args.flags, 'input', 'i') ?? args.positionals[0];
     const outputPath = getStringFlag(args.flags, 'output', 'o');
-    if (outputPath !== undefined) validatePath(outputPath);
     const methodRaw = getStringFlag(args.flags, 'method');
     let method = METHOD_DEFLATE;
     if (methodRaw !== undefined) {
@@ -47,6 +46,7 @@ export async function inflate(args: ParsedArgs): Promise<void> {
     if (maxOutput !== Infinity && maxOutput <= 0) throw new CliError('--max-output must be positive.', 2);
     const bound = Number.isFinite(maxOutput) ? maxOutput : Number.MAX_SAFE_INTEGER;
     const dryRun = hasFlag(args.flags, 'dry-run') || isDryRun();
+    const write = { exclusive: !hasFlag(args.flags, 'overwrite') };
 
     if (dryRun) {
         emitStatus({ command: 'inflate', dryRun: true, method, methodName: methodName(method), maxOutput: bound, sync, output: outputPath ?? '-' });
@@ -76,9 +76,9 @@ export async function inflate(args: ParsedArgs): Promise<void> {
                 }
                 inflator.end();
             }
-            await writeStreamingOutput(pieces(), outputPath);
+            await writeStreamingOutput(pieces(), outputPath, write);
         } else {
-            const buf = await readFileOrStdin(inputPath);
+            const buf = await readFileOrStdin(inputPath, parseInputSizeFlag(args));
             const input = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
             bytesIn = input.length;
             let out: Uint8Array;
@@ -103,9 +103,10 @@ export async function inflate(args: ParsedArgs): Promise<void> {
                 }
             }
             bytesOut = out.length;
-            await writeOutput(out, outputPath);
+            await writeOutput(out, outputPath, write);
         }
     } catch (e) {
+        if (e instanceof CliError && e.code === ErrorCode.IO) throw e; // overwrite refusal: the existing file is untouched
         if (outputPath !== undefined) await unlinkQuiet(outputPath);
         throw mapZipError(e, 'Inflate failed');
     }

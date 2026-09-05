@@ -4,15 +4,17 @@ import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { Readable } from 'node:stream';
 import {
+    DEFAULT_MAX_INPUT_SIZE,
     validatePath,
     readStdin,
     readFileOrStdin,
-    readBinaryFile,
     openInputStream,
     assertJsonSizeLimit,
+    overwriteRefused,
     writeOutput,
     writeStreamingOutput,
     writeFileStream,
+    pathExists,
     ensureDir,
     unlinkQuiet,
     safeJoin,
@@ -48,7 +50,7 @@ afterEach(async () => {
     await rm(dir, { recursive: true, force: true });
 });
 
-describe('validatePath', () => {
+describe('validatePath (manifest values only)', () => {
     it('throws E_INPUT for path traversal with forward slashes', () => {
         expect(() => validatePath('../etc/passwd')).toThrow(CliError);
         try {
@@ -86,8 +88,12 @@ describe('readStdin / readFileOrStdin', () => {
         expect([...buf]).toEqual([1, 2, 3]);
     });
 
-    it('rejects a traversal path before touching the filesystem', async () => {
-        await expect(readFileOrStdin('../secret')).rejects.toMatchObject({ code: 'E_INPUT', exitCode: 1 });
+    it('an argv path containing ".." is ordinary shell usage (resolved by the OS, not refused)', async () => {
+        const file = join(dir, 'via-parent.bin');
+        await writeFile(file, 'ok');
+        const viaParent = join(dir, 'sub', '..', 'via-parent.bin');
+        expect((await readFileOrStdin(viaParent)).toString()).toBe('ok');
+        await expect(readFileOrStdin(join(dir, '..', 'no-such-file-zipnative'))).rejects.toMatchObject({ code: 'ENOENT' });
     });
 
     it('reads stdin for "-" and for undefined', async () => {
@@ -111,19 +117,37 @@ describe('readStdin / readFileOrStdin', () => {
         Object.defineProperty(process, 'stdin', { value: failing, configurable: true });
         await expect(readStdin()).rejects.toThrow('stdin broke');
     });
-});
 
-describe('readBinaryFile', () => {
-    it('returns a Uint8Array view of the file bytes', async () => {
-        const file = join(dir, 'b.bin');
-        await writeFile(file, Buffer.from([9, 8, 7]));
-        const out = await readBinaryFile(file);
-        expect(out).toBeInstanceOf(Uint8Array);
-        expect(Array.from(out)).toEqual([9, 8, 7]);
+    it('the default input bound is 4 GiB', () => {
+        expect(DEFAULT_MAX_INPUT_SIZE).toBe(4 * 1024 ** 3);
     });
 
-    it('rejects traversal', async () => {
-        await expect(readBinaryFile('../x')).rejects.toMatchObject({ code: 'E_INPUT' });
+    it('readStdin stops reading and throws E_LIMIT (limit maxInputSize) past the bound', async () => {
+        fakeStdin([Buffer.alloc(4), Buffer.alloc(4), Buffer.alloc(4)]);
+        let caught: unknown;
+        try {
+            await readStdin(false, 6);
+        } catch (e) {
+            caught = e;
+        }
+        expect(caught).toBeInstanceOf(CliError);
+        expect(caught).toMatchObject({
+            code: 'E_LIMIT',
+            exitCode: 1,
+            detail: { limit: 'maxInputSize', configured: 6, observed: 8 },
+        });
+        expect((caught as CliError).message).toMatch(/exceeds --max-input-size/);
+    });
+
+    it('readFileOrStdin refuses a file larger than the bound before reading it', async () => {
+        const file = join(dir, 'big.bin');
+        await writeFile(file, Buffer.alloc(100));
+        await expect(readFileOrStdin(file, 99)).rejects.toMatchObject({
+            code: 'E_LIMIT',
+            detail: { limit: 'maxInputSize', configured: 99, observed: 100 },
+        });
+        expect((await readFileOrStdin(file, 100)).length).toBe(100);
+        expect((await readFileOrStdin(file, Infinity)).length).toBe(100);
     });
 });
 
@@ -139,10 +163,6 @@ describe('openInputStream', () => {
         const chunks: Uint8Array[] = [];
         for await (const c of readableToByteSource(openInputStream(file))) chunks.push(c);
         expect(Buffer.concat(chunks).toString()).toBe('stream me');
-    });
-
-    it('rejects traversal synchronously', () => {
-        expect(() => openInputStream('../x')).toThrow(CliError);
     });
 });
 
@@ -163,6 +183,15 @@ describe('assertJsonSizeLimit', () => {
     });
 });
 
+describe('overwriteRefused', () => {
+    it('is the uniform E_IO refusal naming the file and the opt-in flag', () => {
+        const e = overwriteRefused('/x/out.zip', 'a.txt');
+        expect(e).toMatchObject({ code: 'E_IO', exitCode: 1, entryName: 'a.txt' });
+        expect(e.message).toBe('Refusing to overwrite existing file /x/out.zip (pass --overwrite).');
+        expect(overwriteRefused('/x/out.zip').entryName).toBeUndefined();
+    });
+});
+
 describe('writeOutput', () => {
     it('writes bytes to a file path', async () => {
         const file = join(dir, 'out.bin');
@@ -170,8 +199,22 @@ describe('writeOutput', () => {
         expect([...(await readFile(file))]).toEqual([1, 2, 3, 4]);
     });
 
-    it('rejects traversal', async () => {
-        await expect(writeOutput(new Uint8Array([1]), '../out')).rejects.toMatchObject({ code: 'E_INPUT' });
+    it('replaces an existing file by default and refuses it under { exclusive: true }', async () => {
+        const file = join(dir, 'out.bin');
+        await writeFile(file, 'old');
+        await expect(writeOutput(new Uint8Array([1]), file, { exclusive: true })).rejects.toMatchObject({
+            code: 'E_IO',
+            message: `Refusing to overwrite existing file ${file} (pass --overwrite).`,
+        });
+        expect((await readFile(file)).toString()).toBe('old');
+        await writeOutput(new Uint8Array([9]), file);
+        expect([...(await readFile(file))]).toEqual([9]);
+    });
+
+    it('creates a new file under { exclusive: true }', async () => {
+        const file = join(dir, 'fresh.bin');
+        await writeOutput(new Uint8Array([7]), file, { exclusive: true });
+        expect([...(await readFile(file))]).toEqual([7]);
     });
 
     it('writes to stdout for undefined and "-"', async () => {
@@ -215,8 +258,19 @@ describe('writeStreamingOutput', () => {
         expect((await stat(file)).size).toBe(0);
     });
 
-    it('rejects traversal', async () => {
-        await expect(writeStreamingOutput(chunksOf(), '../x')).rejects.toMatchObject({ code: 'E_INPUT' });
+    it('refuses an existing file under { exclusive: true } without pulling the whole source', async () => {
+        const file = join(dir, 'exists.bin');
+        await writeFile(file, 'keep');
+        let pulled = 0;
+        async function* counting(): AsyncGenerator<Uint8Array, void, undefined> {
+            for (let i = 0; i < 1000; i++) {
+                pulled++;
+                yield new Uint8Array(64 * 1024);
+            }
+        }
+        await expect(writeStreamingOutput(counting(), file, { exclusive: true })).rejects.toMatchObject({ code: 'E_IO' });
+        expect((await readFile(file)).toString()).toBe('keep');
+        expect(pulled).toBeLessThan(1000);
     });
 
     it('propagates a stdout write error', async () => {
@@ -257,9 +311,25 @@ describe('writeFileStream', () => {
         const file = join(dir, 'no', 'such', 'dir', 'x.bin');
         await expect(writeFileStream(file, chunksOf(new Uint8Array([1])))).rejects.toMatchObject({ code: 'ENOENT' });
     });
+
+    it('opens exclusively on request: EEXIST becomes the uniform overwrite refusal', async () => {
+        const file = join(dir, 'wx.bin');
+        await writeFile(file, 'old');
+        await expect(writeFileStream(file, chunksOf(new Uint8Array([1])), undefined, { exclusive: true }))
+            .rejects.toMatchObject({ code: 'E_IO', message: expect.stringMatching(/pass --overwrite/) as string });
+        expect((await readFile(file)).toString()).toBe('old');
+    });
 });
 
-describe('ensureDir / unlinkQuiet / parentDir', () => {
+describe('pathExists / ensureDir / unlinkQuiet / parentDir', () => {
+    it('pathExists is true for files and directories, false otherwise', async () => {
+        const file = join(dir, 'p.bin');
+        await writeFile(file, 'x');
+        expect(await pathExists(file)).toBe(true);
+        expect(await pathExists(dir)).toBe(true);
+        expect(await pathExists(join(dir, 'absent'))).toBe(false);
+    });
+
     it('ensureDir creates nested directories and is idempotent', async () => {
         const nested = join(dir, 'a', 'b', 'c');
         await ensureDir(nested);
@@ -342,10 +412,6 @@ describe('readJsonInput', () => {
         const file = join(dir, 'missing.json');
         await expect(readJsonInput(file, 'manifest')).rejects.toMatchObject({ code: 'E_IO', exitCode: 1 });
         await expect(readJsonInput(file, 'manifest')).rejects.toThrow(/Cannot read manifest/);
-    });
-
-    it('re-throws a CliError from path validation unchanged', async () => {
-        await expect(readJsonInput('../x.json', 'manifest')).rejects.toMatchObject({ code: 'E_INPUT' });
     });
 
     it('decodes invalid UTF-8 leniently instead of throwing E_IO', async () => {

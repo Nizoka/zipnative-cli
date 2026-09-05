@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { extract } from '../../src/commands/extract.js';
 import { parseArgs } from '../../src/utils/args.js';
 import { crc32, createZip } from '../../src/core-bridge/index.js';
@@ -227,6 +227,25 @@ describe('extract', () => {
             await writeFile(join(out, 'a.txt'), 'pre-existing');
             await run(['--input', zip, '--output-dir', out, '--overwrite']);
             await expectRoundTrip(out);
+        });
+
+        it('refuses a directory link planted inside the destination that points outside (E_SECURITY), writing nothing there', async () => {
+            const zip = await fixture();
+            const out = join(tmp, 'out');
+            const outside = join(tmp, 'outside');
+            await mkdir(out, { recursive: true });
+            await mkdir(outside, { recursive: true });
+            await symlink(outside, join(out, 'nested'), process.platform === 'win32' ? 'junction' : 'dir');
+            await expect(run(['--input', zip, '--output-dir', out]))
+                .rejects.toMatchObject({ code: 'E_SECURITY', exitCode: 1 });
+            expect(await readdir(outside)).toEqual([]);
+        });
+
+        it('an --output-dir containing ".." is ordinary shell usage', async () => {
+            const zip = await fixture();
+            const out = join(tmp, 'sub', '..', 'out-dots');
+            await run(['--input', zip, '--output-dir', out]);
+            await expectRoundTrip(join(tmp, 'out-dots'));
         });
 
         it('a non-zip archive is E_PARSE, a missing one E_IO', async () => {

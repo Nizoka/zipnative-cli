@@ -70,7 +70,7 @@ export async function list(args: ParsedArgs): Promise<void> {
     const long = hasFlag(args.flags, 'long');
     const filter = parseNameFilter(args);
 
-    const bytes = await readArchiveBytes(resolveInputPath(args));
+    const bytes = await readArchiveBytes(resolveInputPath(args), args);
     const sink = createDiagnosticSink(format === 'ndjson' && isJsonMode());
     const reader = openArchive(bytes, {
         ...commonOptions(args, sink),

@@ -24,7 +24,6 @@ import {
     type ZipCodec,
 } from '../core-bridge/index.js';
 import { CliError, ErrorCode } from './error.js';
-import { validatePath } from './io.js';
 
 export interface LoadedCodecModule {
     readonly path: string;
@@ -56,7 +55,6 @@ function isCodec(value: unknown): value is ZipCodec {
  * declares. Throws `E_INPUT` when the module does not honour the contract.
  */
 export async function loadCodecModule(modulePath: string): Promise<LoadedCodecModule> {
-    validatePath(modulePath);
     const abs = resolve(modulePath);
     let mod: Record<string, unknown>;
     try {

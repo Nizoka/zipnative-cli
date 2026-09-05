@@ -1,13 +1,21 @@
 import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve as resolvePath, sep } from 'node:path';
 import type { Readable } from 'node:stream';
 import { CliError, ErrorCode } from './error.js';
 
 const JSON_SIZE_LIMIT = 50 * 1024 * 1024; // 50 MB
 
+/** Default bound for a buffered archive read (stdin or file): 4 GiB. */
+export const DEFAULT_MAX_INPUT_SIZE = 4 * 1024 ** 3;
+
 /**
- * Validate a file path against directory traversal.
+ * Validate a MANIFEST-supplied path against directory traversal.
+ *
+ * Paths typed on the command line are the user's own filesystem authority
+ * (`zipnative list ../a.zip` is ordinary shell usage) and are NOT validated.
+ * Values that arrive through a manifest file (batch tasks, create/modify
+ * entry paths) are, because a manifest is data, not the invoking user.
  * Throws CliError if the path contains `../` or `..\\` sequences.
  */
 export function validatePath(filePath: string): void {
@@ -32,16 +40,37 @@ export function assertStdinNotTty(): void {
     }
 }
 
+function inputTooLarge(observed: number, configured: number, what: string): CliError {
+    return new CliError(
+        `${what} exceeds --max-input-size (${configured} bytes; observed ${observed}). Raise the bound only for trusted input, or use a streaming command (stream, crc32, inflate, create --stream).`,
+        1,
+        ErrorCode.LIMIT,
+        { detail: { limit: 'maxInputSize', configured, observed } },
+    );
+}
+
 /**
- * Read all bytes from stdin.
+ * Read all bytes from stdin, bounded.
  *
  * @param explicit true when the caller wrote `-` (skip the TTY guard)
+ * @param maxBytes bound (E_LIMIT above it; `Infinity` disables)
  */
-export function readStdin(explicit = false): Promise<Buffer> {
+export function readStdin(explicit = false, maxBytes: number = DEFAULT_MAX_INPUT_SIZE): Promise<Buffer> {
     if (!explicit) assertStdinNotTty();
     return new Promise((resolve, reject) => {
         const chunks: Buffer[] = [];
-        process.stdin.on('data', (chunk: Buffer) => chunks.push(chunk));
+        let total = 0;
+        const onData = (chunk: Buffer): void => {
+            total += chunk.length;
+            if (total > maxBytes) {
+                process.stdin.off('data', onData);
+                process.stdin.destroy();
+                reject(inputTooLarge(total, maxBytes, 'stdin'));
+                return;
+            }
+            chunks.push(chunk);
+        };
+        process.stdin.on('data', onData);
         process.stdin.on('end', () => resolve(Buffer.concat(chunks)));
         process.stdin.on('error', reject);
     });
@@ -49,13 +78,17 @@ export function readStdin(explicit = false): Promise<Buffer> {
 
 /**
  * Read a file by path, or fall back to stdin if `filePath` is undefined
- * (or is the conventional `-`).
+ * (or is the conventional `-`). Bounded by `maxBytes` (file size checked
+ * before reading).
  */
-export async function readFileOrStdin(filePath: string | undefined): Promise<Buffer> {
+export async function readFileOrStdin(filePath: string | undefined, maxBytes: number = DEFAULT_MAX_INPUT_SIZE): Promise<Buffer> {
     if (filePath === undefined || filePath === '-') {
-        return readStdin(filePath === '-');
+        return readStdin(filePath === '-', maxBytes);
     }
-    validatePath(filePath);
+    if (Number.isFinite(maxBytes)) {
+        const st = await stat(filePath);
+        if (st.size > maxBytes) throw inputTooLarge(st.size, maxBytes, `"${filePath}"`);
+    }
     return readFile(filePath);
 }
 
@@ -92,15 +125,6 @@ function writeStdout(data: Uint8Array): Promise<void> {
 }
 
 /**
- * Read a binary file by path. Path-traversal validated before access.
- */
-export async function readBinaryFile(filePath: string): Promise<Uint8Array> {
-    validatePath(filePath);
-    const buf = await readFile(filePath);
-    return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
-}
-
-/**
  * Open a readable byte stream for a file path, or stdin when `filePath` is
  * undefined / `-`. Used by the streaming entry points (`stream`, `create
  * --stream`, `inflate`, `crc32`) so a large input never materialises in memory.
@@ -110,7 +134,6 @@ export function openInputStream(filePath: string | undefined): Readable {
         if (filePath === undefined) assertStdinNotTty();
         return process.stdin;
     }
-    validatePath(filePath);
     return createReadStream(filePath);
 }
 
@@ -128,17 +151,44 @@ export function assertJsonSizeLimit(buf: Uint8Array): void {
     }
 }
 
+export interface WriteOptions {
+    /**
+     * Open the file exclusively (`wx`): an existing file is refused with E_IO
+     * ("pass --overwrite"), and a file that appears between the caller's
+     * check and the open is refused too (no TOCTOU window).
+     */
+    readonly exclusive?: boolean;
+}
+
+/** The uniform refusal for an existing output file. */
+export function overwriteRefused(filePath: string, entryName?: string): CliError {
+    return new CliError(
+        `Refusing to overwrite existing file ${filePath} (pass --overwrite).`,
+        1,
+        ErrorCode.IO,
+        entryName !== undefined ? { entryName } : undefined,
+    );
+}
+
+function isEexist(err: unknown): boolean {
+    return err instanceof Error && (err as NodeJS.ErrnoException).code === 'EEXIST';
+}
+
 /**
  * Write binary data to a file path, or to stdout if `filePath` is undefined
  * (or `-`).
  */
-export async function writeOutput(data: Uint8Array, filePath: string | undefined): Promise<void> {
+export async function writeOutput(data: Uint8Array, filePath: string | undefined, options: WriteOptions = {}): Promise<void> {
     if (filePath === undefined || filePath === '-') {
         await writeStdout(data);
         return;
     }
-    validatePath(filePath);
-    await writeFile(filePath, data);
+    try {
+        await writeFile(filePath, data, { flag: options.exclusive === true ? 'wx' : 'w' });
+    } catch (e) {
+        if (isEexist(e)) throw overwriteRefused(filePath);
+        throw e;
+    }
 }
 
 /**
@@ -148,6 +198,7 @@ export async function writeOutput(data: Uint8Array, filePath: string | undefined
 export async function writeStreamingOutput(
     chunks: AsyncIterable<Uint8Array>,
     filePath: string | undefined,
+    options: WriteOptions = {},
 ): Promise<number> {
     let total = 0;
     if (filePath === undefined || filePath === '-') {
@@ -157,22 +208,23 @@ export async function writeStreamingOutput(
         }
         return total;
     }
-
-    validatePath(filePath);
-    await writeFileStream(filePath, chunks, (n) => { total += n; });
+    await writeFileStream(filePath, chunks, (n) => { total += n; }, options);
     return total;
 }
 
 /**
  * Stream chunks into a file (parents are NOT created — callers decide).
  * Backpressure-aware: waits for `drain` when the kernel buffer is full.
+ * With `exclusive`, the file is opened `wx` and EEXIST becomes the uniform
+ * overwrite refusal.
  */
 export async function writeFileStream(
     filePath: string,
     chunks: AsyncIterable<Uint8Array>,
     onChunk?: (bytes: number) => void,
+    options: WriteOptions = {},
 ): Promise<void> {
-    const stream = createWriteStream(filePath);
+    const stream = createWriteStream(filePath, { flags: options.exclusive === true ? 'wx' : 'w' });
     // Settle only on 'close': the file descriptor is opened asynchronously, so
     // rejecting on the first pull failure (before 'open') would let the caller
     // unlink the path and then have the deferred open() recreate an empty file.
@@ -180,23 +232,36 @@ export async function writeFileStream(
     await new Promise<void>((resolve, reject) => {
         stream.on('error', (e: unknown) => { failure ??= e; });
         stream.on('close', () => {
-            if (failure !== undefined) reject(failure);
+            if (failure !== undefined) reject(isEexist(failure) ? overwriteRefused(filePath) : failure);
             else resolve();
         });
         (async () => {
             for await (const chunk of chunks) {
+                // The open is deferred: stop pulling as soon as it failed
+                // (EEXIST under `wx`) instead of decompressing into the void.
+                if (failure !== undefined || stream.destroyed) break;
                 onChunk?.(chunk.length);
                 const ok = stream.write(chunk);
                 if (!ok) {
-                    await new Promise<void>((r) => stream.once('drain', r));
+                    await new Promise<void>((r) => { stream.once('drain', r); stream.once('close', r); });
                 }
             }
-            stream.end();
+            if (!stream.destroyed) stream.end();
         })().catch((e: unknown) => {
             failure ??= e;
             stream.destroy();
         });
     });
+}
+
+/** True when a path exists (any type). */
+export async function pathExists(filePath: string): Promise<boolean> {
+    try {
+        await stat(filePath);
+        return true;
+    } catch {
+        return false;
+    }
 }
 
 /** Create a directory (and parents) — idempotent. */
@@ -215,9 +280,9 @@ export async function unlinkQuiet(filePath: string): Promise<void> {
 
 /**
  * Join an already-sanitised relative archive path under `root` and prove the
- * result stays inside `root`. This is the CLI's own safety belt on top of the
- * engine's `sanitizeEntryPath()`: the engine never touches the filesystem, so
- * containment of the final path is this repository's responsibility.
+ * result stays inside `root` LEXICALLY. This is the CLI's first safety belt
+ * on top of the engine's `sanitizeEntryPath()`; the sink (utils/sink.ts) adds
+ * the physical (realpath) check after the parent directory exists.
  *
  * Throws `E_SECURITY` when the resolved path escapes the root.
  */
@@ -248,7 +313,7 @@ export function parentDir(filePath: string): string {
 export async function readJsonInput(filePath: string, what: string): Promise<unknown> {
     let buf: Buffer;
     try {
-        buf = await readFileOrStdin(filePath);
+        buf = await readFileOrStdin(filePath, JSON_SIZE_LIMIT + 1);
     } catch (e) {
         if (e instanceof CliError) throw e;
         const message = e instanceof Error ? e.message : String(e);

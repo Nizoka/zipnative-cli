@@ -15,7 +15,7 @@
 import { readdir, mkdir, readFile, stat } from 'node:fs/promises';
 import { join, basename, dirname, extname, resolve } from 'node:path';
 import { type ParsedArgs, getStringFlag, hasFlag } from '../utils/args.js';
-import { validatePath, assertJsonSizeLimit } from '../utils/io.js';
+import { assertJsonSizeLimit } from '../utils/io.js';
 import { CliError, ErrorCode, type ErrorCodeValue } from '../utils/error.js';
 import { isJsonMode, isDryRun, progress } from '../utils/agent.js';
 import { selectFields, serializeJson, parseFieldList } from '../utils/projection.js';
@@ -169,7 +169,6 @@ async function runManifest(manifestPath: string, args: ParsedArgs): Promise<void
     const continueOnError = hasFlag(args.flags, 'continue-on-error');
     const dryRun = hasFlag(args.flags, 'dry-run') || isDryRun();
 
-    validatePath(manifestPath);
     let rawBuf: Buffer;
     try {
         rawBuf = await readFile(manifestPath);
@@ -293,8 +292,6 @@ export async function batch(args: ParsedArgs): Promise<void> {
     if (task === 'create' && outputDir === undefined) {
         throw new CliError('batch --task create requires --output-dir <dir>.', 2);
     }
-    validatePath(inputDir);
-    if (outputDir !== undefined) validatePath(outputDir);
 
     const concurrencyRaw = getStringFlag(args.flags, 'concurrency');
     let concurrency = 4;

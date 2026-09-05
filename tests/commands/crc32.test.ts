@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { Readable } from 'node:stream';
 import { crc32 } from '../../src/commands/crc32.js';
 import { parseArgs } from '../../src/utils/args.js';
@@ -171,9 +171,13 @@ describe('crc32', () => {
         expect(r.error).toMatchObject({ code: ErrorCode.IO, exitCode: 1 });
     });
 
-    it('a traversal path is refused (E_INPUT)', async () => {
-        const r = await run(() => crc32(parseArgs(['../escape.bin'])));
-        expect(r.error).toMatchObject({ code: ErrorCode.INPUT });
+    it('a relative path with ".." is ordinary shell usage (resolved, not refused)', async () => {
+        await setup();
+        const viaParent = join(dir, '..', basename(dir), basename(file));
+        const r = await run(() => crc32(parseArgs([viaParent])));
+        expect(r.error).toBeUndefined();
+        const missing = await run(() => crc32(parseArgs(['../escape.bin'])));
+        expect(missing.error).toMatchObject({ code: ErrorCode.IO });
     });
 
     it('emits compact JSON and a status envelope under ZIPNATIVE_JSON', async () => {

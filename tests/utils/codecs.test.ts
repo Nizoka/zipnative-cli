@@ -144,8 +144,8 @@ describe('loadCodecModule', () => {
         await expectInput(loadCodecModule(await writeModule(`export const codecs = [{ method: 5 `)), /Cannot load codec module/);
     });
 
-    it('rejects a traversal path before importing', async () => {
-        await expectInput(loadCodecModule('../evil.mjs'), /Path traversal/);
+    it('a path containing ".." is resolved like any argv path (a missing module is still E_INPUT)', async () => {
+        await expectInput(loadCodecModule(join(dir, '..', 'no-such-codec-zipnative.mjs')), /Cannot load codec module/);
     });
 
     it('does not record a module that failed validation', async () => {

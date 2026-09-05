@@ -17,7 +17,6 @@ import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { sanitizeEntryPath } from '../core-bridge/index.js';
 import { CliError, ErrorCode } from './error.js';
 import type { NameFilter } from './glob.js';
-import { validatePath } from './io.js';
 import { isFsError } from './ziperr.js';
 
 export interface FileSpec {
@@ -89,7 +88,6 @@ export async function walkPaths(inputs: readonly string[], options: WalkOptions 
     const follow = options.followSymlinks === true;
     const visiting = new Set<string>();
     const baseAbs = options.base !== undefined ? resolve(options.base) : undefined;
-    if (options.base !== undefined) validatePath(options.base);
 
     const pushSpec = (spec: FileSpec): void => {
         if (options.filter !== undefined && !options.filter(spec.name)) {
@@ -184,7 +182,6 @@ export async function walkPaths(inputs: readonly string[], options: WalkOptions 
     };
 
     for (const input of inputs) {
-        validatePath(input);
         const abs = resolve(input);
         const rootBase = baseAbs ?? dirname(abs);
         await visit(abs, rootBase);

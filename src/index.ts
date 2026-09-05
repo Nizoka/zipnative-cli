@@ -31,6 +31,12 @@ Global options (any command):
   --max-extra-bytes <size>     <size> accepts 65536, 512k, 1m, 8g, 1GiB.
   --max-comment-bytes <size>
   --max-cd-bytes <size>
+  --max-input-size <size>      Bound on a buffered input read — an archive
+                    or payload read from stdin or a file into memory (list,
+                    inspect, verify, extract, cat, modify, create --stdin-name,
+                    inflate --sync). Default 4 GiB; "none" disables it. Exceeding
+                    it is E_LIMIT. The streaming commands (stream, crc32,
+                    inflate, create --stream) are not bounded by it.
   --pure-codecs     Skip node:zlib and run the pure-TS codec tier
   --codec <module>  Load an ESM module exporting { codecs: ZipCodec[] } and
                     register it (read-side only). Executes user code: only
@@ -94,6 +100,7 @@ Inputs:
                       directory, method, level, date, comment, mode }] }) —
                       see \`zipnative schema create-manifest\`
   --output,  -o       Output path (default: stdout)
+  --overwrite         Replace an existing output file (default: refuse, E_IO)
 
 Naming:
   --base <dir>        Entry names are relative to <dir> (default: each input's
@@ -206,6 +213,7 @@ Options:
   --input,   -i       Archive path
   --entry,   -e       Entry name (repeatable); entries are concatenated in order
   --output,  -o       Write to a file instead of stdout
+  --overwrite         Replace an existing --output file (default: refuse, E_IO)
   --raw               Output the COMPRESSED payload (zero-copy), no decoding
   --no-verify-crc     Skip the CRC-32 check at the end of the stream
   --dry-run           Resolve the entries and report their sizes; output nothing
@@ -298,8 +306,9 @@ Options:
   --date epoch|now|<ISO>     Timestamp for new payloads (default: DOS epoch)
   --compact                  Canonical rewrite (saveCompact): removed data is
                              truly gone, still no recompression
-  --in-place                 Write back to the input path (tmp file + rename)
+  --in-place                 Write back to the input path (exclusive tmp file + rename)
   --output,  -o              Output path (default: stdout)
+  --overwrite                Replace an existing --output file (default: refuse, E_IO)
   --dry-run                  Validate edits against the archive; write nothing
 
 Default save is APPEND-ONLY: original bytes verbatim + appended entries + a new
@@ -352,6 +361,7 @@ Usage:
 Options:
   --input,   -i       Compressed input (default: stdin)
   --output,  -o       Decompressed output (default: stdout)
+  --overwrite         Replace an existing --output file (default: refuse, E_IO)
   --max-output <size> Hard output bound (default: the effective
                       --max-entry-size, 1 GiB); "none" only for trusted input
   --method deflate|store|<id>   Codec (default deflate; ids via --codec)
@@ -379,6 +389,7 @@ Directory mode:
                       (every create flag is honoured); --task verify: every
                       *.zip in the directory is verified
   --output-dir <dir>  Destination for --task create
+  --overwrite         Replace existing <name>.zip files (default: each is refused, E_IO)
   --concurrency <n>   Parallel workers (default 4)
   --fail-fast         Stop scheduling after the first failure
 

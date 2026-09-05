@@ -52,9 +52,9 @@ describe('completion', () => {
         expect(COMMANDS.find((c) => c.name === 'schema')?.flags).toEqual([]);
     });
 
-    it('GLOBAL_FLAGS carries the agent flags and all eight --max-* bounds', () => {
-        expect(GLOBAL_FLAGS).toEqual(expect.arrayContaining(['--json', '--dry-run', '--quiet', '--strict', '--pure-codecs', '--codec', '--config', '--no-config', '--pretty', ...MAX_FLAGS]));
-        expect(GLOBAL_FLAGS.filter((f) => f.startsWith('--max-'))).toHaveLength(8);
+    it('GLOBAL_FLAGS carries the agent flags, all eight --max-* bounds and --max-input-size', () => {
+        expect(GLOBAL_FLAGS).toEqual(expect.arrayContaining(['--json', '--dry-run', '--quiet', '--strict', '--pure-codecs', '--codec', '--config', '--no-config', '--pretty', '--max-input-size', ...MAX_FLAGS]));
+        expect(GLOBAL_FLAGS.filter((f) => f.startsWith('--max-'))).toHaveLength(9);
     });
 
     it('DRY_RUN_COMMANDS lists the commands that plan without writing', () => {

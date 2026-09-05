@@ -685,6 +685,9 @@ function main() {
     // file on disk for inspection.
     for (const entry of CORPUS) {
         let command = null;
+        // The CLI refuses to overwrite an existing output (E_IO without
+        // --overwrite): regenerate from a clean slate rather than opt out.
+        rmSync(dest(entry.file), { force: true });
         if (entry.craft !== undefined) {
             writeFileSync(dest(entry.file), entry.craft());
         } else {

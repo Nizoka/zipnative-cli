@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { mkdtemp, readFile, rm, stat, writeFile, mkdir } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, stat, symlink, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -525,10 +525,25 @@ describe('stream', () => {
         expect(r.error).toMatchObject({ exitCode: 2 });
     });
 
-    it('rejects a traversal in --output-dir (E_INPUT)', async () => {
+    it('refuses a directory link planted inside --output-dir that points outside (E_SECURITY), writing nothing there', async () => {
         await setup();
-        const r = await run(() => stream(parseArgs(['--input', normalPath, '--output-dir', '../escape'])));
-        expect(r.error).toMatchObject({ code: ErrorCode.INPUT });
+        const out = join(dir, 'out');
+        const outside = join(dir, 'outside');
+        await mkdir(out, { recursive: true });
+        await mkdir(outside, { recursive: true });
+        await symlink(outside, join(out, 'dir'), process.platform === 'win32' ? 'junction' : 'dir');
+        const r = await run(() => stream(parseArgs(['--input', normalPath, '--output-dir', out])));
+        expect(r.error).toMatchObject({ code: ErrorCode.SECURITY, exitCode: 1, entryName: 'dir/' });
+        expect((r.error as Error).message).toMatch(/leaves the output directory/);
+        expect(await readdir(outside)).toEqual([]);
+    });
+
+    it('an --output-dir containing ".." is ordinary shell usage', async () => {
+        await setup();
+        const out = join(dir, 'sub', '..', 'out-dots');
+        const r = await run(() => stream(parseArgs(['--input', normalPath, '--output-dir', out])));
+        expect(r.error).toBeUndefined();
+        expect(await readFile(join(dir, 'out-dots', 'a.txt'), 'utf8')).toBe('hello');
     });
 
     // ── Truncation and caveat ───────────────────────────────────────

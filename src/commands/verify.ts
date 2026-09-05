@@ -78,7 +78,7 @@ export async function verify(args: ParsedArgs): Promise<void> {
     const limits = parseLimitFlags(args);
 
     const inputPath = resolveInputPath(args);
-    const bytes = await readArchiveBytes(inputPath);
+    const bytes = await readArchiveBytes(inputPath, args);
     // verifyZip only throws for caller bugs (invalid limits) — pre-validated,
     // but still mapped so an unexpected throw carries a proper code.
     const core = guard('Verification failed', () => verifyZip(bytes, limits !== undefined ? { limits } : undefined));

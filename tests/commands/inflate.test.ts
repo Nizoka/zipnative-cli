@@ -303,11 +303,25 @@ describe('inflate', () => {
         });
     });
 
-    it('a missing input file is E_IO and a traversal --output is E_INPUT', async () => {
+    it('a missing input file is E_IO', async () => {
         await setup();
         const r = await run(() => inflate(parseArgs(['--input', join(dir, 'absent.deflate')])));
         expect(r.error).toMatchObject({ code: ErrorCode.IO });
-        const r2 = await run(() => inflate(parseArgs(['--input', small, '--output', '../escape.bin'])));
-        expect(r2.error).toMatchObject({ code: ErrorCode.INPUT });
+    });
+
+    it('refuses an existing --output without --overwrite (E_IO, file intact) in both paths, replaces it with --overwrite', async () => {
+        await setup();
+        const out = join(dir, 'exists.bin');
+        await writeFile(out, 'keep me');
+        const streaming = await run(() => inflate(parseArgs(['--input', small, '--output', out])));
+        expect(streaming.error).toMatchObject({ code: ErrorCode.IO, exitCode: 1 });
+        expect((streaming.error as Error).message).toBe(`Refusing to overwrite existing file ${out} (pass --overwrite).`);
+        expect((await readFile(out)).toString()).toBe('keep me');
+        const sync = await run(() => inflate(parseArgs(['--input', small, '--output', out, '--sync'])));
+        expect(sync.error).toMatchObject({ code: ErrorCode.IO });
+        expect((await readFile(out)).toString()).toBe('keep me');
+        const forced = await run(() => inflate(parseArgs(['--input', small, '--output', out, '--overwrite'])));
+        expect(forced.error).toBeUndefined();
+        expect((await readFile(out)).equals(SMALL)).toBe(true);
     });
 });

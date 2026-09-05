@@ -20,17 +20,17 @@ export const GLOBAL_BOOLEAN_FLAGS: readonly string[] = [
 
 /** Per-command boolean flags (bare names, without the leading dashes). */
 export const COMMAND_BOOLEAN_FLAGS: Readonly<Record<string, readonly string[]>> = {
-    create: ['dir-entries', 'follow-symlinks', 'deterministic', 'mtime', 'preserve-mode', 'stream', 'parallel'],
-    modify: ['deterministic', 'compact', 'in-place'],
+    create: ['dir-entries', 'follow-symlinks', 'deterministic', 'mtime', 'preserve-mode', 'stream', 'parallel', 'overwrite'],
+    modify: ['deterministic', 'compact', 'in-place', 'overwrite'],
     list: ['long', 'summary'],
     inspect: ['entries', 'extra', 'summary'],
-    cat: ['raw', 'no-verify-crc'],
+    cat: ['raw', 'no-verify-crc', 'overwrite'],
     extract: ['overwrite', 'skip-unsafe', 'allow-symlinks', 'skip-symlinks', 'flat', 'buffered', 'preserve-mode', 'preserve-mtime'],
     stream: ['list', 'long', 'overwrite', 'skip-unsafe', 'skip-unsupported', 'flat', 'preserve-mtime', 'summary'],
     verify: ['summary'],
     crc32: [],
-    inflate: ['sync', 'allow-trailing'],
-    batch: ['fail-fast', 'continue-on-error', 'allow-codec-load', 'summary', 'deterministic'],
+    inflate: ['sync', 'allow-trailing', 'overwrite'],
+    batch: ['fail-fast', 'continue-on-error', 'allow-codec-load', 'summary', 'deterministic', 'overwrite'],
     doctor: [],
     schema: [],
     completion: [],

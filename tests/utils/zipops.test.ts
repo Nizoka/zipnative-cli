@@ -295,8 +295,18 @@ describe('readArchiveBytes', () => {
         await expect(readArchiveBytes(file)).rejects.toThrow(/Cannot read ".*missing\.zip"/);
     });
 
-    it('re-throws a traversal CliError unchanged', async () => {
-        await expect(readArchiveBytes('../x.zip')).rejects.toMatchObject({ code: 'E_INPUT' });
+    it('a path with ".." is ordinary shell usage: a missing one is E_IO, not a traversal refusal', async () => {
+        await expect(readArchiveBytes(join(dir, '..', 'no-such-zipnative.zip'))).rejects.toMatchObject({ code: 'E_IO' });
+    });
+
+    it('honours --max-input-size from the parsed args (E_LIMIT with detail)', async () => {
+        const file = join(dir, 'big.zip');
+        await writeFile(file, Buffer.alloc(2048));
+        await expect(readArchiveBytes(file, parseArgs(['--max-input-size', '1k']))).rejects.toMatchObject({
+            code: 'E_LIMIT',
+            detail: { limit: 'maxInputSize', configured: 1024, observed: 2048 },
+        });
+        expect((await readArchiveBytes(file, parseArgs(['--max-input-size', '2k']))).length).toBe(2048);
     });
 });
 

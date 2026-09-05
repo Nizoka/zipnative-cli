@@ -13,7 +13,7 @@ import type { ZipEntry } from '../core-bridge/index.js';
 import { createDiagnosticSink } from '../utils/diagnostics.js';
 import { prepareEngine } from '../utils/engine.js';
 import { CliError, ErrorCode } from '../utils/error.js';
-import { unlinkQuiet, validatePath, writeStreamingOutput } from '../utils/io.js';
+import { unlinkQuiet, writeStreamingOutput } from '../utils/io.js';
 import { mapZipError } from '../utils/ziperr.js';
 import { commonOptions, openArchive, readArchiveBytes } from '../utils/zipops.js';
 
@@ -34,12 +34,11 @@ export async function cat(args: ParsedArgs): Promise<void> {
         throw new CliError('cat requires at least one entry name: --entry <name> (or positionals after the archive).', 2);
     }
     const outputPath = getStringFlag(args.flags, 'output', 'o');
-    if (outputPath !== undefined) validatePath(outputPath);
     const raw = hasFlag(args.flags, 'raw');
     const verifyCrc = !hasFlag(args.flags, 'no-verify-crc');
     const dryRun = hasFlag(args.flags, 'dry-run') || isDryRun();
 
-    const bytes = await readArchiveBytes(inputPath);
+    const bytes = await readArchiveBytes(inputPath, args);
     const sink = createDiagnosticSink();
     const reader = openArchive(bytes, commonOptions(args, sink));
 
@@ -87,8 +86,9 @@ export async function cat(args: ParsedArgs): Promise<void> {
 
     let written = 0;
     try {
-        written = await writeStreamingOutput(chunks(), outputPath);
+        written = await writeStreamingOutput(chunks(), outputPath, { exclusive: !hasFlag(args.flags, 'overwrite') });
     } catch (e) {
+        if (e instanceof CliError && e.code === ErrorCode.IO) throw e; // overwrite refusal: the existing file is untouched
         if (outputPath !== undefined) await unlinkQuiet(outputPath);
         throw mapZipError(e, `Failed to read entry "${current}"`, current);
     }

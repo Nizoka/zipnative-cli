@@ -106,10 +106,6 @@ describe('loadConfig', () => {
         expectUsage(() => loadConfig('list', join(dir, 'no-such-file.json')), /Config file not found/);
     });
 
-    it('rejects a traversal in the explicit --config path', () => {
-        expect(() => loadConfig('list', '../x.json')).toThrow(CliError);
-    });
-
     it('reads an explicit --config path and skips discovery', async () => {
         await writeRc({ quiet: true });
         const custom = join(dir, 'custom.json');

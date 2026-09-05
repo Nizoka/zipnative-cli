@@ -25,7 +25,6 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import type { ParsedArgs } from './args.js';
-import { validatePath } from './io.js';
 import { CliError } from './error.js';
 
 const CONFIG_FILENAME = '.zipnativerc.json';
@@ -89,7 +88,6 @@ export function loadConfig(
 ): ConfigDefaults {
     let path: string | null;
     if (explicitPath !== undefined) {
-        validatePath(explicitPath);
         path = resolve(explicitPath);
         if (!existsSync(path)) {
             throw new CliError(`Config file not found: ${explicitPath}`, 2);
