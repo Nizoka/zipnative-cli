@@ -20,6 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   engine's `sanitizeEntryPath()` — the pre-extraction gate `verify` cannot give (it proves
   integrity and structure, not path safety; its help and the docs now say so). (review Q2-F3)
 
+### Changed
+
+- ESLint runs the type-aware `strictTypeChecked` set over `src/` (`no-floating-promises`,
+  `no-misused-promises`, `no-unnecessary-condition`, …; three relaxations justified in
+  `eslint.config.js`, tests keep the non-type-checked strict set) and `tsconfig.json` enables
+  `noUncheckedIndexedAccess`. No behaviour change. (review Q4-P1-3, audit A-44)
+
 ### Supply chain
 
 - The CycloneDX generator is an exact-pinned devDependency (`@cyclonedx/cyclonedx-npm` 6.0.1,

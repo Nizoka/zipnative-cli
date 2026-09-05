@@ -180,7 +180,7 @@ export async function extract(args: ParsedArgs): Promise<void> {
             }
         } else {
             for await (const item of extractZipStream(bytes, options)) {
-                planOne(item.entry, item.path, item.stream);
+                planOne(item.entry, item.path, () => item.stream());
             }
         }
     } catch (e) {

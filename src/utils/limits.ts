@@ -66,7 +66,7 @@ export function parseLimitFlags(args: ParsedArgs): Partial<ZipLimits> | undefine
         out[spec.key] = value;
         any = true;
     }
-    return any ? (out as Partial<ZipLimits>) : undefined;
+    return any ? out : undefined;
 }
 
 /**

@@ -15,6 +15,11 @@ function colorEnabled(stream: NodeJS.WriteStream): boolean {
     const force = process.env['FORCE_COLOR'];
     if (force !== undefined) return force !== '0' && force.toLowerCase() !== 'false';
     if (process.env['TERM'] === 'dumb') return false;
+    return streamIsTty(stream);
+}
+
+/** `isTTY` is typed `boolean` but is `undefined` on a pipe: only `true` counts. */
+export function streamIsTty(stream: { readonly isTTY?: boolean | undefined }): boolean {
     return stream.isTTY === true;
 }
 

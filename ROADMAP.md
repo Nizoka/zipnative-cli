@@ -61,7 +61,8 @@ This document outlines the planned development direction for zipnative-cli. Prio
   truthfully when it shapes the writer), `--format, -f` on every command that has a format.
 - [x] **Global flags before the command name** — `zipnative --json list a.zip` and
   `list --long a.zip` both work: `src/utils/flags.ts` is the boolean-flag table, so a boolean
-  never consumes the next token and flags and positionals are order-independent (audit A-01).
+  never consumes the next token and flags and positionals are order-independent (audit A-01)
+- **Type-aware lint and `noUncheckedIndexedAccess`** — ESLint runs `strictTypeChecked` over `src/` (three relaxations, each justified in `eslint.config.js`; tests keep the non-type-checked strict set) and `tsconfig.json` enables `noUncheckedIndexedAccess`. (audit A-44, phase 3).
 - [x] **Relative parent paths on argv** — `zipnative list ../a.zip`, `-o ../out.zip` and
   `--output-dir ../x` are ordinary shell usage and are accepted: argv paths are the user's own
   filesystem authority; the `..` refusal (`validatePath`, `E_INPUT`) now applies only to path
@@ -141,7 +142,6 @@ CLI stays a thin dispatch layer and never re-implements engine logic).
   command is excluded, but a `positionals` array would make manifests read like the shell.
 - **Lazy engine require** — `dist/cli.cjs` requires `zipnative` at bundle top level (≈10 ms of the ≈40 ms `--version` start-up over bare Node); moving the require into the first core call (tsup `splitting` or a lazy getter in the bridge) would make `--help` / `--version` / `schema` engine-free. Measured, not yet worth the bundling risk. (audit A-11)
 - **Fuzz / property tests for the CLI-owned parsers** — a seeded generator (or `fast-check` as a devDependency) over `parseArgs`, `compileGlob`, `parseByteSize` / `parseCount`, `parseManifest` and `selectFields`, run in CI; today the suites are example-based only. (audit A-25)
-- **`noUncheckedIndexedAccess`** — enable the stricter indexing check in `tsconfig.json` once the resulting `undefined` narrowings across `src/` are reviewed (the code already writes `argv[i] as string` as if it were on). (audit A-44)
 - **One ecosystem governance schema** — the engine's `.github/ai-governance.json` (`version: 1`, `issue_drafting`, `compliance_report_fields`) and the CLI's (`1.0.0`, `policy`, `compliance_report`) differ in shape; agreeing one schema upstream and generating the CLI constant from it is an ecosystem decision, not a CLI change. (audit A-36)
 - **man pages** — generated from the USAGE strings; deferred (ongoing maintenance cost vs
   `--help` / completions already covering usage).

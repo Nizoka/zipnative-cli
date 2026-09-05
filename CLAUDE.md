@@ -133,7 +133,7 @@ A new command touches **all** of these — miss one and it half-works:
 
 ```bash
 npm run typecheck:all   # tsc for src + tests — must be clean
-npm run lint            # eslint src/ tests/ — 0 errors (tests use a relaxed override)
+npm run lint            # eslint src/ tests/ — type-aware strictTypeChecked on src/, 0 errors
 npm run test            # vitest run — all pass; keep coverage ≥ thresholds
 npm run build           # tsup → dist/cli.cjs (the bin — the only artefact)
 npm run validate:zip    # veraZIP gate: build + corpus:zip + scripts/validate-zip.mjs

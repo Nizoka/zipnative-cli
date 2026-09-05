@@ -186,7 +186,8 @@ refusal deserves a new canary.
 ## Lint & Type Check
 
 ```bash
-npm run lint              # eslint src/ tests/ (tests get a relaxed test-ergonomics override)
+npm run lint              # eslint src/ tests/ — strictTypeChecked (type-aware) on src/; tests keep the
+                          # non-type-checked strict set plus a test-ergonomics override
 npm run typecheck         # tsc --noEmit (src/)
 npm run typecheck:tests   # tsc --project tsconfig.test.json
 npm run typecheck:all     # both above

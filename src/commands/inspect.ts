@@ -173,8 +173,8 @@ function buildReport(entries: readonly ZipEntry[], archive: InspectReport['archi
             cp437Names,
             duplicateNames,
             unsafeNames,
-            earliestDate: earliest === null ? null : (earliest as Date).toISOString(),
-            latestDate: latest === null ? null : (latest as Date).toISOString(),
+            earliestDate: earliest === null ? null : earliest.toISOString(),
+            latestDate: latest === null ? null : latest.toISOString(),
         },
         determinism: {
             epochTimestamps,

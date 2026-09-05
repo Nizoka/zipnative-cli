@@ -167,7 +167,7 @@ async function planFromManifest(manifestPath: string, storeExt: Set<string>): Pr
         }
     }
     if (m['version'] !== undefined && m['version'] !== 1) {
-        throw new CliError(`Unsupported manifest version ${String(m['version'])} (expected 1).`, 1, ErrorCode.INPUT);
+        throw new CliError(`Unsupported manifest version ${JSON.stringify(m['version'])} (expected 1).`, 1, ErrorCode.INPUT);
     }
     if (!Array.isArray(m['entries'])) {
         throw new CliError('Manifest "entries" must be an array.', 1, ErrorCode.INPUT);
@@ -278,7 +278,7 @@ async function planFromManifest(manifestPath: string, storeExt: Set<string>): Pr
     }
 
     const archive: Plan['archive'] = {
-        ...(order !== undefined ? { order: order as 'canonical' | 'insertion' } : {}),
+        ...(order !== undefined ? { order } : {}),
         ...(parseManifestDate(m['date'], 'manifest') !== undefined ? { defaultDate: parseManifestDate(m['date'], 'manifest') } : {}),
         ...(m['compression'] !== undefined ? { compression: parseManifestCompression(m['compression'], 'manifest') } : {}),
         ...(archiveComment !== undefined ? { comment: archiveComment } : {}),

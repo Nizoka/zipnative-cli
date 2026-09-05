@@ -56,7 +56,8 @@ function coerce(value: ConfigValue): string | boolean | string[] | null {
     if (typeof value === 'string' || typeof value === 'boolean') return value;
     if (typeof value === 'number') return String(value);
     if (Array.isArray(value)) {
-        return value.map((v) => (typeof v === 'number' ? String(v) : v)) as string[];
+        const items: readonly (string | number)[] = value;
+        return items.map((v) => (typeof v === 'number' ? String(v) : v));
     }
     return null;
 }

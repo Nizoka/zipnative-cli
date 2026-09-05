@@ -95,7 +95,7 @@ export function parseArgs(argv: readonly string[], options: ParseOptions = {}): 
         } else if (token.startsWith('-') && token.length > 1 && !/^-\d/.test(token)) {
             if (token.length > 2) {
                 throw new CliError(
-                    `Combined short flags are not supported ("${token}"): write them separately, e.g. ${[...token.slice(1)].map((c) => `-${c}`).join(' ')}.`,
+                    `Combined short flags are not supported ("${token}"): write them separately, e.g. ${Array.from(token.slice(1), (c) => `-${c}`).join(' ')}.`,
                     2,
                 );
             }
@@ -203,7 +203,7 @@ export function getBoolFlag(
         const v = (typeof value === 'string' ? value : (value[0] ?? '')).trim().toLowerCase();
         if (v === '' || v === 'true' || v === '1' || v === 'yes' || v === 'on') return true;
         if (isNegation(v)) return false;
-        throw new CliError(`Flag --${name} expects a boolean (true/false), got "${value}".`, 2);
+        throw new CliError(`Flag --${name} expects a boolean (true/false), got "${typeof value === 'string' ? value : value.join(',')}".`, 2);
     }
     return undefined;
 }

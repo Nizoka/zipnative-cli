@@ -174,6 +174,9 @@ function entryNameOf(err: ZipError): string | undefined {
 export function mapZipError(err: unknown, context: string, entryName?: string): CliError {
     if (err instanceof CliError) return err;
     if (err instanceof ZipError) {
+        // `satisfies Record<ZipErrorCode, …>` makes the fallback unreachable for a
+        // 1.0.0 engine; it stays for a code a NEWER engine may add at runtime.
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
         const [code, exitCode] = ZIP_TO_CLI[err.code] ?? RUNTIME;
         const name = entryNameOf(err) ?? entryName;
         const detail = detailOf(err);

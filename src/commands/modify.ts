@@ -143,7 +143,7 @@ async function editsFromManifest(manifestPath: string, stdinUsed: { used: boolea
         if (!MANIFEST_KEYS.has(key)) throw new CliError(`Unknown key "${key}" in manifest. Valid: ${[...MANIFEST_KEYS].join(', ')}.`, 1, ErrorCode.INPUT);
     }
     if (m['version'] !== undefined && m['version'] !== 1) {
-        throw new CliError(`Unsupported manifest version ${String(m['version'])} (expected 1).`, 1, ErrorCode.INPUT);
+        throw new CliError(`Unsupported manifest version ${JSON.stringify(m['version'])} (expected 1).`, 1, ErrorCode.INPUT);
     }
     if (!Array.isArray(m['edits'])) throw new CliError('Manifest "edits" must be an array.', 1, ErrorCode.INPUT);
     const archiveComment = parseManifestComment(m, 'manifest');

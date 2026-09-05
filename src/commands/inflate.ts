@@ -73,6 +73,9 @@ export async function inflate(args: ParsedArgs): Promise<void> {
                         bytesOut += piece.length;
                         yield piece;
                     }
+                    // push() above may have flipped `finished`; the narrowing from the
+                    // earlier check does not know that.
+                    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
                     if (inflator.finished) leftover += inflator.leftover.length;
                 }
                 inflator.end();

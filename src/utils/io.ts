@@ -2,6 +2,7 @@ import { createReadStream, createWriteStream } from 'node:fs';
 import { open, readFile, rm, stat, type FileHandle } from 'node:fs/promises';
 import { isAbsolute, relative, resolve as resolvePath, sep } from 'node:path';
 import type { Readable } from 'node:stream';
+import { streamIsTty } from './colors.js';
 import { CliError, ErrorCode } from './error.js';
 import { clearInFlight, markInFlight } from './inflight.js';
 
@@ -33,7 +34,7 @@ export function validatePath(filePath: string): void {
  * caller saying "yes, stdin" and is never guarded.
  */
 export function assertStdinNotTty(): void {
-    if (process.stdin.isTTY === true) {
+    if (streamIsTty(process.stdin)) {
         throw new CliError(
             'No input: pass --input <file> (or a positional path), or pipe data on stdin.',
             2,
@@ -251,8 +252,11 @@ export async function writeFileStream(
         stream.on('error', (e: unknown) => { failure ??= e; });
         stream.on('close', () => {
             clearInFlight(filePath);
-            if (failure !== undefined) reject(isEexist(failure) ? overwriteRefused(filePath) : failure);
-            else resolve();
+            if (failure !== undefined) {
+                reject(isEexist(failure) ? overwriteRefused(filePath) : failure instanceof Error ? failure : new Error('Write failed', { cause: failure }));
+            } else {
+                resolve();
+            }
         });
         (async () => {
             for await (const chunk of chunks) {
@@ -364,6 +368,9 @@ export interface Captured<T> {
  * Exceeding `maxBytes` aborts with E_LIMIT `{ limit: 'captureBytes' }`.
  */
 export async function captureStdout<T>(fn: () => Promise<T>, maxBytes: number = DEFAULT_CAPTURE_BYTES): Promise<Captured<T>> {
+    // Kept as the exact function object so the restore below is identity-
+    // preserving; it is never called detached from its stream.
+    // eslint-disable-next-line @typescript-eslint/unbound-method
     const original = process.stdout.write;
     const chunks: Buffer[] = [];
     let total = 0;
@@ -392,7 +399,7 @@ export async function captureStdout<T>(fn: () => Promise<T>, maxBytes: number = 
         if (typeof done === 'function') (done as () => void)();
         return true;
     };
-    process.stdout.write = capture as typeof process.stdout.write;
+    process.stdout.write = capture;
     try {
         const result = await fn();
         if (overflow !== undefined) throw overflow;

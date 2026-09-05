@@ -89,7 +89,7 @@ export function buildRawZip(entries: readonly RawEntrySpec[], options: RawZipOpt
         const method = spec.method ?? 0;
         const stored = method === 8 ? new Uint8Array(deflateRawSync(data)) : data;
         if (spec.corruptDataAt !== undefined && stored.length > spec.corruptDataAt) {
-            stored[spec.corruptDataAt] ^= 0xff;
+            stored[spec.corruptDataAt] = (stored[spec.corruptDataAt] ?? 0) ^ 0xff;
         }
         const crc = spec.crcOverride ?? zlibCrc32(data);
         const descriptorForm = spec.dataDescriptor;
