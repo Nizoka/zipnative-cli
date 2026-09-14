@@ -105,7 +105,7 @@
     "eslint": "^9.0.0",
     "tsup": "^8.0.0",
     "typescript": "^5.4.0",
-    "typescript-eslint": "^8.59.2",
+    "typescript-eslint": "^8.70.0",
     "vitest": "^4.1.7"
   },
   "overrides": {
