@@ -387,6 +387,25 @@ describe('status envelope ↔ emitStatus callers', () => {
     });
 });
 
+describe('counted figures in the prose (second 1.1.0 review, M-11)', () => {
+    it('every "N demos" / "N runnable" equals the number of dual-shell samples', () => {
+        const demos = readdirSync(join(ROOT, 'samples'), { recursive: true, encoding: 'utf8' }).filter((p) => p.endsWith('.sh')).length;
+        for (const file of ['README.md', 'llms.txt', 'samples/README.md', 'docs/KNOWLEDGE_BASE.md']) {
+            for (const m of read(file).matchAll(/\b(\d+) (?:dual-shell )?(?:runnable `\.sh` \+ `\.ps1` )?demos\b/g)) {
+                expect(Number(m[1]), `${file}: "${m[0]}"`).toBe(demos);
+            }
+        }
+    });
+
+    it('every "(N codes)" next to the diagnostics equals the diagnostic count', () => {
+        for (const file of ['README.md', 'AGENTS.md', 'llms.txt', 'docs/KNOWLEDGE_BASE.md']) {
+            for (const m of read(file).matchAll(/diagnostic[^\n]{0,40}?\((\d+) codes\)/g)) {
+                expect(Number(m[1]), `${file}: "${m[0]}"`).toBe(ZIP_DIAGNOSTIC_CODES.length);
+            }
+        }
+    });
+});
+
 describe('release metadata', () => {
     it('CITATION.cff and package.json agree on the version', () => {
         const pkg = JSON.parse(read('package.json')) as { version: string };

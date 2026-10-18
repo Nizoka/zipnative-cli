@@ -16,12 +16,15 @@ CLI to parity with it — every new export is bridged, and the ones that change 
 do are exposed as flags — and to the runtime and supply-chain hardening level of pkinative-cli
 and zipnative 1.1.0. Three hardening items narrow what 1.0.0 accepted; they ship as **security
 fixes in a minor release** and are listed with their migration under
-[Security and behaviour changes](#security-and-behaviour-changes-migration). Every other change is
+[Security](#security). Every other change is
 additive: the `--json` envelopes, the 13 `E_*` codes, the exit codes and the `ZIP_*` mapping are
 unchanged, and the 37 archives of the 1.0.0 veraZIP corpus are byte-identical when the 1.1.0 CLI
 writes them. Design decisions are recorded as ADRs in [docs/adr/](docs/adr/README.md).
 
-### Security and behaviour changes (migration)
+### Security
+
+Security fixes that change behaviour, each with its migration.
+
 
 - **The configuration file is presentation only** ([ADR 0001](docs/adr/0001-configuration-is-presentation-only.md)).
   `.zipnativerc.json` may set `format`, `fields`, `json`, `pretty`, `quiet`, `no-color`,
@@ -35,13 +38,19 @@ writes them. Design decisions are recorded as ADRs in [docs/adr/](docs/adr/READM
   envelopes. **Migration:** move safety and limit settings from the file to argv (or to a
   `batch` manifest task's `flags`).
 - **Strict invocation** ([ADR 0003](docs/adr/0003-strict-invocation.md)). A flag the command
-  does not declare (`--overwite`), a single-value flag given twice, a repeated switch, a value
-  given to a switch (`--json=1`), `-o=x`, and surplus operands are `E_USAGE` (exit 2) before any
-  input is read — on argv and for every `batch` task before the first one runs. 1.0.0 ignored a
+  does not declare (`--overwite`), a single-value flag given twice, a repeated switch, an
+  unrecognised value given to a switch (a switch takes `true|1|yes|on` or `false|0|no|off` (case-insensitive); any other value — `--overwrite=flase`, an empty `--overwrite=` — is `E_USAGE`, never ON), `-o=x`, and surplus operands are
+  `E_USAGE` (exit 2) before any input is read — on argv and for every `batch` task before the first one runs. 1.0.0 ignored a
   misspelt flag, so `--max-entires 10` silently ran with the default bound; `--constructor x`
   crashed with `E_RUNTIME`. The parser is prototype-free and canonicalises the short aliases.
-  **Migration:** remove the flags the command never honoured; `--codec`, `--include`,
-  `--exclude`, `--entry`, `--check` and the other declared repeatable flags still repeat.
+  `batch` refuses a flag its mode ignores (a create flag with `--task verify`, a directory flag
+  with `--manifest`), and a manifest task cannot set a process-wide flag (`json`, `quiet`,
+  `no-color`, `config`, `no-config`, `progress`, `timeout`). `extract --entry` naming no entry
+  is `E_NOT_FOUND` (it was an empty success), like `cat` and `verify`. `--workers` is bounded
+  `0`–`64`.
+  **Migration:** remove the flags the command never honoured; spell switch values with the
+  eight accepted words; `--codec`, `--include`, `--exclude`, `--entry`, `--check` and the other
+  declared repeatable flags still repeat.
 - **Every bound is finite** ([ADR 0002](docs/adr/0002-every-bound-is-finite.md)). `none`, `inf`
   and `infinity` are refused on the eight `--max-*` flags, `--max-input-size` and `inflate
   --max-output`, with a remedy naming an explicit value. **Migration:** pass the size you mean
@@ -62,8 +71,10 @@ writes them. Design decisions are recorded as ADRs in [docs/adr/](docs/adr/READM
   too, so it cannot forge a row or a `remedy:` line. JSON output stays exact (`rawNameHex`
   keeps the bytes).
 - **Text errors lead with the class and the engine code**: `error E_X (ZIP_Y): message`, then
-  the `remedy:` line. Scripts that matched the 1.0.0 `Error: ` prefix should match
-  `^error ` or, better, use `--json`.
+  the `remedy:` line. 1.0.0 printed the bare message (with an `Error: ` prefix only for an
+  unexpected runtime error); scripts that matched the start of the message should match
+  `^error E_` or, better, use `--json`. Text-mode `inspect --check`, `verify` and `batch`
+  failures now print their one-line reason too (they printed nothing on stderr).
 
 ### Added
 
@@ -107,6 +118,15 @@ writes them. Design decisions are recorded as ADRs in [docs/adr/](docs/adr/READM
 - **`maxEntryCompressedSize`** is reported by `doctor` and `schema limits`, deliberately
   without a flag: only `openZipRange()` consults it, and no 1.1.0 command opens a range reader
   ([ADR 0007](docs/adr/0007-no-flag-without-an-effect.md)).
+- **Agent contract, completed by the second review**: `inspect --summary` carries
+  `canonicalForm` and the extraction-safety facts `unsafeNames`, `symlinks`, `duplicateNames`;
+  `schema manifest` gives each command its `switches`, `repeatable` and `pathFlags` and its
+  `operands`, plus `globalSwitches`, and lists exit codes 130 / 143; a `verify` failure names
+  the failing entries (`detail.failedEntries`, `failedCount`; `entryName` when one);
+  `batch --task verify` rows carry `zipCode`; `verify --name-encoding` decodes the `--entry`
+  lookups; `schema` output is compact under `--json`; `--summary` / `--fields` given to a text
+  run print a warning. Every JSON document is validated against its published `schema` subject
+  by `tests/commands/schema-conformance.test.ts`.
 - **Seeded fuzzing of the CLI-owned parsers** (`tests/fuzz/`, ROADMAP A-25,
   [ADR 0010](docs/adr/0010-seeded-fuzzing-of-cli-parsers.md)): argv and the invocation
   contract, sizes / counts / durations, globs, `--fields`, `batch` manifests,
@@ -164,6 +184,17 @@ writes them. Design decisions are recorded as ADRs in [docs/adr/](docs/adr/READM
 
 ### Fixed
 
+- **`--timeout` fires while an input is stalled**: a silent pipe made `list -`, `crc32`,
+  `create --stdin-name`, `stream` and `extract -` wait forever; the input streams now carry the
+  deadline, and the dispatcher fails a run still pending 500 ms after it.
+- **`batch --task verify` honours `--max-input-size`** (it read each archive whole, with no
+  bound — a FIFO named `*.zip` included).
+- **The published schemas match the output**: `inspect --summary` emitted `canonicalForm`,
+  and an error envelope carried `config`, which their closed schemas refused.
+- `extract` refuses a file entry that is also a parent directory (`f` and `f/child`) with
+  `E_IO` naming the entry, before anything is written (it failed midway with `E_RUNTIME`).
+- An undeclared alias is named as typed (`--output-dir (-d)`), and `--toString` is reported by
+  name (the alias table is prototype-free).
 - **A run never ends with exit 0 while an engine call is still pending.** If the event loop
   drains with the command unfinished, the run fails (the deadline's `E_LIMIT` when it fired,
   `E_RUNTIME` otherwise) and the files being written are removed. `stream` does not hand the

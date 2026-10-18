@@ -157,6 +157,30 @@ decision, not an engine wait:
   `AddFromReaderOptions` / `RawEntryReader`, and `addRaw` with `RawEntryMeta` for
   pre-compressed payloads (`verify: true` by default, so a lying source is refused).
 
+### 1.2 targets from the second 1.1.0 review (verified, deferred)
+
+Legitimate findings that the verifier deferred because they cost more churn than a minor release
+should carry (`release-notes/draft/review-v1.1.0.md`):
+
+- **Token budget for the AI-facing text** — AGENTS.md (49 KB), llms.txt (15 KB), CLAUDE.md and
+  copilot-instructions total about 94 KB (≈ 23k tokens). Targets: `llms.txt` as an
+  [llmstxt.org](https://llmstxt.org) index of 4 KB or less; AGENTS.md at 30 KB or less by pointing
+  to `schema errors` / `docs/data/errors.json` instead of repeating the tables; CLAUDE.md at 5 KB
+  or less, deferring to copilot-instructions.
+- **Contract and contributor guide split** (family parity) — move the consumer contract to
+  `docs/AGENT_CONTRACT.md` (shipped) and make AGENTS.md the coding-agent contributor guide, as in
+  pkinative-cli and pdfnative-cli, with a pointer stub so no link breaks. Tracking a shared
+  `.claude/` guard hook and rules is the maintainer's call.
+- **Family hygiene** — a `docs.yml` workflow (docs verification + npm drift), a Deno / Bun
+  runtime smoke job, `release-notes/PR_TEMPLATE.md`, a standalone `docs/THREAT_MODEL.md` with the
+  trust boundaries (argv vs data paths vs archive bytes vs codec modules), an ADR "one runtime
+  dependency, one bridge", and `.github/instructions/security.instructions.md`.
+- **`modify --name-encoding`** — after checking that the editor re-emits the raw name bytes
+  unchanged when a decoder is set (today the CP437 name addresses the entry).
+- **A `remedy` on diagnostic rows** — `ZIP_NONDETERMINISTIC_CODEC` → `--deterministic`,
+  `ZIP_DEAD_BYTES_RATIO` → `--compact`, from the `ZIP_REMEDY` table. The engine-side message
+  vocabulary is drafted for zipnative (`.github/drafts/upstream-message-vocabulary.md`).
+
 ### Ideas feasible now (deferred from 1.1.0, which is scoped to engine parity)
 
 - **`--explain <ZIP_CODE>`** — print `raisedWhen` / `remedy` / class / CLI mapping for one

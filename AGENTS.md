@@ -31,8 +31,11 @@ Keep stdout binary-clean: write archives and entries to `--output <file>` /
 **Flags are order-independent.** `zipnative --json list a.zip`,
 `zipnative list --json a.zip` and `zipnative list a.zip --json` are the same
 invocation: a boolean flag never consumes the token after it, `--flag=false`
-(`0`, `no`, `off`) is the explicit off form, and combined short flags (`-lq`)
-are refused with exit 2. Short aliases that take a value: `-i --input`,
+(`0`, `no`, `off`) is the explicit off form and `--flag=true` (`1`, `yes`, `on`) the
+explicit on form — any other value is refused with exit 2 — and combined short flags
+(`-lq`) are refused with exit 2. `schema manifest` lists each command's `switches`,
+`repeatable` and `pathFlags` and its `operands`, so a tool schema needs no `--help`
+scraping. Short aliases that take a value: `-i --input`,
 `-o --output`, `-d --output-dir`, `-e --entry`, `-f --format`; boolean short
 aliases: `-q`, `-h`, `-V` — an alias means its long flag on every command that
 declares it. There is no `-l`.
@@ -198,7 +201,9 @@ selects / compacts the JSON format. Shapes worth knowing:
   `null` when absent) and
   `unixIds: { uid, gid }` or `null` (the `0x7875` extra field). Under
   `--name-encoding <label>` a name stored without the UTF-8 flag is decoded with that
-  label and its row says `nameEncoding: "custom"`; `rawNameHex` keeps the stored bytes.
+  label and its row says `nameEncoding: "custom"`; `rawNameHex` keeps the stored bytes. `lastModified` is the DOS date read as the HOST's
+  local time (ADR 0008): the same archive reads differently on two time zones — run with
+  `TZ=UTC`, or compare `dosDate` / `dosTime` (`--long`) or the archive hash, across hosts.
 - `inspect`: `determinism.deterministic` (reproducible: epoch timestamps +
   canonical order + UTF-8 flags) is separate from `determinism.canonicalLayout`
   (no data descriptors) — a `create --stream` archive is reproducible but not
@@ -343,7 +348,7 @@ the output stays pretty for humans.
 | Command | `--summary` shape |
 |---------|-------------------|
 | `list` | `{ "entries": <int>, "files": <int>, "directories": <int>, "compressedSize": <int>, "uncompressedSize": <int>, "zip64": <bool>, "encrypted": <int> }` |
-| `inspect` | `{ "entries": <int>, "bytes": <int>, "uncompressedSize": <int>, "zip64": <bool>, "encrypted": <int>, "deterministic": <bool>, "canonicalLayout": <bool>, "diagnostics": <int>, "checksPassed"?: <bool> }` — `deterministic` is reproducibility, `canonicalLayout` is the absence of data descriptors (`create --stream` output is `true` / `false`); `stream --json --summary` selects the json report (an explicit `--format ndjson` never projects) |
+| `inspect` | `{ "entries": <int>, "bytes": <int>, "uncompressedSize": <int>, "zip64": <bool>, "encrypted": <int>, "deterministic": <bool>, "canonicalLayout": <bool>, "canonicalForm": <bool>, "unsafeNames": <int>, "symlinks": <int>, "duplicateNames": <int>, "diagnostics": <int>, "checksPassed"?: <bool> }` — the three counts are the extraction-safety facts — `deterministic` is reproducibility, `canonicalLayout` is the absence of data descriptors (`create --stream` output is `true` / `false`); `stream --json --summary` selects the json report (an explicit `--format ndjson` never projects) |
 | `verify` | `{ "ok": <bool>, "entries": <int>, "failed": <int>, "skipped": <int>, "diagnostics": <int>, "selected"?: <int>, "error"?: "ZIP_*" }` — `entries` is the archive total, `selected` the `--entry` count |
 | `stream` | `{ "entries": <int>, "bytes": <int>, "descriptorEntries": <int>, "bytesKnown": <bool>, "trust": "local-headers-only" }` — `bytes` excludes data-descriptor entries (their local headers carry zeros), `descriptorEntries` counts them, `bytesKnown` is `descriptorEntries === 0`; a `create --stream` archive therefore reads `bytes: 0, bytesKnown: false` |
 | `batch` | `{ "ok": <bool>, "command": "batch", "mode": "directory" \| "manifest", "task"?: …, "dryRun"?: <bool>, "total": <int>, "succeeded": <int>, "failed": <int>, "skipped"?: <int> }` (drops `results` / `tasks`) |
@@ -481,9 +486,10 @@ enforces.
    present, the deflate tier is `node-zlib`, workers are available if you plan
    `create --parallel`, and read the **effective limits** as numbers from the
    `limits` check's `data` (incl. `maxInputSize`).
-2. `zipnative inspect --input a.zip --json --summary` → cheap facts (entries, bytes,
-   encrypted count, reproducibility and layout verdicts, diagnostics count) before
-   touching anything. Add `--check safe-names,no-encryption,no-symlinks,max-ratio=100` to turn
+2. `zipnative inspect --input a.zip --json --summary` → cheap facts before touching
+   anything: entries, bytes, encrypted count, the reproducibility and layout verdicts and
+   the extraction-safety counts (`unsafeNames`, `symlinks`, `duplicateNames`). Gate with
+   `--check safe-names,no-symlinks,no-duplicates,no-encryption,max-ratio=100` to turn the
    policy into an exit code.
 3. `zipnative extract --input a.zip --output-dir out/ --dry-run --json` → the plan:
    every destination proven safe, existing files refused, `skipped` inventory,
@@ -491,9 +497,9 @@ enforces.
 4. `zipnative extract --input a.zip --output-dir out/ --json` → do it; read the status
    envelope from stderr.
 5. On any non-zero exit, take the last stderr line that starts with `{`, branch on
-   `error.code`, and apply `error.remedy` (the CLI flag that lifts the refusal —
-   e.g. `--skip-unsafe`, `--on-duplicate first`, `--overwrite`) only for trusted input
-   (class) then `error.zipCode` (cause): `E_SECURITY` → quarantine the archive;
+   `error.code` (class) then `error.zipCode` (cause), and apply `error.remedy` (the CLI
+   flag that lifts the refusal — e.g. `--skip-unsafe`, `--on-duplicate first`,
+   `--overwrite`) only for trusted input: `E_SECURITY` → quarantine the archive;
    `E_LIMIT` → only for trusted input, retry with the named `--max-*` (or
    `--max-input-size`) raised; `E_UNSUPPORTED` → route around the feature
    (`detail.feature`, `--skip-unsupported`); `E_PARSE` / `E_DATA` → the bytes are
@@ -509,7 +515,7 @@ For `verify` / `inspect`, read the JSON result on stdout and use `--strict` /
 run `npm run validate:zip` for any change touching what the CLI writes (`create`,
 `modify`, `batch --task create`, the corpus generator, name handling): it builds the
 CLI, drives the built binary to write the 39-archive corpus (35 conformant archives —
-30 CLI-produced or crafted, plus 3 hostile-but-conformant ones `extract` must refuse —
+32 CLI-produced or crafted, plus 3 hostile-but-conformant ones `extract` must refuse —
 and 4 raw-crafted negative canaries; expected `35 PASS, 4 XFAIL, 0 FAIL`) and
 validates every file against ISO/IEC 21320-1:2015 with an engine-independent parser.
 Level 0 needs no external tool and always runs; level 1 (foreign integrity tools)

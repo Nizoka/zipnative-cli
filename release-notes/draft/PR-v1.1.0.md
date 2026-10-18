@@ -49,7 +49,7 @@ Upstream: closes the CLI's engine asks answered by zipnative 1.1.0
 2. An undeclared, repeated or surplus flag or operand is `E_USAGE` (exit 2) before any input is
    read, including for every `batch` task (ADR 0003).
 3. `none` / `inf` on a bound is `E_USAGE` (ADR 0002).
-4. Text errors read `error E_X (ZIP_Y): message` (was `Error: message`).
+4. Text errors read `error E_X (ZIP_Y): message` (1.0.0 printed the bare message).
 5. A manifest `comment-file` resolves against the manifest directory (was the current
    directory) and is refused on `..`; a manifest task cannot carry `timeout`.
 

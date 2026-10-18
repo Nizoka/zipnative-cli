@@ -32,8 +32,8 @@ machine-readable JSON manifest run `zipnative schema manifest`.
   `--quiet` removes them, never an envelope.
 - **Flags and positionals are order-independent**: a boolean flag never
   consumes the next token (`zipnative --json list a.zip` works);
-  `--flag=false` is the explicit off form; combined short flags (`-lq`) are
-  refused. Value short aliases: `-i -o -d -e -f`; boolean: `-q -h -V`.
+  `--flag=false|0|no|off` is the explicit off form (`true|1|yes|on` on; any
+  other value is exit 2); combined short flags (`-lq`) are refused. Value short aliases: `-i -o -d -e -f`; boolean: `-q -h -V`.
 - **Strict invocation** (1.1.0): an undeclared flag, a repeated switch or
   single-value flag, surplus positionals, or an operand plus its flag →
   `E_USAGE` (exit 2), checked before any input is read (also per batch task).
@@ -235,6 +235,6 @@ On GitHub:
 - https://github.com/Nizoka/zipnative-cli/blob/main/SECURITY.md — security
   posture and disclosure.
 - https://github.com/Nizoka/zipnative-cli/blob/main/samples/README.md —
-  41 runnable `.sh` + `.ps1` demos.
+  45 runnable `.sh` + `.ps1` demos.
 - Requires Node `^22.17.1 || >=24.4.1` (a security patch floor); the package is a CommonJS bin (`dist/cli.cjs`) with no
   programmatic entry point. MIT licensed.

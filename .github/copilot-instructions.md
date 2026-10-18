@@ -78,6 +78,9 @@ src/
 │   │                  #   of the nearest existing ancestor before mkdir (+ re-check) → exclusive open → unlink on failure
 │   ├── inflight.ts    # In-flight output registry; SIGINT/SIGTERM remove exactly those files, exit 130/143
 │   ├── projection.ts  # Agent output projection (compact JSON, --summary, --fields dot-paths)
+│   ├── control.ts     # --timeout (one AbortController, E_LIMIT) and --progress (onProgress → stderr)
+│   ├── engines.ts     # Minimal engines.node range evaluator (doctor, the node-floor gate step)
+│   ├── sanitize.ts    # escapeTerminal / escapeLine: terminal-safe TEXT output (JSON stays exact)
 │   ├── config.ts      # `.zipnativerc.json` discovery + PRESENTATION-ONLY defaults (CONFIG_KEYS; every other key E_USAGE)
 │   ├── version.ts     # CLI + engine version resolution (source layout and bundled dist/)
 │   ├── colors.ts      # ANSI helper decided on stderr: NO_COLOR off, FORCE_COLOR on, TERM=dumb off, else TTY
@@ -108,7 +111,8 @@ src/
   (`zipnative --json`) → exit 2 "No command given". Bare `zipnative` → usage, exit 0.
 - Global flags are turned into env vars before dispatch: `--json` → `ZIPNATIVE_JSON=1`,
   `--dry-run` → `ZIPNATIVE_DRY_RUN=1`, `--quiet` → `ZIPNATIVE_QUIET=1`, `--strict` →
-  `ZIPNATIVE_STRICT=1`, `--pure-codecs` → `ZIPNATIVE_PURE_CODECS=1`, `--no-color` → `NO_COLOR=1`.
+  `ZIPNATIVE_STRICT=1`, `--pure-codecs` → `ZIPNATIVE_PURE_CODECS=1`, `--progress` →
+  `ZIPNATIVE_PROGRESS=1`, `--no-color` → `NO_COLOR=1`.
   The variables are also honoured when the caller sets them (an env-driven `--dry-run` prints
   no text plan under `ZIPNATIVE_JSON`).
 - `.zipnativerc.json` defaults are merged unless `--no-config`; explicit flags always win. The

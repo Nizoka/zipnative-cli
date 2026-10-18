@@ -28,7 +28,7 @@ Official CLI for the [`zipnative`](https://github.com/Nizoka/zipnative) engine �
 > `E_USAGE`** (a typo is no longer ignored), and **`--max-* none` is refused** (every bound is
 > finite). `--overwrite` now replaces a planted symlink instead of following it, text output
 > escapes terminal control characters, and the release ships through a five-job attested
-> pipeline. Migration notes: [CHANGELOG](CHANGELOG.md#security-and-behaviour-changes-migration),
+> pipeline. Migration notes: [CHANGELOG](CHANGELOG.md#security),
 > decisions: [docs/adr/](docs/adr/README.md), [release notes](release-notes/v1.1.0.md).
 >
 > ⭐ Star [`zipnative`](https://github.com/Nizoka/zipnative) — the zero-dependency ZIP engine that powers this CLI.
@@ -399,7 +399,7 @@ zipnative govern verify-issue ./draft.md        # exit 1 / E_POLICY on a violati
 
 ## Examples
 
-Ready-to-run examples are in [`samples/`](samples/), one directory per command — 41 demos,
+Ready-to-run examples are in [`samples/`](samples/), one directory per command — 45 demos,
 each shipped as a Bash (`.sh`) **and** a PowerShell (`.ps1`) pair, plus a dependency-free runner
 that replays them as 83 jobs:
 
@@ -875,7 +875,7 @@ zipnative schema status             # the --json success envelope
 zipnative schema error              # the --json error envelope
 zipnative schema errors             # E_* codes + the 39 ZIP_* → E_* mapping + diagnostics (DATA)
 zipnative schema limits             # ZipLimits: the eight bounds, defaults, CWEs, flags
-zipnative schema diagnostics        # the diagnostic shape (11 codes)
+zipnative schema diagnostics        # the diagnostic shape (12 codes)
 zipnative schema manifest           # capability manifest: commands, flags, codes, schemas (DATA)
 zipnative schema list               # list the 22 subjects
 ```
@@ -966,7 +966,8 @@ value — raise a bound for trusted input instead), and a bound cannot come from
   `{`; the other lines are text (progress, NDJSON diagnostics) that `--quiet` removes.
 - **Flags and positionals are order-independent.** A boolean flag never consumes the next
   token, so `zipnative --json list a.zip` and `zipnative list --long a.zip` both work;
-  `--flag=false|0|no|off` is the explicit off form. Combined short flags (`-lq`) and `-o=x` are
+  `--flag=false|0|no|off` is the explicit off form, `--flag=true|1|yes|on` the explicit on form;
+  any other value is refused (exit 2). Combined short flags (`-lq`) and `-o=x` are
   refused (exit 2). Short aliases that take a value: `-i`, `-o`, `-d`, `-e`, `-f`; boolean: `-q`,
   `-h`, `-V` — each means its long flag on every command that declares it. There is no `-l`.
 - **The invocation is checked before anything runs** (1.1.0). A flag the command does not

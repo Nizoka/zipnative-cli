@@ -73,11 +73,14 @@ this file wins on Claude-Code workflow specifics.
   `engine` (`prepareEngine`), `codecs` (`--codec`), `diagnostics` (the
   diagnostic sink), `entryfmt` (the `EntryRow`), `zipops` (shared flag →
   option translation, UTC dates, extra fields), `manifest`, `projection`,
-  `agent`, `colors`, `config`, `governance`.
+  `agent`, `colors`, `config`, `governance`, `control` (`--timeout` /
+  `--progress`), `engines` (the `engines.node` range check), `glob`,
+  `sanitize` (terminal-safe text), `sizes`, `version`, `walk`.
 - `src/core-bridge/index.ts` — the single import point of `zipnative` /
   `zipnative/worker` (+ `ensureCodecsReady()`, `loadParallelZip()`).
-- `scripts/` — `generate-zip-corpus.mjs` + `validate-zip.mjs` (veraZIP) +
-  `helpers/interop-tools.mjs`.
+- `scripts/` — `gate.mjs` (the definition of green), `generate-zip-corpus.mjs` +
+  `validate-zip.mjs` (veraZIP) + `helpers/interop-tools.mjs`, `package-files.mjs`,
+  `smoke-install.mjs`, `sync-engine-data.mjs`, `install-git-hooks.mjs`, `lib/`.
 - `tests/**` — vitest, in-process (stdout/stderr captured via
   `tests/helpers/capture.ts`); one spawn smoke test against `dist/cli.cjs`;
   `tests/docs/consistency.test.ts` pins the docs to the code and
@@ -103,7 +106,9 @@ A new command touches **all** of these — miss one and it half-works:
    and the docs test derive from this table. Every **boolean** flag also goes
    into `COMMAND_BOOLEAN_FLAGS` in `src/utils/flags.ts` (otherwise the parser
    makes it consume the next token); a path-valued flag goes into
-   `PATH_FLAGS` so the shells complete files. Also `src/utils/config.ts`
+   `PATH_FLAGS` so the shells complete files; a repeatable flag into
+   `REPEATABLE_FLAGS` and the operand count into `OPERANDS` (strict invocation
+   refuses anything else, and `schema manifest` publishes all four). Also `src/utils/config.ts`
    `KNOWN_COMMANDS`, `src/utils/projection.ts` `PROJECTED_COMMANDS` if it
    emits a JSON report, and `src/utils/manifest.ts` `MANIFEST_COMMANDS` +
    `batch.ts` `loadTaskCommand()` if it may run inside a manifest.

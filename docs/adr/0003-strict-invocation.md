@@ -27,6 +27,11 @@ policy the caller did not ask for. pkinative-cli refuses all of these (its audit
 - The parser (`src/utils/args.ts`) stores flags in a prototype-free record, refuses empty and
   prototype names, canonicalises the aliases (`-i`, `-o`, `-d`, `-e`, `-f`, `-h`, `-q`, `-V`) to
   their long name, and refuses a switch given twice or a flag given both bare and with a value.
+  A switch takes only `true|1|yes|on|false|0|no|off`: any other value is refused before the
+  command runs (`assertSwitchValues`) — the second 1.1.0 review found `--overwrite=flase` read
+  as ON, the very typo this decision exists to catch (pkinative-cli parity).
+- `batch` refuses a flag its current mode ignores (a create flag with `--task verify`, a
+  directory flag with `--manifest`), and a manifest task cannot set a process-wide flag.
 - The dispatcher (`assertInvocation()` in `src/commands/completion.ts`) refuses, before any input
   is read: a flag the command does not declare in `COMMANDS` (or the global table), a value flag
   given twice unless declared repeatable (`REPEATABLE_FLAGS`), more positionals than the command

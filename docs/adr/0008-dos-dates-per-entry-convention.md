@@ -29,8 +29,8 @@ contract, it is not equivalent:
 ## Decision Outcome
 
 - The CLI keeps the engine default `'local'` and its own ISO → UTC-fields normalisation
-  (`parseIsoDateUtc` in `src/utils/zipops.ts`). The 37-archive veraZIP corpus is byte-identical to
-  the 1.0.0 build.
+  (`parseIsoDateUtc` in `src/utils/zipops.ts`). The 37 archives of the veraZIP corpus inherited from
+  1.0.0 are byte-identical to the 1.0.0 build.
 - What 1.1 does replace: the CLI's own "outside the DOS range" warning. The engine now clamps an
   out-of-range date to the DOS epoch / maximum and reports `ZIP_TIMESTAMP_CLAMPED` through the
   diagnostic sink (an error under `--strict`), for explicit dates and `--mtime` alike.
@@ -40,5 +40,9 @@ contract, it is not equivalent:
 
 - Good: no archive the CLI writes changes bytes, and no timestamp it reads shifts, in a minor
   release.
+- Bad: a JSON `lastModified` is the DOS date read in the HOST's time zone, so a date pinned
+  with `--date 2020-06-01T12:00:00Z` reads `10:00Z` on a CEST host and `12:00Z` under `TZ=UTC`
+  (the text table shows the stored `12:00`). Agents that compare across hosts run with
+  `TZ=UTC` or compare `dosDate` / `dosTime` (AGENTS.md says so).
 - Neutral: the engine ask is answered and recorded as not adoptable for this convention; a future
   major could move every surface to UTC at once, deliberately.
