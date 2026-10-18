@@ -273,17 +273,23 @@ npm, before the first publish of a line:
 Every release:
 
 1. On a release branch: bump `package.json` (and `CITATION.cff`), move `[Unreleased]` in
-   `CHANGELOG.md` under the version and date, write `release-notes/vX.Y.Z.md`, run
-   `node scripts/gate.mjs --publish --require-all` locally, open the PR, merge it once every
-   required check is green.
-2. Publish the GitHub Release `vX.Y.Z` (which creates the tag) from `main`. `publish.yml`
+   `CHANGELOG.md` under the version and date, write `release-notes/vX.Y.Z.md`.
+2. Run the pre-release audit in Claude Code: `/release-audit release-notes/vX.Y.Z.md` — two
+   auditors in parallel (claims against the code and the non-negotiables; help text, the
+   surface tables and the release surfaces), an adversarial verifier, an agent-autonomy pass and
+   a GO/NO-GO ledger under `.audit/<version>/` (git-ignored). Fix what it confirms, one
+   regression test per finding; the ledger records the fix commits.
+3. Run `node scripts/gate.mjs --publish --require-all` locally, fill
+   `release-notes/draft/PR-vX.Y.Z.md` (every figure from a command that ran; the *Independent
+   audit* section from `verdict.md`), open the PR, merge it once every required check is green.
+4. Publish the GitHub Release `vX.Y.Z` (which creates the tag) from `main`. `publish.yml`
    runs `guard` (the tag must equal `v<package.json version>`), `build and pack` (the whole
    publish gate, one tarball, its SHA-256 / SHA-512), waits for the `npm-publish` approval,
    publishes exactly that tarball with provenance, then `attest and attach` fetches it back
    from the registry, checks both digests and attaches the tarball, the CycloneDX / SPDX /
    toolchain SBOMs and the Sigstore bundle to the release; `verify as a consumer` (read-only)
    installs the published version and runs `npm audit signatures`.
-3. Verify like a consumer: `npm install zipnative-cli@X.Y.Z && npm audit signatures`, and
+5. Verify like a consumer: `npm install zipnative-cli@X.Y.Z && npm audit signatures`, and
    `gh attestation verify zipnative-cli-X.Y.Z.tgz -R Nizoka/zipnative-cli`.
 
 ## Bumping the engine
@@ -384,6 +390,8 @@ src/
 scripts/                   # generate-zip-corpus.mjs, validate-zip.mjs (veraZIP), helpers/interop-tools.mjs
 tests/                     # vitest suite (mirrors src/) + tests/docs/ + tests/scripts/ + tests/helpers/ + tests/fixtures/
 samples/                   # .sh + .ps1 per command (48 demos), run-all.js (96 jobs)
+.claude/                   # settings.json (attribution off, HITL deny list) + skills/release-audit/
+.audit/                    # release-audit ledgers, one directory per version — git-ignored
 ```
 
 ## Security

@@ -254,6 +254,11 @@ Security fixes that change behaviour, each with its migration.
 - SECURITY.md: 1.1.x supported; 1.0.x receives security fixes until 2027-04-18.
 - The `[Unreleased]` entries listed after 1.0.0 shipped in the 1.0.0 tarball; they now sit
   under [1.0.0] ("Release-branch review").
+- The pre-release audit is a tracked Claude Code skill (`.claude/skills/release-audit/`: two
+  auditors, an adversarial verifier, an autonomy pass, a GO/NO-GO ledger), with a tracked
+  `.claude/settings.json` (attribution off, the GitHub and npm writes denied). Review and triage
+  reports of a release live outside the tree (`.audit/<version>/`, `.github/drafts/`) and are
+  summarised in the release PR; `release-notes/draft/` holds the PR bodies only.
 
 ### Fixed
 

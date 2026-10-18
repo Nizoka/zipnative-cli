@@ -186,6 +186,13 @@ tests.
 - Adversarial archives for tests come from `tests/helpers/raw-zip-builder.ts`
   — never commit a CLI- or engine-produced archive (see
   `tests/fixtures/README.md`).
+- `/release-audit release-notes/vX.Y.Z.md` is the maintainer's pre-release
+  audit (`.claude/skills/release-audit/`, `disable-model-invocation`): never
+  run it on your own. Its ledger lives under `.audit/<version>/`, git-ignored;
+  the release PR draft carries the summary.
+- `.claude/settings.json` is tracked: attribution off, `npm publish`,
+  `git push`, `git tag` and the `gh` writes denied. Per-machine allowances go
+  in `.claude/settings.local.json` (git-ignored).
 
 ## Governance / HITL (hard rule)
 

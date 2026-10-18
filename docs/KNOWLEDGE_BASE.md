@@ -1094,6 +1094,7 @@ npm ci
 npm run gate:fast           # typecheck:all, lint, test
 npm run gate                # --ci: + build, reproducible, bundle check, smoke, coverage, engine data, tarball list
 node scripts/gate.mjs --publish --require-all   # + samples, veraZIP (fail-closed), install smoke test
+# Pre-release audit (the maintainer, in Claude Code): /release-audit release-notes/vX.Y.Z.md → .audit/<version>/
 
 # Build (outputs dist/cli.cjs — the bin; CJS only, no ESM build, no .d.ts, no source maps)
 npm run build

@@ -480,7 +480,9 @@ Rules an agent MUST honour:
 draft locally → `govern verify-issue` → present to the human → the **human** submits.
 The printed rules and the policy JSON are pinned to `.github/AGENT_RULES.md` and
 `.github/ai-governance.json` by a test, so what `govern` prints is what the repository
-enforces.
+enforces. Before a release the maintainer runs `/release-audit` (a Claude Code skill under
+`.claude/skills/release-audit/`, never invoked by an agent on its own); its ledger is local,
+under `.audit/<version>/`, and the release PR carries the summary.
 
 ---
 
