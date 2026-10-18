@@ -1,10 +1,14 @@
 ---
-status: accepted
+status: superseded
 date: 2026-10-18
 since: 1.1.0
 ---
 
 # No flag without an effect: `maxEntryCompressedSize` is reported, not flagged
+
+> Superseded by [ADR 0011](0011-range-reading-and-the-compressed-entry-bound.md): `--range` made the
+> byte-range reader reachable, so the bound got its flag. The principle — no flag without an
+> effect — stands.
 
 ## Context and Problem Statement
 

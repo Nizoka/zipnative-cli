@@ -227,6 +227,10 @@ export async function modify(args: ParsedArgs): Promise<void> {
     const outputFlag = getStringFlag(args.flags, 'output', 'o');
     const inPlace = hasFlag(args.flags, 'in-place');
     const compact = hasFlag(args.flags, 'compact');
+    // --canonical: the compact rewrite in zipnative's canonical deterministic
+    // form (saveCompact({ canonical }), zipnative 1.1) — `canonicalize` with edits.
+    const canonical = hasFlag(args.flags, 'canonical');
+    if (canonical && !compact) throw new CliError('--canonical rewrites the archive: it requires --compact (append-only keeps the original bytes).', 2);
     const manifestPath = getStringFlag(args.flags, 'from-manifest');
     const dryRun = hasFlag(args.flags, 'dry-run') || isDryRun();
     const compression = parseCompression(args);
@@ -357,13 +361,15 @@ export async function modify(args: ParsedArgs): Promise<void> {
     }
 
     if (dryRun) {
-        emitStatus({ command: 'modify', dryRun: true, output: outputPath ?? '-', edits: applied, layout, verified, verifySkipped, tier, ...sink.field() });
+        emitStatus({ command: 'modify', dryRun: true, output: outputPath ?? '-', edits: applied, layout, ...(canonical ? { canonical } : {}), verified, verifySkipped, tier, ...sink.field() });
         return;
     }
 
     let out: Uint8Array;
     try {
-        out = compact ? modifier.saveCompact() : modifier.save();
+        out = compact
+            ? modifier.saveCompact(canonical ? { canonical: defaultDate instanceof Date ? { date: defaultDate } : true } : undefined)
+            : modifier.save();
     } catch (e) {
         throw mapZipError(e, 'Failed to save the modified archive');
     }
@@ -396,6 +402,7 @@ export async function modify(args: ParsedArgs): Promise<void> {
         bytes: out.length,
         edits: applied,
         layout,
+        ...(canonical ? { canonical } : {}),
         changed,
         verified,
         verifySkipped,

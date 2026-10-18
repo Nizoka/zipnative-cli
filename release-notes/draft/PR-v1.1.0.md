@@ -54,14 +54,14 @@ Upstream: closes the CLI's engine asks answered by zipnative 1.1.0
    directory) and is refused on `..`; a manifest task cannot carry `timeout`.
 
 No security default was loosened. `dosTimeMode` is deliberately not adopted (ADR 0008).
-`maxEntryCompressedSize` is reported without a flag (ADR 0007).
+`maxEntryCompressedSize` is behind `--max-entry-compressed-size` (ADR 0011, superseding 0007).
 
 ## Test plan
 
 - [x] `npm run typecheck:all` clean; `npm run lint` 0 errors
-- [x] `npm run test:coverage` — 1318 passed, 9 skipped, 70 files; 96.13 / 92.11 / 98.21 / 96.88
+- [x] `npm run test:coverage` — 1364 passed, 9 skipped, 74 files; 95.94 / 91.78 / 97.76 / 96.87
       (thresholds 95 / 91 / 97 / 96)
-- [x] `npm run validate:zip` — 35 PASS + 4 XFAIL; the 37 inherited archives are byte-identical
+- [x] `npm run validate:zip` — 37 PASS + 4 XFAIL; the 37 inherited archives are byte-identical
       to the 1.0.0 build (SHA-256 compared)
 - [x] `node scripts/gate.mjs --publish --require-all` — every step green (reproducible build,
       bundle probe, 10-file tarball, install smoke test)
@@ -111,7 +111,6 @@ and PRs with read-only `gh api` calls. The quality gates above were run locally.
 deviation from the plan is recorded in an ADR or in ROADMAP:
 
 - `dosTimeMode` not adopted (ADR 0008);
-- no `--max-entry-compressed-size` flag (ADR 0007);
 - the Node floor is `^22.17.1 || >=24.4.1` (Windows path CVEs; second review);
 - no `stream --codec` sample: the CLI cannot write a custom-method archive, so the case is
   covered by tests;

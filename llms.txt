@@ -73,7 +73,8 @@ machine-readable JSON manifest run `zipnative schema manifest`.
   projection), compact JSON by default under `--json` (`--pretty` opts out) —
   on `list`, `inspect`, `verify`, `stream`, `batch`.
 - **`--dry-run`** validates inputs and prints the plan without writing output
-  (`create`, `extract`, `modify`, `stream`, `cat`, `inflate`, `batch`).
+  (`create`, `canonicalize`, `merge`, `extract`, `modify`, `stream`, `cat`,
+  `inflate`, `batch`).
 - **`--progress`** (or `ZIPNATIVE_PROGRESS=1`): engine progress on stderr
   where it is measured (`create --stream` / `--stdin-name` / `--parallel`,
   `extract` without `--buffered`, `stream`, `cat`) — a text line, or NDJSON
@@ -107,7 +108,7 @@ machine-readable JSON manifest run `zipnative schema manifest`.
   `ZIP_DEAD_BYTES_RATIO`, `ZIP_TIMESTAMP_CLAMPED`) travel as `diagnostics[]`
   in envelopes and reports.
 
-## Commands (15)
+## Commands (17)
 
 - `create` — build a deterministic ZIP from files, directories, stdin
   (`--stdin-name`) or a JSON manifest (`--from-manifest`, with `extraFields`
@@ -128,7 +129,17 @@ machine-readable JSON manifest run `zipnative schema manifest`.
   sync-less-codec entries have their local header checked and are counted in
   `verifySkipped`; an unregistered method is `E_UNSUPPORTED`); default save is
   APPEND-ONLY (removed content remains recoverable; 7-Zip mis-reads the
-  layout) — `--compact` for true deletion; `--in-place`; `--overwrite`.
+  layout) — `--compact` for true deletion (`--compact --canonical`: the
+  canonical deterministic form); `--in-place`; `--overwrite`.
+- `canonicalize` — rewrite ANY archive into the canonical deterministic form
+  (`canonicalizeZip`: pinned timestamps, sorted UTF-8 names, no extras or
+  comments) without recompression; the envelope reports `deterministic` /
+  `canonicalForm` measured on the output; `--date`, `--keep-comments`,
+  `--normalize-modes`; idempotent.
+- `merge` — merge archives, or split one with `--include/--exclude`, copying
+  compressed entries (`addFromReader`); every entry VERIFIED first (no
+  opt-out); duplicate names refused unless `--on-duplicate first|last`;
+  unverifiable entries refused unless `--skip-unsupported`.
 - `list` — entries without decompressing (`text | json | ndjson`, `--long`
   adds `rawNameHex` / `commentHex`, `timestamps { mtime, atime, ctime, source }`
   and `unixIds { uid, gid }`, `--validate eager`, `--include/--exclude`).
@@ -170,9 +181,9 @@ machine-readable JSON manifest run `zipnative schema manifest`.
   `bytesOut`, `leftover`; `--overwrite`.
 - `batch` — archive every subdirectory (`--task create`, `--concurrency`
   1–64, `--overwrite`), verify every archive (`--task verify`), or run a
-  `--manifest tasks.json` pipeline with `@<id>` output references (10
-  whitelisted manifest commands: create, list, inspect, extract, cat, verify,
-  stream, modify, crc32, inflate; a `codec` flag needs `--allow-codec-load`).
+  `--manifest tasks.json` pipeline with `@<id>` output references (12
+  whitelisted manifest commands: create, modify, canonicalize, merge, list,
+  inspect, extract, cat, verify, stream, crc32, inflate; a `codec` flag needs `--allow-codec-load`).
   Under `--json` stdout is ONE batch document: each task's stdout is captured
   into `tasks[i].report` (parsed JSON / NDJSON rows) or `tasks[i].stdout`
   with `tasks[i].stdoutBytes`; tasks that would write an artefact to stdout
@@ -204,7 +215,7 @@ entries > 4 GiB (buffer instead). No network access, ever.
 ## Conformance
 
 Every archive the CLI writes is validated against ISO/IEC 21320-1:2015 by an
-engine-independent validator (veraZIP, `npm run validate:zip`; 39-archive
+engine-independent validator (veraZIP, `npm run validate:zip`; 41-archive
 corpus), blocking in CI on Linux and Windows for every pull request and before
 every publish. Conformant does not mean safe — the extraction guards exist on
 top.
@@ -235,6 +246,6 @@ On GitHub:
 - https://github.com/Nizoka/zipnative-cli/blob/main/SECURITY.md — security
   posture and disclosure.
 - https://github.com/Nizoka/zipnative-cli/blob/main/samples/README.md —
-  45 runnable `.sh` + `.ps1` demos.
+  48 runnable `.sh` + `.ps1` demos.
 - Requires Node `^22.17.1 || >=24.4.1` (a security patch floor); the package is a CommonJS bin (`dist/cli.cjs`) with no
   programmatic entry point. MIT licensed.

@@ -157,7 +157,7 @@ to their JSON format and compact it).
 `captureBytes` / `timeout` — milliseconds for the last), `{ feature }` for `E_UNSUPPORTED`, `{ expectedCrc, actualCrc }`
 for `E_DATA` / `crc32 --expect`.
 
-**On success**, `create` / `modify` / `extract` / `stream` (extract and cat
+**On success**, `create` / `modify` / `canonicalize` / `merge` / `extract` / `stream` (extract and cat
 modes, or list mode under `--dry-run`) / `cat` / `inflate` / `crc32` write a
 status line to stderr (`zipnative schema status`):
 
@@ -178,7 +178,9 @@ Command-specific fields (all confirmed against the built binary):
 | Command | Envelope fields beyond `ok`, `command`, `dryRun`, `diagnostics` |
 |---------|-------------------------------------------------------------------|
 | `create` | `output`, `entries`, `files`, `directories`, `bytesIn`, `method`, `level`, `deterministic`, `order`, `stream`, `zip64` (`--zip64`: streamed entries carry a Zip64 local header), `layout: "buffered" \| "data-descriptor"` (streamed entries), `parallel: false \| { workers }`, `skipped: [{ name, path, reason: "symlink" \| "special" \| "filtered" }]`, `tier` and `bytes` (both absent under `--dry-run`; under `--parallel` `tier` is `node-zlib` or `pure-pinned`, never `injected`) |
-| `modify` | `output`, `bytes`, `edits: [{ op, name, to? }]` (a binary comment shows as `"<N bytes>"`), `layout: "append-only" \| "compact"`, `changed` (false when the save returned the same bytes), `verified` (untouched entries verified before re-emission), `verifySkipped` (encrypted / stream-only-codec entries copied as-is), `tier` (deflate tier of new payloads) |
+| `canonicalize` | `output`, `entries`, `bytes`, `changed` (the output differs from the input), `deterministic` / `canonicalForm` (`analyzeDeterminism()` on the OUTPUT) |
+| `merge` | `output`, `inputs`, `entries`, `files`, `directories`, `order`, `layout`, `skipped: [{ name, input, reason: "filtered" \| "duplicate" \| "unsupported" }]`, `bytes` (absent under `--dry-run`) |
+| `modify` | `output`, `bytes`, `edits: [{ op, name, to? }]` (a binary comment shows as `"<N bytes>"`), `layout: "append-only" \| "compact"`, `canonical` (`--compact --canonical`), `changed` (false when the save returned the same bytes), `verified` (untouched entries verified before re-emission), `verifySkipped` (encrypted / stream-only-codec entries copied as-is), `tier` (deflate tier of new payloads) |
 | `extract` | `outputDir`, `entries`, `files`, `directories`, `bytes`, `skipped: [{ name, reason: "unsafe-path" \| "symlink" \| "filtered" \| "duplicate" \| "unsupported" }]`, `symlinksAsData` |
 | `stream` | `mode`, `trust: "local-headers-only"`, `outputDir?`, `entries`, `bytes?` (extract / cat modes), `skipped?: [{ name, reason: "unsafe-path" \| "filtered" \| "duplicate" \| "unsupported" }]`, `stoppedAt: "central-directory" \| "eof"` |
 | `cat` | `output` (`"-"` for stdout), `entries: [names]`, `bytes`, `raw`, `verifyCrc` |
@@ -220,8 +222,7 @@ selects / compacts the JSON format. Shapes worth knowing:
   carries `{ maxEntries, maxEntryUncompressedSize, maxEntryCompressedSize,
   maxTotalUncompressedSize, maxCompressionRatio, maxNameBytes, maxExtraFieldBytes,
   maxCommentBytes, maxCentralDirectoryBytes, maxInputSize }` (numbers, always finite;
-  `maxEntryCompressedSize` is the zipnative 1.1 range-reader bound, reported without a
-  flag).
+  `maxEntryCompressedSize` bounds the whole-entry fetches of `--range`).
 - **`batch --manifest` under `--json` owns stdout: one document.** Each task
   runs with its stdout captured (64 MiB cap → `E_LIMIT` `{ limit:
   "captureBytes" }`) into `tasks[i].report` (parsed JSON object, or an array of
@@ -416,7 +417,7 @@ zipnative schema entries-summary | inspect-summary | verify-summary | stream-sum
 zipnative schema status            # the --json success envelope (layout, verified, verifySkipped, bytesConsumed, tier …)
 zipnative schema error             # the --json error envelope (code, zipCode, entryName, detail)
 zipnative schema errors            # E_* codes + the 39 ZIP_* → E_* mapping + diagnostics (DATA, not a schema)
-zipnative schema limits            # ZipLimits: eight bounds, defaults, CWEs, flags
+zipnative schema limits            # ZipLimits: nine bounds, defaults, CWEs, flags
 zipnative schema diagnostics       # the diagnostic row shape (12 codes)
 zipnative schema manifest          # capability manifest: commands, flags, codes, schemas (DATA, not a schema)
 ```
@@ -514,9 +515,9 @@ For `verify` / `inspect`, read the JSON result on stdout and use `--strict` /
 **Conformance changes → veraZIP gate.** An agent working **on this repository** must
 run `npm run validate:zip` for any change touching what the CLI writes (`create`,
 `modify`, `batch --task create`, the corpus generator, name handling): it builds the
-CLI, drives the built binary to write the 39-archive corpus (35 conformant archives —
-32 CLI-produced or crafted, plus 3 hostile-but-conformant ones `extract` must refuse —
-and 4 raw-crafted negative canaries; expected `35 PASS, 4 XFAIL, 0 FAIL`) and
+CLI, drives the built binary to write the 41-archive corpus (37 conformant archives —
+34 CLI-produced or crafted, plus 3 hostile-but-conformant ones `extract` must refuse —
+and 4 raw-crafted negative canaries; expected `37 PASS, 4 XFAIL, 0 FAIL`) and
 validates every file against ISO/IEC 21320-1:2015 with an engine-independent parser.
 Level 0 needs no external tool and always runs; level 1 (foreign integrity tools)
 skips visibly when a tool is absent — set `VERAZIP_REQUIRED=1` to fail closed as CI
@@ -544,9 +545,9 @@ as an object rather than in `tasks[i].stdout` as text:
 
 `"@<id>"` references the resolved output (or output-dir) of an **earlier** task;
 relative paths resolve against the manifest's directory and manifest path values get
-the `..` refusal that argv paths do not (`E_INPUT` "Path traversal detected"); 10
-manifest commands are whitelisted — `create`, `list`, `inspect`, `extract`, `cat`,
-`verify`, `stream`, `modify`, `crc32`, `inflate` (never `batch`, `govern`, `schema`,
+the `..` refusal that argv paths do not (`E_INPUT` "Path traversal detected"); 12
+manifest commands are whitelisted — `create`, `modify`, `canonicalize`, `merge`, `list`,
+`inspect`, `extract`, `cat`, `verify`, `stream`, `crc32`, `inflate` (never `batch`, `govern`, `schema`,
 `completion`, `doctor`). Validate the file with `schema batch-manifest`, pre-flight
 with `--dry-run` (it also enforces the `--json` stdout policy), and remember: a
 `codec` flag inside a manifest additionally requires `--allow-codec-load` on the
@@ -586,8 +587,8 @@ the first failing task's `E_*` code and `zipCode`.
   leaves the original untouched); `modify --in-place` works the same way. A failed run
   never removes a file it did not create. Interrupting (SIGINT / SIGTERM) removes the
   in-flight files and exits 130 / 143.
-- **Bounded input.** The engine's eight CWE-tagged limits are always on (100000 entries,
-  1 GiB per entry, 8 GiB total, 1024:1 ratio, 4096-byte names, 65535-byte extra fields and
+- **Bounded input.** The engine's nine CWE-tagged limits are always on (100000 entries,
+  1 GiB per entry, 1 GiB + 1 MiB per entry fetched whole by `--range`, 8 GiB total, 1024:1 ratio, 4096-byte names, 65535-byte extra fields and
   comments, 256 MiB central directory) — when reading **and** when writing; tighten them
   for untrusted uploads (`--max-total-size 512m --max-ratio 50`). `--max-input-size`
   (default 4 GiB) bounds every buffered read of an archive or payload, so a huge upload
@@ -598,6 +599,14 @@ the first failing task's `E_*` code and `zipCode`.
   (`E_LIMIT`, `detail.limit: "timeout"`).
   JSON inputs are capped at 50 MB; a captured `batch --json` task stdout at 64 MiB.
   `inflate` always has an output bound.
+- **Archives larger than memory: `--range`.** `list`, `cat` and `verify --range` read a
+  regular file by byte ranges through one descriptor (zipnative `openZipRange`): only
+  the central directory and the entries asked for are fetched, `--max-input-size` does
+  not apply, and a whole-entry fetch is bounded by `--max-entry-compressed-size`.
+- **Copies are verified; nothing is laundered.** `merge` and `create` manifest `raw`
+  entries copy compressed bytes without recompression, but decode each one once first
+  (CRC-32 and size): a lying source is `E_DATA`, an unverifiable entry `E_UNSUPPORTED`
+  (or skipped with `--skip-unsupported`). `canonicalize` decodes nothing — `verify` first.
 - **Decoded names are still guarded.** `--name-encoding` only changes how a name stored
   without the UTF-8 flag is decoded; the engine applies the decoder **before**
   `sanitizeEntryPath()`, so `extract` and `stream` refuse a decoded traversal exactly like

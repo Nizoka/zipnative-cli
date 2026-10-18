@@ -3,12 +3,12 @@
 // doc edit (or a code edit) cannot silently desynchronise them.
 //
 // Sources of truth:
-//   COMMANDS (completion.ts)      — the 15-command surface and its groups
+//   COMMANDS (completion.ts)      — the 17-command surface and its groups
 //   ErrorCode (error.ts)          — the 13 stable E_* classes
 //   ZIP_TO_CLI (ziperr.ts)        — the 39 ZIP_* → E_* / exit mapping
 //   ZIP_DIAGNOSTIC_CODES          — the 12 diagnostic codes
 //   SUBJECTS (schema.ts)          — the schema subjects
-//   LIMIT_FLAGS + DEFAULT_ZIP_LIMITS — the eight --max-* bounds and their defaults
+//   LIMIT_FLAGS + DEFAULT_ZIP_LIMITS — the nine --max-* bounds and their defaults
 //   VERSION (core-bridge)         — the engine version the data files were derived from
 //   docs/data/core-exports.json   — the 106 exports of zipnative 1.1 and their CLI reach
 import { readFileSync } from 'node:fs';
@@ -57,8 +57,8 @@ function section(text: string, heading: string): string {
 }
 
 describe('command counts agree with COMMANDS', () => {
-    it('COMMANDS is the 15-command surface in four groups', () => {
-        expect(COMMANDS).toHaveLength(15);
+    it('COMMANDS is the 17-command surface in four groups', () => {
+        expect(COMMANDS).toHaveLength(17);
         expect(new Set(COMMANDS.map((c) => c.group)).size).toBe(4);
         expect([...KNOWN_COMMANDS].sort()).toEqual([...COMMAND_NAMES].sort());
     });
@@ -189,7 +189,7 @@ describe('README Global options ↔ LIMIT_FLAGS / DEFAULT_ZIP_LIMITS', () => {
     const globals = section(readme, '### Global options');
 
     it('quotes every --max-* flag with its engine default', () => {
-        expect(LIMIT_FLAGS).toHaveLength(8);
+        expect(LIMIT_FLAGS).toHaveLength(9);
         for (const spec of LIMIT_FLAGS) {
             const row = globals.split('\n').find((l) => l.includes(`\`--${spec.flag} `));
             expect(row, `README lacks --${spec.flag}`).toBeDefined();
@@ -202,7 +202,7 @@ describe('README Global options ↔ LIMIT_FLAGS / DEFAULT_ZIP_LIMITS', () => {
         const row = globals.split('\n').find((l) => l.startsWith('| `--dry-run`'));
         expect(row).toBeDefined();
         for (const cmd of DRY_RUN_COMMANDS) expect(row, cmd).toContain(`\`${cmd}\``);
-        expect(DRY_RUN_COMMANDS).toHaveLength(7);
+        expect(DRY_RUN_COMMANDS).toHaveLength(9);
     });
 });
 
@@ -222,7 +222,7 @@ describe('README schema section ↔ SUBJECTS', () => {
 
 describe('agent-surface lists', () => {
     it('AGENTS.md names every manifest command and every projected command', () => {
-        expect(MANIFEST_COMMANDS.size).toBe(10);
+        expect(MANIFEST_COMMANDS.size).toBe(12);
         const batchSection = section(agents, '## 7. Recommended agent loop');
         for (const cmd of MANIFEST_COMMANDS) expect(batchSection, cmd).toContain(`\`${cmd}\``);
         const tokenSection = section(agents, '## 3. Token economy');

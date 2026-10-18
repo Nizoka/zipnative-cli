@@ -18,7 +18,7 @@ async function capture(fn: () => Promise<void>): Promise<string> {
 }
 
 const NAMES = [
-    'create', 'modify', 'list', 'inspect', 'cat', 'extract', 'stream', 'verify', 'crc32', 'inflate',
+    'create', 'modify', 'canonicalize', 'merge', 'list', 'inspect', 'cat', 'extract', 'stream', 'verify', 'crc32', 'inflate',
     'batch', 'doctor', 'schema', 'completion', 'govern',
 ];
 
@@ -26,6 +26,8 @@ const NAMES = [
 const DISTINCTIVE: Record<string, string> = {
     create: '--from-manifest',
     modify: '--compact',
+    canonicalize: '--normalize-modes',
+    merge: '--on-duplicate',
     extract: '--output-dir',
     inspect: '--check',
     stream: '--cat',
@@ -35,30 +37,30 @@ const DISTINCTIVE: Record<string, string> = {
 };
 
 const MAX_FLAGS = [
-    '--max-entries', '--max-entry-size', '--max-total-size', '--max-ratio',
+    '--max-entries', '--max-entry-size', '--max-entry-compressed-size', '--max-total-size', '--max-ratio',
     '--max-name-bytes', '--max-extra-bytes', '--max-comment-bytes', '--max-cd-bytes',
 ];
 
 describe('completion', () => {
     afterEach(() => vi.restoreAllMocks());
 
-    it('COMMANDS is the single source of truth for the 15 commands', () => {
-        expect(COMMANDS).toHaveLength(15);
+    it('COMMANDS is the single source of truth for the 17 commands', () => {
+        expect(COMMANDS).toHaveLength(17);
         expect([...COMMAND_NAMES]).toEqual(NAMES);
-        expect(new Set(COMMAND_NAMES).size).toBe(15);
+        expect(new Set(COMMAND_NAMES).size).toBe(17);
         for (const [name, flag] of Object.entries(DISTINCTIVE)) {
             expect(COMMANDS.find((c) => c.name === name)?.flags).toContain(flag);
         }
         expect(COMMANDS.find((c) => c.name === 'schema')?.flags).toEqual([]);
     });
 
-    it('GLOBAL_FLAGS carries the agent flags, all eight --max-* bounds and --max-input-size', () => {
+    it('GLOBAL_FLAGS carries the agent flags, all nine --max-* bounds and --max-input-size', () => {
         expect(GLOBAL_FLAGS).toEqual(expect.arrayContaining(['--json', '--dry-run', '--quiet', '--strict', '--pure-codecs', '--codec', '--config', '--no-config', '--pretty', '--max-input-size', ...MAX_FLAGS]));
-        expect(GLOBAL_FLAGS.filter((f) => f.startsWith('--max-'))).toHaveLength(9);
+        expect(GLOBAL_FLAGS.filter((f) => f.startsWith('--max-'))).toHaveLength(10);
     });
 
     it('DRY_RUN_COMMANDS lists the commands that plan without writing', () => {
-        expect([...DRY_RUN_COMMANDS]).toEqual(['create', 'extract', 'modify', 'stream', 'cat', 'inflate', 'batch']);
+        expect([...DRY_RUN_COMMANDS]).toEqual(['create', 'canonicalize', 'merge', 'extract', 'modify', 'stream', 'cat', 'inflate', 'batch']);
         for (const c of DRY_RUN_COMMANDS) expect(NAMES).toContain(c);
     });
 

@@ -25,6 +25,8 @@ import {
     loadParallelZip,
     sanitizeEntryPath,
     type AddEntryOptions,
+    type RawEntryMeta,
+    DEFAULT_ZIP_LIMITS,
     type ByteSource,
     type CreateZipOptions,
     type ParallelZipWriter,
@@ -35,6 +37,8 @@ import { createDiagnosticSink } from '../utils/diagnostics.js';
 import { isPureCodecs, prepareEngine } from '../utils/engine.js';
 import { CliError, ErrorCode } from '../utils/error.js';
 import {
+    DEFAULT_MAX_INPUT_SIZE,
+    readFileOrStdin,
     readJsonInput,
     readStdin,
     readableToByteSource,
@@ -42,7 +46,8 @@ import {
     writeOutput,
     writeStreamingOutput,
 } from '../utils/io.js';
-import { parseInputSizeFlag } from '../utils/limits.js';
+import { parseInputSizeFlag, parseLimitFlags } from '../utils/limits.js';
+import { parseRawMeta, verifyRawPayload } from '../utils/rawentry.js';
 import { escapeTerminal, escapeLine } from '../utils/sanitize.js';
 import { parseByteSize } from '../utils/sizes.js';
 import { walkPaths, type SkippedPath } from '../utils/walk.js';
@@ -67,6 +72,7 @@ import {
 type Source =
     | { readonly kind: 'file'; readonly path: string; readonly size: number }
     | { readonly kind: 'bytes'; readonly data: Uint8Array }
+    | { readonly kind: 'raw'; readonly payload: Uint8Array; readonly meta: RawEntryMeta }
     | { readonly kind: 'stdin' };
 
 interface PlannedEntry {
@@ -152,10 +158,10 @@ function parseManifestCompression(raw: unknown, where: string): ZipCompressionOp
 }
 
 const MANIFEST_KEYS = new Set(['version', 'comment', 'commentBase64', 'order', 'date', 'compression', 'entries']);
-const ENTRY_KEYS = new Set(['name', 'path', 'data', 'dataBase64', 'directory', 'method', 'level', 'deterministic', 'date', 'comment', 'mode', 'extraFields']);
+const ENTRY_KEYS = new Set(['name', 'path', 'data', 'dataBase64', 'raw', 'directory', 'method', 'level', 'deterministic', 'date', 'comment', 'mode', 'extraFields']);
 
 /** Parse a `create-manifest` document into a plan (paths resolve against the manifest's directory). */
-async function planFromManifest(manifestPath: string, storeExt: Set<string>): Promise<Plan> {
+async function planFromManifest(manifestPath: string, storeExt: Set<string>, maxEntrySize: number): Promise<Plan> {
     const parsed = await readJsonInput(manifestPath, 'manifest');
     if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
         throw new CliError('--from-manifest must be a JSON object: { "entries": [...] }.', 1, ErrorCode.INPUT);
@@ -217,7 +223,27 @@ async function planFromManifest(manifestPath: string, storeExt: Set<string>): Pr
         }
 
         let source: Source;
-        if (isDirectory) {
+        if (e['raw'] !== undefined) {
+            // A pre-compressed payload (zipnative addRaw): copied verbatim, but
+            // VERIFIED first — decoded once, size and CRC-32 checked (utils/rawentry.ts).
+            if (isDirectory) throw new CliError(`${where}: a directory entry cannot carry "raw".`, 1, ErrorCode.INPUT);
+            for (const key of ['data', 'method', 'level', 'deterministic']) {
+                if (e[key] !== undefined) throw new CliError(`${where}: "raw" takes the compressed payload from "path" or "dataBase64", and its own method — "${key}" does not apply.`, 1, ErrorCode.INPUT);
+            }
+            const meta = parseRawMeta(e['raw'], where);
+            let payload: Uint8Array;
+            if (typeof e['path'] === 'string') {
+                validatePath(e['path']);
+                const buf = await readFileOrStdin(resolve(baseDir, e['path']), DEFAULT_MAX_INPUT_SIZE);
+                payload = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+            } else if (typeof e['dataBase64'] === 'string') {
+                payload = new Uint8Array(Buffer.from(e['dataBase64'], 'base64'));
+            } else {
+                throw new CliError(`${where}: "raw" needs the compressed payload in "path" or "dataBase64".`, 1, ErrorCode.INPUT);
+            }
+            verifyRawPayload(name, payload, meta, maxEntrySize);
+            source = { kind: 'raw', payload, meta };
+        } else if (isDirectory) {
             source = { kind: 'bytes', data: new Uint8Array(0) };
         } else if (typeof e['path'] === 'string') {
             validatePath(e['path']);
@@ -408,7 +434,7 @@ export async function create(args: ParsedArgs): Promise<void> {
     }
 
     const plan = manifestPath !== undefined
-        ? await planFromManifest(manifestPath, storeExt)
+        ? await planFromManifest(manifestPath, storeExt, parseLimitFlags(args)?.maxEntryUncompressedSize ?? DEFAULT_ZIP_LIMITS.maxEntryUncompressedSize)
         : await planFromPaths(args, inputs, stdinName, storeExt);
 
     const hasStdin = plan.entries.some((e) => e.source.kind === 'stdin');
@@ -435,7 +461,7 @@ export async function create(args: ParsedArgs): Promise<void> {
 
     const files = plan.entries.filter((e) => !e.isDirectory).length;
     const directories = plan.entries.length - files;
-    const bytesIn = plan.entries.reduce((n, e) => n + (e.source.kind === 'file' ? e.source.size : e.source.kind === 'bytes' ? e.source.data.length : 0), 0);
+    const bytesIn = plan.entries.reduce((n, e) => n + (e.source.kind === 'file' ? e.source.size : e.source.kind === 'bytes' ? e.source.data.length : e.source.kind === 'raw' ? e.source.meta.uncompressedSize : 0), 0);
     const method = effectiveCompression?.method ?? 'deflate';
     const level = effectiveCompression?.level ?? 6;
     const deterministic = effectiveCompression?.deterministic === true;
@@ -466,7 +492,7 @@ export async function create(args: ParsedArgs): Promise<void> {
         // artefact; the text plan would only pollute stdout.
         if (!isJsonMode()) {
             const lines = plan.entries.map((e) => {
-                const size = e.source.kind === 'file' ? e.source.size : e.source.kind === 'bytes' ? e.source.data.length : '?';
+                const size = e.source.kind === 'file' ? e.source.size : e.source.kind === 'bytes' ? e.source.data.length : e.source.kind === 'raw' ? e.source.meta.uncompressedSize : '?';
                 const m = e.isDirectory ? 'dir' : (e.options.compression?.method ?? method);
                 return `plan  ${escapeLine(e.name)}  ${size}  ${m}`;
             });
@@ -522,6 +548,9 @@ export async function create(args: ParsedArgs): Promise<void> {
             switch (e.source.kind) {
                 case 'bytes':
                     writer.add(e.name, e.source.data, e.options);
+                    break;
+                case 'raw':
+                    writer.addRaw(e.name, e.source.payload, e.source.meta, e.options);
                     break;
                 case 'file':
                     if (streaming) {

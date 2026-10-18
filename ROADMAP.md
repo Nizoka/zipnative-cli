@@ -6,10 +6,10 @@ This document outlines the planned development direction for zipnative-cli. Prio
 
 ### v1.1.0 — zipnative 1.1.0 parity and hardening _(2026-10-18)_
 
-- [x] **`zipnative` pinned** to `^1.1.0` — all 106 exports bridged (101 + 5 worker), the 12th
-  diagnostic `ZIP_TIMESTAMP_CLAMPED`, `maxEntryCompressedSize` reported by `doctor` /
-  `schema limits` without a flag (ADR 0007); `docs/data/core-exports.json` grades the exports
-  no command reaches yet as `bridged` (see "1.2 candidates" below).
+- [x] **`zipnative` pinned** to `^1.1.0` — all 106 exports bridged (101 + 5 worker) and every
+  one reachable from a command (`docs/data/core-exports.json` grades none `bridged`), the 12th
+  diagnostic `ZIP_TIMESTAMP_CLAMPED`, `maxEntryCompressedSize` behind
+  `--max-entry-compressed-size` (ADR 0011).
 - [x] **Streamed Zip64** — `create --stream|--stdin-name --zip64` (`AddEntryOptions.zip64`):
   streamed entries past 4 GiB.
 - [x] **Legacy name encodings** — `--name-encoding <label>` on `list`, `inspect`, `cat`,
@@ -35,10 +35,16 @@ This document outlines the planned development direction for zipnative-cli. Prio
 - [x] **Fuzzing of the CLI-owned parsers** (audit A-25, ADR 0010) — seeded campaigns over argv,
   sizes, durations, globs, projections, manifests, the config file, name encodings and the
   terminal escaper; one real bug found and fixed (an out-of-order glob range).
+- [x] **Every engine export reachable** (second 1.1.0 review) — `canonicalize` and
+  `modify --compact --canonical` (`canonicalizeZip`, `CompactOptions`); `merge` (`addFromReader`,
+  every entry verified); `--range` on `list` / `cat` / `verify` (`openZipRange` over one file
+  descriptor) with `--max-entry-compressed-size` (ADR 0011, superseding 0007); create-manifest
+  `raw` entries (`addRaw`, verified first) — ADR 0012. A network source (`--url`) stays out:
+  offline, always.
 - [x] **Documentation verified by tests** — relative links and anchors resolve, LF line
   endings, fixture SHA-256s, the ADR index; veraZIP re-ported from zipnative 1.1.0
   (`WF/DESCRIPTOR-WIDTH`) with a divergence test against the engine checkout; corpus of 39
-  archives (35 PASS, 4 XFAIL).
+  archives (37 PASS, 4 XFAIL).
 
 ### v1.0.0 — zipnative 1.0.0: the agent-grade ZIP CLI _(released 2026-09-05)_
 
@@ -135,27 +141,6 @@ This document outlines the planned development direction for zipnative-cli. Prio
 
 Feasibility is called out honestly: some ideas need zipnative to expose a primitive first (the
 CLI stays a thin dispatch layer and never re-implements engine logic).
-
-### 1.2 candidates — engine 1.1 capabilities bridged but not yet exposed
-
-zipnative 1.1 added 29 exports; 1.1.0 of the CLI surfaces the ones that complete existing
-commands (see the v1.1.0 section) and bridges the rest so the ledger
-(`docs/data/core-exports.json`, `reach: "bridged"`) stays complete. Each is a command-surface
-decision, not an engine wait:
-
-- **Range reading of large local archives** — `openZipRange` / `ZipRangeReader` over a
-  `ByteRangeSource` built from a local file handle (`rangeSourceFromBytes` is the in-memory
-  form) would let `list` / `inspect` / `cat` / `verify` read an archive larger than
-  `--max-input-size` without loading it, bounded by the engine's `maxEntryCompressedSize`
-  (which then gets its `--max-*` flag). A network source (`--url`) is **not** a candidate:
-  offline, always.
-- **`canonicalize` command / `modify --compact --canonical`** — `canonicalizeZip` /
-  `saveCompact({ canonical })` with `CanonicalizeOptions` / `CanonicalOptions` /
-  `CompactOptions`: the "fix" half of `inspect`'s `canonicalForm` verdict (rewrite an archive
-  from any producer into zipnative's canonical deterministic form, no recompression).
-- **Verbatim entry copy between archives** (a `merge` / `split` command) — `addFromReader` with
-  `AddFromReaderOptions` / `RawEntryReader`, and `addRaw` with `RawEntryMeta` for
-  pre-compressed payloads (`verify: true` by default, so a lying source is refused).
 
 ### 1.2 targets from the second 1.1.0 review (verified, deferred)
 

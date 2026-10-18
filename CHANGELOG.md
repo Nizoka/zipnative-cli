@@ -78,10 +78,29 @@ Security fixes that change behaviour, each with its migration.
 
 ### Added
 
-- **zipnative 1.1.0 parity.** The core bridge re-exports all **106** exports (101 from
-  `zipnative`, 5 from `zipnative/worker`); `docs/data/core-exports.json` gains a third reach
-  grade, `bridged`, for the exports no 1.1.0 command reaches yet (the range reader,
-  `canonicalizeZip`, raw entry copy — each named in [ROADMAP.md](ROADMAP.md) "1.2 candidates").
+- **zipnative 1.1.0 parity — every export reachable.** The core bridge re-exports all **106**
+  exports (101 from `zipnative`, 5 from `zipnative/worker`), and every one is reached by a
+  command (`docs/data/core-exports.json` grades none `bridged`; the grade stays defined for a
+  future export).
+- **`canonicalize`** — rewrite any archive into zipnative's canonical deterministic form
+  (`canonicalizeZip`): pinned timestamps (`--date`), names sorted and re-encoded as UTF-8, extras
+  and comments dropped (`--keep-comments`), canonical modes on request (`--normalize-modes`). No
+  recompression; idempotent; the envelope carries `deterministic` / `canonicalForm` measured on
+  the output. **`modify --compact --canonical`** applies the same form with edits
+  (`saveCompact({ canonical })`). ([ADR 0012](docs/adr/0012-copies-are-verified-canonicalisation-decodes-nothing.md))
+- **`merge`** — merge archives, or split one with `--include` / `--exclude`, copying compressed
+  entries without recompression (`addFromReader`). Every source is opened eagerly and every entry
+  verified first, with no opt-out; a duplicate name is refused unless `--on-duplicate first|last`;
+  an unverifiable entry (encrypted, unregistered method) is refused unless `--skip-unsupported`.
+- **`--range`** on `list`, `cat` and `verify` — read an archive by byte ranges through one file
+  descriptor (`openZipRange` over `fileRangeSource()`), so an archive larger than
+  `--max-input-size` is listed, read and verified without being loaded; the ninth bound,
+  **`--max-entry-compressed-size`**, limits each whole-entry fetch.
+  ([ADR 0011](docs/adr/0011-range-reading-and-the-compressed-entry-bound.md), superseding ADR 0007)
+- **Pre-compressed manifest entries** — a `create --from-manifest` entry with
+  `raw: { method, crc32, uncompressedSize }` is written with `addRaw` after the CLI decodes the
+  payload once and checks its size and CRC-32 (`ZIP_SIZE_MISMATCH` / `ZIP_CRC_MISMATCH`
+  otherwise).
 - **`create --stream --zip64`** (also with `--stdin-name`): a
   streamed entry is written with a Zip64 local header and the 24-byte data descriptor, so it may
   exceed 4 GiB (`AddEntryOptions.zip64`). Without it, an entry past 4 GiB stays refused with
@@ -115,9 +134,6 @@ Security fixes that change behaviour, each with its migration.
 - **`ZIP_TIMESTAMP_CLAMPED`**, the 12th diagnostic: a date outside the DOS range is clamped by
   the engine (before 1980 → 1980-01-01) and reported; `--strict` refuses it. The CLI's own
   range warning is gone (the engine reports it).
-- **`maxEntryCompressedSize`** is reported by `doctor` and `schema limits`, deliberately
-  without a flag: only `openZipRange()` consults it, and no 1.1.0 command opens a range reader
-  ([ADR 0007](docs/adr/0007-no-flag-without-an-effect.md)).
 - **Agent contract, completed by the second review**: `inspect --summary` carries
   `canonicalForm` and the extraction-safety facts `unsafeNames`, `symlinks`, `duplicateNames`;
   `schema manifest` gives each command its `switches`, `repeatable` and `pathFlags` and its
@@ -172,11 +188,11 @@ Security fixes that change behaviour, each with its migration.
   `noPropertyAccessFromIndexSignature`, `lib` without `dom`; ESLint adds
   `no-non-null-assertion`, `no-console` and a rule forbidding a `zipnative` import outside the
   core bridge. Coverage thresholds ratcheted to 95 / 91 / 97 / 96 (measured
-  96.13 / 92.11 / 98.21 / 96.88).
+  95.94 / 91.78 / 97.76 / 96.87).
 - **veraZIP** re-ported from zipnative 1.1.0 (`scripts/validate-zip.ts`, commit `1e2ab42`, blob
   `604321f`): the new `WF/DESCRIPTOR-WIDTH` check keys the data-descriptor width on the local
   header's Zip64 extra (APPNOTE 4.3.9.2), a 23-id vocabulary. The corpus gains `create --stream
-  --zip64` and a clamped pre-1980 `--date`: **39 archives, 35 PASS, 4 XFAIL**. When an engine
+  --zip64`, a clamped pre-1980 `--date`, `canonicalize` and `merge`: **41 archives, 37 PASS, 4 XFAIL**. When an engine
   checkout is present, the vendor test compares the pinned blobs with the upstream files at the
   installed engine's tag.
 - `samples/config` demonstrates the presentation-only contract, including a refused planted

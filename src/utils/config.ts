@@ -36,7 +36,7 @@ export const CONFIG_FILENAME = '.zipnativerc.json';
 const CONFIG_SIZE_LIMIT = 1024 * 1024; // 1 MiB — config files are small.
 
 export const KNOWN_COMMANDS: readonly string[] = [
-    'create', 'list', 'inspect', 'extract', 'cat', 'verify', 'stream', 'modify',
+    'create', 'modify', 'canonicalize', 'merge', 'list', 'inspect', 'extract', 'cat', 'verify', 'stream',
     'crc32', 'inflate', 'batch', 'doctor', 'schema', 'completion', 'govern',
 ];
 

@@ -65,6 +65,9 @@ function distCheck() {
     return failures;
 }
 
+/** The command count the built --help declares ("Commands (N)"), for the smoke step's note. @type {number | null} */
+let smokeCommands = null;
+
 /** Drive the BUILT binary the way a user would (tsup flattens src/: a path that resolves in source can fail in dist/). */
 function smoke() {
     if (!existsSync(CLI)) return ['dist/cli.cjs is missing (run build first)'];
@@ -77,7 +80,11 @@ function smoke() {
     const manifest = runCli(['schema', 'manifest', '--no-config']);
     try {
         const doc = /** @type {{ commands?: Array<{ name: string }> }} */ (JSON.parse(manifest.stdout));
-        if (doc.commands?.length !== 15) failures.push(`schema manifest lists ${String(doc.commands?.length)} commands, expected 15`);
+        // One count, two surfaces: the manifest must list what --help declares.
+        const declared = /Commands \((\d+)\)/.exec(help.stdout);
+        smokeCommands = declared === null ? null : Number(declared[1]);
+        if (smokeCommands === null) failures.push('--help does not declare "Commands (N)"');
+        else if (doc.commands?.length !== smokeCommands) failures.push(`schema manifest lists ${String(doc.commands?.length)} commands, --help declares ${smokeCommands}`);
         for (const c of doc.commands ?? []) if (!help.stdout.includes(c.name)) failures.push(`--help does not list ${c.name}`);
     } catch {
         failures.push(`schema manifest is not JSON:\n${manifest.stdout}${manifest.stderr}`);
@@ -137,7 +144,7 @@ export const STEPS = [
     { id: 'reproducible', inline: reproducible, profiles: ['ci', 'publish'] },
     { id: 'dist-check', inline: distCheck, profiles: ['ci', 'publish'] },
     { id: 'bundle-check', inline: bundleCheck, profiles: ['ci', 'publish'], note: () => 'engine external, no inlined engine code' },
-    { id: 'smoke', inline: smoke, profiles: ['ci', 'publish'], note: () => '15 commands' },
+    { id: 'smoke', inline: smoke, profiles: ['ci', 'publish'], note: () => (smokeCommands === null ? null : `${smokeCommands} commands`) },
     { id: 'node-floor', inline: nodeFloor, profiles: ['ci', 'publish'], note: () => `Node.js ${process.versions.node}` },
     // After `build`: the built-binary suites need dist/ and self-skip without it.
     { id: 'test:coverage', npmScript: 'test:coverage', profiles: ['ci', 'publish'] },

@@ -8,21 +8,23 @@ import { isStrict, progress } from './agent.js';
 import type {
     EntryVerification,
     OpenZipOptions,
+    ReadEntryOptions,
     ZipCommonOptions,
     ZipCompressionOptions,
     ZipExtraField,
+    ZipEntry,
     ZipNameDecoder,
     ZipReader,
 } from '../core-bridge/index.js';
-import { externalAttributesFromUnixMode, openZip } from '../core-bridge/index.js';
+import { externalAttributesFromUnixMode, openZip, openZipRange } from '../core-bridge/index.js';
 import { armTimeout, progressHandler, runSignal } from './control.js';
 import type { DiagnosticSink } from './diagnostics.js';
 import { CliError, ErrorCode } from './error.js';
 import { buildFilter, isPassThrough, type NameFilter } from './glob.js';
-import { readFileOrStdin } from './io.js';
+import { fileRangeSource, readFileOrStdin } from './io.js';
 import { parseInputSizeFlag, parseLimitFlags } from './limits.js';
 import { parseByteSize, parsePositiveInt } from './sizes.js';
-import { guard } from './ziperr.js';
+import { guard, mapZipError } from './ziperr.js';
 
 /**
  * The options every core entry point takes (`ZipCommonOptions`):
@@ -295,6 +297,56 @@ export function entryPasses(v: EntryVerification): boolean {
 /** `openZip` wrapped with the error mapper. */
 export function openArchive(bytes: Uint8Array, options: OpenZipOptions): ZipReader {
     return guard('Failed to open archive', () => openZip(bytes, options));
+}
+
+/**
+ * The random-access surface `list`, `cat` and `verify` need, served by the
+ * buffered `ZipReader` or by the byte-range `ZipRangeReader` (whose reads are
+ * asynchronous — callers `await` them either way).
+ */
+export interface ArchiveReader {
+    readonly entryCount: number;
+    readonly isZip64: boolean;
+    readonly comment: Uint8Array;
+    entries(): IterableIterator<ZipEntry>;
+    getEntry(name: string): ZipEntry | null;
+    readEntry(entry: ZipEntry | string, options?: ReadEntryOptions): Uint8Array | Promise<Uint8Array>;
+    readEntryRaw(entry: ZipEntry | string): Uint8Array | Promise<Uint8Array>;
+    readEntryStream(entry: ZipEntry | string, options?: ReadEntryOptions): AsyncGenerator<Uint8Array, void, undefined>;
+    verifyEntry(entry: ZipEntry | string): EntryVerification | Promise<EntryVerification>;
+}
+
+/** An opened archive: the reader, the whole bytes when buffered (null under `--range`), its size, and the release. */
+export interface ArchiveSource {
+    readonly reader: ArchiveReader;
+    readonly bytes: Uint8Array | null;
+    readonly size: number;
+    readonly range: boolean;
+    close(): Promise<void>;
+}
+
+/**
+ * Open the archive the way the invocation asks: buffered (the default,
+ * bounded by `--max-input-size`), or under `--range` through zipnative 1.1
+ * `openZipRange()` over one file descriptor — the central directory and each
+ * entry are fetched by range, each entry bounded by
+ * `--max-entry-compressed-size`, so an archive larger than memory is listed,
+ * read and verified without being loaded. Callers `close()` in `finally`.
+ */
+export async function openArchiveSource(args: ParsedArgs, inputPath: string | undefined, options: OpenZipOptions): Promise<ArchiveSource> {
+    if (hasFlag(args.flags, 'range')) {
+        const file = await fileRangeSource(inputPath);
+        try {
+            const reader = await openZipRange(file.source, options);
+            return { reader, bytes: null, size: reader.size, range: true, close: () => file.close() };
+        } catch (e) {
+            await file.close();
+            throw mapZipError(e, 'Failed to open archive');
+        }
+    }
+    const bytes = await readArchiveBytes(inputPath, args);
+    const reader = openArchive(bytes, options);
+    return { reader, bytes, size: bytes.length, range: false, close: () => Promise.resolve() };
 }
 
 /** Decode raw comment bytes as UTF-8 (lossy), for JSON/text output. */

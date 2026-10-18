@@ -48,28 +48,23 @@ afterEach(() => {
 });
 
 describe('LIMIT_FLAGS', () => {
-    it('has 8 flagged entries in ZipLimits declaration order (the engine-only key skipped)', () => {
-        expect(LIMIT_FLAGS).toHaveLength(8);
-        expect(LIMIT_FLAGS.map((l) => l.key)).toEqual(ZIP_LIMITS_ORDER.filter((k) => k !== 'maxEntryCompressedSize'));
+    it('has one flag per ZipLimits key, in declaration order (since 1.1.0 --range)', () => {
+        expect(LIMIT_FLAGS).toHaveLength(9);
+        expect(LIMIT_FLAGS.map((l) => l.key)).toEqual(ZIP_LIMITS_ORDER);
         expect(Object.keys(DEFAULT_ZIP_LIMITS)).toEqual(ZIP_LIMITS_ORDER);
         expect(LIMIT_KEYS).toEqual(ZIP_LIMITS_ORDER);
     });
 
-    it('every ZipLimits key is either flagged or engine-only, never both', () => {
+    it('every ZipLimits key is flagged; no key is engine-only any more (ADR 0011)', () => {
         const flagged = new Set(LIMIT_FLAGS.map((l) => l.key));
-        const engineOnly = ENGINE_ONLY_LIMITS.map((l) => l.key);
-        expect(engineOnly).toEqual(['maxEntryCompressedSize']);
-        for (const k of engineOnly) expect(flagged.has(k)).toBe(false);
-        expect(flagged.size + engineOnly.length).toBe(LIMIT_KEYS.length);
-        for (const l of ENGINE_ONLY_LIMITS) {
-            expect(l.cwe).toMatch(/^CWE-\d+$/);
-            expect(l.reason).toContain('openZipRange');
-        }
+        expect(ENGINE_ONLY_LIMITS).toEqual([]);
+        expect(flagged.size).toBe(LIMIT_KEYS.length);
+        expect(LIMIT_FLAGS.find((l) => l.key === 'maxEntryCompressedSize')).toMatchObject({ flag: 'max-entry-compressed-size', cwe: 'CWE-770' });
     });
 
     it('uses distinct --max-* flag names with a kind, a CWE and a description', () => {
         const flags = LIMIT_FLAGS.map((l) => l.flag);
-        expect(new Set(flags).size).toBe(8);
+        expect(new Set(flags).size).toBe(9);
         for (const l of LIMIT_FLAGS) {
             expect(l.flag).toMatch(/^max-[a-z-]+$/);
             expect(['size', 'count', 'ratio']).toContain(l.kind);

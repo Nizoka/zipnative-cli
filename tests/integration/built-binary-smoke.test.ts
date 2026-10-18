@@ -44,10 +44,10 @@ describe.skipIf(!existsSync(BIN))('integration: built binary smoke (dist/cli.cjs
         await rm(dir, { recursive: true, force: true }).catch(() => undefined);
     });
 
-    it('--help lists the 15 commands', () => {
+    it('--help lists the 17 commands', () => {
         const r = zipnative(['--help']);
         expect(r.status).toBe(0);
-        expect(r.stdout).toContain('Commands (15)');
+        expect(r.stdout).toContain('Commands (17)');
         for (const name of ['create', 'modify', 'list', 'inspect', 'cat', 'extract', 'stream', 'verify', 'crc32', 'inflate', 'batch', 'doctor', 'schema', 'completion', 'govern']) {
             expect(r.stdout).toMatch(new RegExp(`^  ${name}\\s`, 'm'));
         }
@@ -66,13 +66,13 @@ describe.skipIf(!existsSync(BIN))('integration: built binary smoke (dist/cli.cjs
         expect(doc).toEqual({ name: 'zipnative-cli', version: PKG.version, zipnative: expect.stringMatching(/^\d+\.\d+\.\d+/) });
     });
 
-    it('schema manifest exposes 15 commands from the bundle', () => {
+    it('schema manifest exposes 17 commands from the bundle', () => {
         const r = zipnative(['schema', 'manifest']);
         expect(r.status).toBe(0);
         const doc = JSON.parse(r.stdout) as { kind: string; version: string; commands: { name: string }[]; zipErrorCodes: string[] };
         expect(doc.kind).toBe('capability-manifest');
         expect(doc.version).toBe(PKG.version);
-        expect(doc.commands).toHaveLength(15);
+        expect(doc.commands).toHaveLength(17);
         expect(doc.zipErrorCodes).toHaveLength(39);
     });
 
@@ -84,7 +84,7 @@ describe.skipIf(!existsSync(BIN))('integration: built binary smoke (dist/cli.cjs
         const byName = new Map(doc.checks.map((c) => [c.name, c]));
         expect(byName.get('deflate-tier')?.value).toBe('node-zlib');
         expect(byName.get('workers')?.status).toBe('ok');
-        expect(byName.get('commands')?.value).toBe('15');
+        expect(byName.get('commands')?.value).toBe('17');
     });
 
     it('create --parallel (worker pool) then verify --format json round-trips through the bundle', async () => {

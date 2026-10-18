@@ -39,7 +39,9 @@ Global options (any command):
                     under --json; off under --quiet
   --max-entries <n>            Security bounds (zipnative ZipLimits), always
   --max-entry-size <size>      finite and positive. Defaults: 100000 entries,
-  --max-total-size <size>      1 GiB per entry, 8 GiB total, ratio 1024:1,
+  --max-entry-compressed-size <size>
+                               1 GiB per entry, 1 GiB + 1 MiB per entry
+  --max-total-size <size>      fetched by --range, 8 GiB total, ratio 1024:1,
   --max-ratio <n>              4096-byte names, 65535-byte extra fields and
   --max-name-bytes <size>      comments, 256 MiB central directory.
   --max-extra-bytes <size>     <size> accepts 65536, 512k, 1m, 8g, 1GiB.
@@ -81,12 +83,15 @@ zipnative-cli — Official CLI for zipnative
 Usage:
   zipnative <command> [options]
 
-Commands (15):
+Commands (17):
 
  Create & modify
   create      Build a deterministic ZIP from files, dirs, stdin or a manifest
   modify      Incremental edits: add/replace/remove/rename/comment (append-only
               or --compact)
+  canonicalize  Rewrite any archive into the canonical deterministic form
+  merge       Merge archives (or split one with filters): entries copied
+              verified, never recompressed
 
  Read & extract
   list        List archive entries (text | json | ndjson)
@@ -200,6 +205,69 @@ directories, bytes, bytesIn, method, level, deterministic, tier, order, stream,
 zip64, layout, parallel, skipped, diagnostics }.
 `;
 
+const CANONICALIZE_USAGE = `\
+zipnative canonicalize — Rewrite an archive into the canonical form
+
+Usage:
+  zipnative canonicalize <in.zip> -o <out.zip> [--date epoch|<ISO>]
+  zipnative canonicalize --input <in.zip> -o - > out.zip
+
+The "fix" half of inspect --check canonical-form (zipnative canonicalizeZip):
+timestamps pinned, entries sorted by raw name bytes, names re-encoded as UTF-8
+(flag bit 11), extra fields and comments dropped, version-made-by and internal
+attributes constant. NO recompression: payloads are copied bit for bit, so an
+encrypted or corrupt entry travels unchanged (run verify first). Running it
+twice yields the same bytes.
+
+Options:
+  --input,   -i       Archive path (default: stdin)
+  --output,  -o       Output path ("-" = stdout); required
+  --date epoch|<ISO>  Timestamp of every entry (default: the DOS epoch; an ISO
+                      date is UTC wall-clock, as in create). "now" is refused:
+                      it is not a canonical form
+  --keep-comments     Keep the archive and entry comments
+  --normalize-modes   Write the canonical modes (0644 files, 0755 dirs)
+                      instead of keeping each entry's external attributes
+  --overwrite         Replace an existing --output file (default: refuse, E_IO)
+  --dry-run           Canonicalise and report; write nothing
+
+Envelope (--json): { output, entries, bytes, changed, deterministic,
+canonicalForm } — the last two measured on the OUTPUT by analyzeDeterminism.
+`;
+
+const MERGE_USAGE = `\
+zipnative merge — Merge archives (or split one) without recompression
+
+Usage:
+  zipnative merge <a.zip> <b.zip>... -o <out.zip>
+  zipnative merge <a.zip> --include 'docs/**' -o <docs.zip>      (split)
+
+Each entry's COMPRESSED bytes are transplanted with its method, CRC, sizes,
+timestamp, attributes, comment and extra fields (zipnative addFromReader).
+Every source is opened eagerly and every entry is VERIFIED (CRC-32 and size)
+before it is copied — no opt-out: a lying source is refused, never laundered.
+
+Options:
+  --input,   -i       Source archive (repeatable; positionals too; "-" =
+                      stdin, once)
+  --output,  -o       Output path ("-" = stdout); required
+  --include <glob>    Keep only matching names (repeatable)
+  --exclude <glob>    Drop matching names (repeatable)
+  --on-duplicate error|first|last  A name present in two sources (default
+                      error; the same directory twice is one directory)
+  --order canonical|insertion  Entry order (default canonical; insertion =
+                      sources in argv order, entries in directory order)
+  --comment <text>    Archive comment (--comment-file <path> for raw bytes)
+  --skip-unsupported  Leave out entries that cannot be verified (encrypted, or
+                      a method no registered codec decodes) instead of
+                      refusing (E_UNSUPPORTED)
+  --overwrite         Replace an existing --output file (default: refuse, E_IO)
+  --dry-run           Plan and verify; write nothing
+
+Envelope (--json): { output, inputs, entries, files, directories, order,
+layout, skipped: [{ name, input, reason }], bytes }.
+`;
+
 const LIST_USAGE = `\
 zipnative list — List archive entries without decompressing anything
 
@@ -212,6 +280,11 @@ Options:
   --format, -f text|json|ndjson   (default text; json under --json)
   --long              Add mode, flags, versions, offsets and extra fields
   --validate lazy|eager       Cross-check every local header up front (eager)
+  --range             Read the archive by byte ranges through one file
+                      descriptor (zipnative openZipRange): only the central
+                      directory is fetched, so an archive larger than memory
+                      lists; --max-input-size does not apply. A regular file
+                      only, not stdin
   --include <glob>    Keep only matching names (repeatable)
   --exclude <glob>    Drop matching names (repeatable)
   --name-encoding <label>  Decode names WITHOUT the UTF-8 flag with this
@@ -277,6 +350,12 @@ Options:
   --overwrite         Replace an existing --output file (default: refuse, E_IO)
   --raw               Output the COMPRESSED payload (zero-copy), no decoding
   --no-verify-crc     Skip the CRC-32 check at the end of the stream
+  --range             Read the archive by byte ranges through one file
+                      descriptor (zipnative openZipRange): only the central
+                      directory and the requested entries are fetched, in
+                      chunks (--raw fetches the whole compressed entry,
+                      bounded by --max-entry-compressed-size); never bounded
+                      by --max-input-size. A regular file only, not stdin
   --name-encoding <label>  Decode non-UTF-8 names (as in \`list\`) — --entry
                       then matches the decoded name
   --dry-run           Resolve the entries and report their sizes; output nothing
@@ -384,6 +463,10 @@ Options:
   --date epoch|now|<ISO>     Timestamp for new payloads (default: DOS epoch)
   --compact                  Canonical rewrite (saveCompact): removed data is
                              truly gone, still no recompression
+  --canonical                With --compact: write zipnative's canonical
+                             deterministic form (epoch or --date timestamps,
+                             sorted names, no extras or comments), as
+                             canonicalize does
   --in-place                 Write back to the input path (exclusive temp
                              file + atomic rename)
   --output,  -o              Output path (default: stdout)
@@ -421,6 +504,11 @@ Options:
                       \`list\`), with --entry only
   --format, -f text|json  (default text; json under --json)
   --strict            Also fail when any diagnostic was emitted
+  --range             Read the archive by byte ranges through one file
+                      descriptor (zipnative openZipRange): each entry is
+                      fetched and verified one at a time, bounded by
+                      --max-entry-compressed-size, never by --max-input-size.
+                      A regular file only, not stdin
   --summary           { ok, entries, failed, skipped, diagnostics, selected?,
                         error? }
   --fields a,b.c      Dot-path projection
@@ -593,6 +681,8 @@ review before anything is submitted under a human identity.
 const COMMAND_USAGE: Readonly<Record<string, string>> = {
     create: CREATE_USAGE,
     modify: MODIFY_USAGE,
+    canonicalize: CANONICALIZE_USAGE,
+    merge: MERGE_USAGE,
     list: LIST_USAGE,
     inspect: INSPECT_USAGE,
     cat: CAT_USAGE,
@@ -612,6 +702,8 @@ async function loadCommand(name: string): Promise<CommandFn> {
     switch (name) {
         case 'create': return (await import('./commands/create.js')).create;
         case 'modify': return (await import('./commands/modify.js')).modify;
+        case 'canonicalize': return (await import('./commands/canonicalize.js')).canonicalize;
+        case 'merge': return (await import('./commands/merge.js')).merge;
         case 'list': return (await import('./commands/list.js')).list;
         case 'inspect': return (await import('./commands/inspect.js')).inspect;
         case 'cat': return (await import('./commands/cat.js')).cat;

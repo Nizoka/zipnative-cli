@@ -48,11 +48,11 @@ afterEach(async () => {
 });
 
 describe('KNOWN_COMMANDS and CONFIG_KEYS', () => {
-    it('lists all 15 commands', () => {
-        expect(KNOWN_COMMANDS).toHaveLength(15);
+    it('lists all 17 commands', () => {
+        expect(KNOWN_COMMANDS).toHaveLength(17);
         expect([...KNOWN_COMMANDS].sort()).toEqual([
-            'batch', 'cat', 'completion', 'crc32', 'create', 'doctor', 'extract', 'govern', 'inflate',
-            'inspect', 'list', 'modify', 'schema', 'stream', 'verify',
+            'batch', 'canonicalize', 'cat', 'completion', 'crc32', 'create', 'doctor', 'extract', 'govern', 'inflate',
+            'inspect', 'list', 'merge', 'modify', 'schema', 'stream', 'verify',
         ]);
     });
 

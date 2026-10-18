@@ -487,6 +487,27 @@ const CORPUS = [
         },
     },
     {
+        // `canonicalize` (zipnative 1.1 canonicalizeZip): the data-descriptor
+        // archive above rewritten into the canonical form, payloads copied.
+        file: 'canonicalized.zip',
+        run: (f) => cli(f, ['canonicalize', dest('stream-parity-chunked.zip'), '-o', dest(f)]),
+        after: (f) => {
+            cli(`${f} (inspect)`, ['inspect', dest(f), '--check', 'canonical-form,deterministic', '--json', '--summary']);
+            assertSameContent('stream-parity-chunked.zip', f, 'stream layout vs canonicalized');
+        },
+    },
+    {
+        // `merge` (zipnative 1.1 addFromReader): two corpus archives combined,
+        // every entry verified and copied without recompression.
+        file: 'merged.zip',
+        run: (f) => cli(f, ['merge', dest('deterministic-a.zip'), dest('streaming-descriptor.zip'), '-o', dest(f)]),
+        after: (f) => {
+            const names = inspectEntries(f).map((e) => e.name).sort().join(',');
+            const want = [...inspectEntries('deterministic-a.zip'), ...inspectEntries('streaming-descriptor.zip')].map((e) => e.name).sort().join(',');
+            if (names !== want) fail(f, [`merged entries ${names} ≠ ${want}`]);
+        },
+    },
+    {
         file: 'incremental-original.zip',
         run: (f) => cli(f, ['create', '--from-manifest', manifestFile('incremental.json', {
             entries: [

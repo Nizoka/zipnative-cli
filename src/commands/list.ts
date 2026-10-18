@@ -19,10 +19,10 @@ import {
     commonOptions,
     bytesToHex,
     decodeComment,
-    openArchive,
+    type ArchiveReader,
+    openArchiveSource,
     parseFormat,
     parseNameFilter,
-    readArchiveBytes,
     resolveInputPath,
 } from '../utils/zipops.js';
 
@@ -74,12 +74,26 @@ export async function list(args: ParsedArgs): Promise<void> {
     const long = hasFlag(args.flags, 'long');
     const filter = parseNameFilter(args);
 
-    const bytes = await readArchiveBytes(resolveInputPath(args), args);
     const sink = createDiagnosticSink(format === 'ndjson' && isJsonMode());
-    const reader = openArchive(bytes, {
+    // Buffered by default; --range reads the archive by byte ranges (never whole).
+    const source = await openArchiveSource(args, resolveInputPath(args), {
         ...commonOptions(args, sink, 'list'),
         ...(validate !== undefined ? { validate } : {}),
     });
+    try {
+        render(args, source.reader, source.size, { format, long, filter, sink });
+    } finally {
+        await source.close();
+    }
+}
+
+function render(
+    args: ParsedArgs,
+    reader: ArchiveReader,
+    size: number,
+    o: { readonly format: 'text' | 'json' | 'ndjson'; readonly long: boolean; readonly filter: ReturnType<typeof parseNameFilter>; readonly sink: ReturnType<typeof createDiagnosticSink> },
+): void {
+    const { format, long, filter, sink } = o;
 
     const rows: EntryRow[] = guard('Failed to read the central directory', () => {
         const out: EntryRow[] = [];
@@ -108,7 +122,7 @@ export async function list(args: ParsedArgs): Promise<void> {
 
     const report: ListReport = {
         archive: {
-            bytes: bytes.length,
+            bytes: size,
             entryCount: reader.entryCount,
             isZip64: reader.isZip64,
             comment: decodeComment(reader.comment),

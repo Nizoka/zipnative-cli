@@ -26,7 +26,7 @@ import { parseLimitFlags } from '../utils/limits.js';
 import { emitJsonReport, warnTextProjection } from '../utils/projection.js';
 import { escapeTerminal, escapeLine } from '../utils/sanitize.js';
 import { guard, mapZipError } from '../utils/ziperr.js';
-import { commonOptions, entryPasses, openArchive, parseFormat, readArchiveBytes, resolveInputPath } from '../utils/zipops.js';
+import { type ArchiveSource, commonOptions, entryPasses, openArchive, openArchiveSource, parseFormat, readArchiveBytes, resolveInputPath } from '../utils/zipops.js';
 
 type VerifiedEntry = ZipVerificationReport['entries'][number];
 
@@ -148,6 +148,48 @@ function verifySelected(bytes: Uint8Array, args: ParsedArgs, names: readonly str
     };
 }
 
+/**
+ * `--range`: the same per-entry verdict through zipnative 1.1 `openZipRange()`
+ * — the archive is opened eagerly (structure first) by byte ranges and every
+ * entry (or every `--entry`) goes through `verifyEntry()`, one entry in memory
+ * at a time, each fetch bounded by `--max-entry-compressed-size`. The archive
+ * rule is verifyZip's own ({@link entryPasses}).
+ */
+async function verifyRange(args: ParsedArgs, inputPath: string | undefined, names: readonly string[]): Promise<{ core: CoreOutcome; diagnostics: readonly DiagnosticRow[] }> {
+    const sink = createDiagnosticSink();
+    let source: ArchiveSource;
+    try {
+        source = await openArchiveSource(args, inputPath, { ...commonOptions(args, sink, 'verify'), validate: 'eager' });
+    } catch (e) {
+        // A structural refusal is the report's `error`, as with verifyZip.
+        if (!(e instanceof CliError) || e.zipCode === undefined) throw e;
+        return { core: { ok: false, error: { code: e.zipCode, message: e.message }, entryCount: 0, entries: [] }, diagnostics: sink.diagnostics };
+    }
+    try {
+        const reader = source.reader;
+        const targets = names.length > 0
+            ? names.map((name) => {
+                const entry = guard('Failed to read the central directory', () => reader.getEntry(name));
+                if (entry === null) {
+                    throw new CliError(`Entry not found: ${name} (run \`zipnative list\` for the exact names).`, 1, ErrorCode.NOT_FOUND, { entryName: name, zipCode: 'ZIP_ENTRY_NOT_FOUND' });
+                }
+                return entry;
+            })
+            : guard('Failed to read the central directory', () => [...reader.entries()]);
+        const entries: VerifiedEntry[] = [];
+        for (const entry of targets) {
+            try {
+                entries.push({ name: entry.name, ...(await reader.verifyEntry(entry)) });
+            } catch (e) {
+                throw mapZipError(e, `Cannot verify entry "${entry.name}"`, entry.name);
+            }
+        }
+        return { core: { ok: entries.every(entryPasses), error: null, entryCount: reader.entryCount, entries }, diagnostics: sink.diagnostics };
+    } finally {
+        await source.close();
+    }
+}
+
 export async function verify(args: ParsedArgs): Promise<void> {
     await prepareEngine(args);
     const format = parseFormat(args, ['text', 'json'] as const, isJsonMode() ? 'json' : 'text');
@@ -160,8 +202,12 @@ export async function verify(args: ParsedArgs): Promise<void> {
     }
 
     const inputPath = resolveInputPath(args);
-    const bytes = await readArchiveBytes(inputPath, args);
-    const { core, diagnostics } = selected.length > 0 ? verifySelected(bytes, args, selected) : verifyAll(bytes, args);
+    const { core, diagnostics } = hasFlag(args.flags, 'range')
+        ? await verifyRange(args, inputPath, selected)
+        : await (async () => {
+            const bytes = await readArchiveBytes(inputPath, args);
+            return selected.length > 0 ? verifySelected(bytes, args, selected) : verifyAll(bytes, args);
+        })();
 
     // verifyZip's archive rule: a design-time skip with a matching local
     // header passes; everything else that is not ok — corrupt, a mismatching

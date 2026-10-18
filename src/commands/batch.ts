@@ -110,6 +110,8 @@ async function loadTaskCommand(name: string): Promise<CommandFn> {
         case 'verify': return (await import('./verify.js')).verify;
         case 'stream': return (await import('./stream.js')).stream;
         case 'modify': return (await import('./modify.js')).modify;
+        case 'canonicalize': return (await import('./canonicalize.js')).canonicalize;
+        case 'merge': return (await import('./merge.js')).merge;
         case 'crc32': return (await import('./crc32.js')).crc32;
         case 'inflate': return (await import('./inflate.js')).inflate;
         default:

@@ -22,7 +22,7 @@ import { validatePath } from './io.js';
 
 /** Commands a manifest task may invoke. Meta/orchestration commands never are. */
 export const MANIFEST_COMMANDS: ReadonlySet<string> = new Set([
-    'create', 'list', 'inspect', 'extract', 'cat', 'verify', 'stream', 'modify', 'crc32', 'inflate',
+    'create', 'modify', 'canonicalize', 'merge', 'list', 'inspect', 'extract', 'cat', 'verify', 'stream', 'crc32', 'inflate',
 ]);
 
 /** Global flags that act on the whole process, never on one task. */
@@ -313,7 +313,7 @@ export function assertCodecPolicy(plan: ManifestPlan, allowCodecLoad: boolean): 
 }
 
 /** Commands whose stdout IS the artefact unless `output` redirects it. */
-const ARTEFACT_TO_STDOUT: ReadonlySet<string> = new Set(['create', 'modify', 'cat', 'inflate']);
+const ARTEFACT_TO_STDOUT: ReadonlySet<string> = new Set(['create', 'modify', 'canonicalize', 'merge', 'cat', 'inflate']);
 
 /**
  * `batch --manifest` in JSON mode owns stdout (one document). A task that

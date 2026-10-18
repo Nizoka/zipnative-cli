@@ -62,7 +62,7 @@ describe('doctor', () => {
         expect(doc.checks.every((c) => c.status !== 'error')).toBe(true);
     });
 
-    it('reports the CLI version, Node >= 22, the engine and the registered command count', async () => {
+    it('reports the CLI version, the Node floor, the engine and the registered command count', async () => {
         const doc = JSON.parse(await capture(() => doctor(parseArgs(['--format', 'json'])))) as DoctorReport;
         const byName = new Map(doc.checks.map((c) => [c.name, c]));
         expect(byName.get('cli')?.value).toMatch(/^\d+\.\d+\.\d+/);
@@ -70,7 +70,7 @@ describe('doctor', () => {
         expect(byName.get('node')?.status).toBe('ok');
         expect(byName.get('zipnative')?.status).toBe('ok');
         expect(byName.get('zipnative')?.value).toMatch(/^\d+\.\d+\.\d+/);
-        expect(byName.get('commands')?.value).toBe('15');
+        expect(byName.get('commands')?.value).toBe('17');
         expect(byName.get('web-streams')).toMatchObject({ status: 'ok', value: 'available' });
         expect(byName.get('workers')?.status).toBe('ok');
         expect(byName.get('workers')?.detail).toContain('zip-worker.js');

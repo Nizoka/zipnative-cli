@@ -135,6 +135,10 @@ const JOBS = [
   { category: 'list', id: '01-table', stdout: OUT('list', '01-table.txt'), args: ['list', '--input', OUT('list', 'archive.zip'), '--long'] },
   { category: 'list', id: '02-json-fields', stdout: OUT('list', '02-json-fields.json'), args: ['list', '--input', OUT('list', 'archive.zip'), '--format', 'json', '--fields', 'entries.name,entries.uncompressedSize'] },
   { category: 'list', id: '03-ndjson', stdout: OUT('list', '03-ndjson.ndjson'), args: ['list', '--input', OUT('list', 'archive.zip'), '--format', 'ndjson', '--include', '**/*.md'] },
+  { category: 'list', id: '05-range-setup', args: ['create', INPUT_DIR, '--output', OUT('list', '05-range.zip')] },
+  { category: 'list', id: '05-range-buffered-refused', expectExit: 1, expectCode: 'E_LIMIT', args: ['list', '--input', OUT('list', '05-range.zip'), '--max-input-size', '1k', '--json', '--summary'] },
+  { category: 'list', id: '05-range', args: ['list', '--input', OUT('list', '05-range.zip'), '--range', '--max-input-size', '1k', '--json', '--summary'] },
+  { category: 'list', id: '05-range-verify', args: ['verify', '--input', OUT('list', '05-range.zip'), '--range', '--max-input-size', '1k', '--json', '--summary'] },
   {
     category: 'list', id: '04-name-encoding', stdout: OUT('list', '04-name-encoding.json'),
     args: ['list', '--input', IN('legacy', 'shift-jis-names.zip'), '--name-encoding', 'shift_jis', '--long', '--format', 'json', '--fields', 'entries.name,entries.nameEncoding,entries.rawNameHex'],
@@ -206,6 +210,22 @@ const JOBS = [
   { category: 'modify', id: '02-compact', args: ['modify', '--input', OUT('modify', '01-append-only.zip'), '--output', OUT('modify', '02-compact.zip'), '--remove', 'extra/pattern.bin', '--compact', '--json'] },
   { category: 'modify', id: '03-rename-and-comment', args: ['modify', '--input', OUT('modify', 'base.zip'), '--output', OUT('modify', '03-rename-and-comment.zip'), '--rename', 'text/notes.md=text/NOTES.md', '--comment', 'renamed by samples/run-all.js', '--compact', '--json'] },
   { category: 'modify', id: '04-from-manifest', args: ['modify', '--input', OUT('modify', 'base.zip'), '--output', OUT('modify', '04-from-manifest.zip'), '--from-manifest', IN('manifest', 'edits.json'), '--compact', '--json'] },
+
+  // ── canonicalize ────────────────────────────────────────────────────────
+  { category: 'canonicalize', id: '01-canonicalize', args: ['canonicalize', join(ROOT_DIR, 'tests', 'fixtures', 'interop', 'bsdtar-basic.zip'), '-o', OUT('canonicalize', '01-canonical.zip'), '--json'] },
+  { category: 'canonicalize', id: '01-gate', args: ['inspect', '--input', OUT('canonicalize', '01-canonical.zip'), '--summary', '--check', 'canonical-form'] },
+  {
+    category: 'canonicalize', id: '01-idempotent', args: ['canonicalize', OUT('canonicalize', '01-canonical.zip'), '-o', OUT('canonicalize', '01-again.zip'), '--json'],
+    after: () => byteIdentical(OUT('canonicalize', '01-canonical.zip'), OUT('canonicalize', '01-again.zip')),
+  },
+
+  // ── merge ───────────────────────────────────────────────────────────────
+  { category: 'merge', id: '00-setup-text', args: ['create', IN('text'), '--output', OUT('merge', 'text.zip')] },
+  { category: 'merge', id: '00-setup-unicode', args: ['create', IN('unicode'), '--output', OUT('merge', 'unicode.zip')] },
+  { category: 'merge', id: '01-merge', args: ['merge', OUT('merge', 'text.zip'), OUT('merge', 'unicode.zip'), '-o', OUT('merge', 'all.zip'), '--json'] },
+  { category: 'merge', id: '01-verify', args: ['verify', '--input', OUT('merge', 'all.zip'), '--json', '--summary'] },
+  { category: 'merge', id: '01-split', args: ['merge', OUT('merge', 'all.zip'), '--include', '**/*.md', '-o', OUT('merge', 'md-only.zip'), '--json'] },
+  { category: 'merge', id: '01-duplicate-refused', expectExit: 1, expectCode: 'E_INPUT', args: ['merge', OUT('merge', 'text.zip'), OUT('merge', 'text.zip'), '-o', OUT('merge', 'dup.zip'), '--json'] },
 
   // ── crc32 ───────────────────────────────────────────────────────────────
   { category: 'crc32', id: '01-file', stdout: OUT('crc32', '01-file.json'), args: ['crc32', IN('text', 'readme.txt'), IN('binary', 'pattern.bin'), '--format', 'json'] },

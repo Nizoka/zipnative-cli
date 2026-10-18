@@ -1,7 +1,6 @@
 // `--max-*` flags → `Partial<ZipLimits>`.
 //
-// Eight individual flags (one per CLI-reachable `ZipLimits` key — see
-// ENGINE_ONLY_LIMITS for the one 1.1 bound without a flag) rather than a JSON blob:
+// Nine individual flags (one per `ZipLimits` key) rather than a JSON blob:
 // they complete in every shell, they are flat keys in `.zipnativerc.json`
 // (global or command-scoped), and PowerShell quoting of JSON on argv is
 // hostile. Values are pre-validated so `ZIP_LIMIT_INVALID` is unreachable
@@ -25,10 +24,11 @@ export interface LimitFlag {
     readonly description: string;
 }
 
-/** The eight limit flags, in `ZipLimits` declaration order (engine-only keys skipped). */
+/** The nine limit flags, in `ZipLimits` declaration order (one per key since 1.1.0 `--range`). */
 export const LIMIT_FLAGS: readonly LimitFlag[] = [
     { flag: 'max-entries', key: 'maxEntries', kind: 'count', cwe: 'CWE-400', description: 'Maximum central-directory entry count' },
     { flag: 'max-entry-size', key: 'maxEntryUncompressedSize', kind: 'size', cwe: 'CWE-400', description: 'Maximum decompressed size of a single entry' },
+    { flag: 'max-entry-compressed-size', key: 'maxEntryCompressedSize', kind: 'size', cwe: 'CWE-770', description: 'Maximum compressed size of a single entry fetched by the byte-range reader (--range)' },
     { flag: 'max-total-size', key: 'maxTotalUncompressedSize', kind: 'size', cwe: 'CWE-400', description: 'Maximum total decompressed size across an extraction' },
     { flag: 'max-ratio', key: 'maxCompressionRatio', kind: 'ratio', cwe: 'CWE-409', description: 'Maximum uncompressed/compressed ratio (entries ≥ 1 KiB compressed)' },
     { flag: 'max-name-bytes', key: 'maxNameBytes', kind: 'size', cwe: 'CWE-400', description: 'Maximum entry-name length in bytes' },
@@ -38,11 +38,10 @@ export const LIMIT_FLAGS: readonly LimitFlag[] = [
 ];
 
 /**
- * A `ZipLimits` key the CLI reports but deliberately exposes no flag for.
- * `maxEntryCompressedSize` (zipnative 1.1, CWE-770) is consulted only by the
- * byte-range reader (`openZipRange`), which no 1.1.0 command reads through:
- * a `--max-*` flag for it would be accepted and have no effect — a report
- * that lies (docs/adr/0007). `doctor` and `schema limits` still show it.
+ * A `ZipLimits` key the CLI would report without a flag. Empty since 1.1.0:
+ * `maxEntryCompressedSize` gained `--max-entry-compressed-size` when `--range`
+ * made the byte-range reader reachable (docs/adr/0011, superseding 0007). Kept
+ * so a future engine bound without a CLI surface has its place.
  */
 export interface EngineOnlyLimit {
     readonly key: keyof ZipLimits;
@@ -53,15 +52,7 @@ export interface EngineOnlyLimit {
     readonly reason: string;
 }
 
-export const ENGINE_ONLY_LIMITS: readonly EngineOnlyLimit[] = [
-    {
-        key: 'maxEntryCompressedSize',
-        kind: 'size',
-        cwe: 'CWE-770',
-        description: 'Maximum compressed size of a single entry fetched by the byte-range reader',
-        reason: 'consulted only by openZipRange(), which no zipnative-cli 1.1 command reads through',
-    },
-];
+export const ENGINE_ONLY_LIMITS: readonly EngineOnlyLimit[] = [];
 
 /** Every `ZipLimits` key, in the engine's declaration order (flagged and engine-only). */
 export const LIMIT_KEYS: readonly (keyof ZipLimits)[] = Object.keys(DEFAULT_ZIP_LIMITS) as (keyof ZipLimits)[];

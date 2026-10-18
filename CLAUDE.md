@@ -58,7 +58,7 @@ this file wins on Claude-Code workflow specifics.
 - `src/index.ts` — entry point: USAGE strings (one per command + the global
   block), `loadCommand()` dispatch, global flags → `ZIPNATIVE_*` env, config
   merge, agent error envelope.
-- `src/commands/*.ts` — one file per command (15), each exporting a single
+- `src/commands/*.ts` — one file per command (17), each exporting a single
   `async function <name>(args: ParsedArgs): Promise<void>`; `completion.ts`
   holds the `COMMANDS` table (the single source of truth for the surface).
 - `src/utils/*.ts` — `args` (arg parsing), `flags` (the boolean-flag table:
@@ -69,13 +69,14 @@ this file wins on Claude-Code workflow specifics.
   `stream`: lexical + realpath containment, duplicate policy, exclusive open,
   partial-file removal), `inflight` (SIGINT / SIGTERM cleanup of the files
   being written, exit 130 / 143), error codes, `ziperr` (the 39-code
-  mapping), `limits` (the eight `--max-*` flags + `--max-input-size`),
+  mapping), `limits` (the nine `--max-*` flags + `--max-input-size`),
   `engine` (`prepareEngine`), `codecs` (`--codec`), `diagnostics` (the
   diagnostic sink), `entryfmt` (the `EntryRow`), `zipops` (shared flag →
   option translation, UTC dates, extra fields), `manifest`, `projection`,
   `agent`, `colors`, `config`, `governance`, `control` (`--timeout` /
   `--progress`), `engines` (the `engines.node` range check), `glob`,
-  `sanitize` (terminal-safe text), `sizes`, `version`, `walk`.
+  `sanitize` (terminal-safe text), `rawentry` (verified manifest `raw`
+  entries), `sizes`, `version`, `walk`.
 - `src/core-bridge/index.ts` — the single import point of `zipnative` /
   `zipnative/worker` (+ `ensureCodecsReady()`, `loadParallelZip()`).
 - `scripts/` — `gate.mjs` (the definition of green), `generate-zip-corpus.mjs` +

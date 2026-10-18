@@ -1,6 +1,6 @@
 # zipnative-cli — Samples
 
-A comprehensive collection of runnable samples covering every command of zipnative-cli, organized by command: **45 demos**, each a **`.sh` + `.ps1` pair** with identical behaviour, plus a dependency-free runner (`run-all.js`, **83 jobs**) that exercises the same invocations from Node.js.
+A comprehensive collection of runnable samples covering every command of zipnative-cli, organized by command: **48 demos**, each a **`.sh` + `.ps1` pair** with identical behaviour, plus a dependency-free runner (`run-all.js`, **96 jobs**) that exercises the same invocations from Node.js.
 
 > **Generated archives are not committed.** All output goes to `samples/output/` which is git-ignored. The committed inputs under `samples/input/` are tiny, deterministic and text-only — except one 4 KiB pattern binary and one 139-byte foreign archive with legacy Shift_JIS names (see [Committed input archive](#committed-input-archive)) — so every `--deterministic` build hashes the same on every machine.
 
@@ -71,8 +71,10 @@ samples/
 │   ├── config/.zipnativerc.json  Presentation defaults: { pretty, list: { format, long }, inspect: { format, summary } }
 │   ├── config-unsafe/.zipnativerc.json  { extract: { overwrite, skip-unsafe } } — refused (E_USAGE)
 │   └── govern/draft-{good,bad}.md  HITL drafts for `govern verify-issue` (bad one proposes `npm install some-lib`)
+├── canonicalize/                 Make any archive reproducible (canonical form), idempotently
+├── merge/                        Merge archives / split one, every entry verified, nothing recompressed
 ├── create/                       Build archives: basic, store/deflate, deterministic, manifest, stdin, parallel, comments, streamed Zip64
-├── list/                         Central-directory listing: table, JSON + --fields, NDJSON, legacy name encodings
+├── list/                         Central-directory listing: table, JSON + --fields, NDJSON, legacy name encodings, --range
 ├── inspect/                      Forensic report, --check gates, --strict diagnostics, canonical form + offenders
 ├── extract/                      Secure extraction: basic, globs + --flat, --dry-run, refusals
 ├── cat/                          Stream entries to stdout (decoded and --raw)
@@ -110,6 +112,18 @@ Build a deterministic ZIP from files, directories, stdin or a manifest.
 | [07-comment-and-order.sh](create/07-comment-and-order.sh) / [.ps1](create/07-comment-and-order.ps1) | `--comment`, `--entry-comment name=text`, `--order insertion` (the **argv order**, directories still name-sorted — how an EPUB gets `mimetype` first), `--date <ISO>` (UTC wall-clock, 2-second resolution); what `inspect` reports for each |
 | [08-zip64-stream.sh](create/08-zip64-stream.sh) / [.ps1](create/08-zip64-stream.ps1) | `--stdin-name --stream --zip64`: a Zip64 local header and the 24-byte data descriptor, so a streamed entry may exceed 4 GiB; `list --long` flags D and Z; `inspect --check zip64` |
 
+## canonicalize Samples
+
+| File | Description |
+|------|-------------|
+| [01-canonicalize.sh](canonicalize/01-canonicalize.sh) / [.ps1](canonicalize/01-canonicalize.ps1) | The foreign bsdtar fixture is not in the canonical form; `canonicalize` rewrites it (no recompression), `inspect --check canonical-form` passes, and canonicalising again yields the same bytes |
+
+## merge Samples
+
+| File | Description |
+|------|-------------|
+| [01-merge-and-split.sh](merge/01-merge-and-split.sh) / [.ps1](merge/01-merge-and-split.ps1) | Merge two archives (every entry verified, nothing recompressed), split the result with `--include`, and the duplicate-name refusal (`E_INPUT`, `--on-duplicate first\|last` to pick one) |
+
 ## list Samples
 
 List archive entries without decompressing anything.
@@ -119,6 +133,7 @@ List archive entries without decompressing anything.
 | [01-table.sh](list/01-table.sh) / [.ps1](list/01-table.ps1) | Text table, `--long` (mode + flags; no `-l` short form — flags and positionals are order-independent), `--validate eager`, `--include` glob |
 | [02-json-fields.sh](list/02-json-fields.sh) / [.ps1](list/02-json-fields.ps1) | `--format json`, `--summary`, `--fields entries.name,entries.uncompressedSize`, compact vs `--pretty` under `--json` |
 | [03-ndjson.sh](list/03-ndjson.sh) / [.ps1](list/03-ndjson.ps1) | `--format ndjson` — one row per line, filtered with `--exclude` and a shell / `ConvertFrom-Json` pipeline |
+| [05-range.sh](list/05-range.sh) / [.ps1](list/05-range.ps1) | `--range`: an archive above `--max-input-size` is refused buffered (`E_LIMIT`) but listed, read and verified by byte ranges |
 | [04-name-encoding.sh](list/04-name-encoding.sh) / [.ps1](list/04-name-encoding.ps1) | A legacy archive without the UTF-8 flag: CP437 mojibake by default, `--name-encoding shift_jis` decodes 日本語/挨拶.txt; `nameEncoding: "custom"`, `rawNameHex` keeps the bytes |
 
 ## inspect Samples
@@ -260,7 +275,7 @@ the same rule as [tests/fixtures/](../tests/fixtures/README.md):
 `samples/run-all.js` executes a declarative table of CLI invocations (one or more per sample) directly with Node.js — no shell needed — and asserts what the scripts assert: byte identity for the deterministic and parallel builds, `stream` vs `extract` parity, and the expected exit code + `E_*` code for every failure demo.
 
 ```bash
-node samples/run-all.js                     # every job (83 jobs across the 45 demos)
+node samples/run-all.js                     # every job (96 jobs across the 48 demos)
 node samples/run-all.js --category extract  # one directory's jobs
 node samples/run-all.js --clean             # wipe samples/output/ first
 node samples/run-all.js --verbose           # echo every command line

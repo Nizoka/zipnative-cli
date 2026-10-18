@@ -6,7 +6,7 @@ title: "zipnative-cli — Official CLI for the zipnative ZIP engine"
 abstract: >-
   A zero-extra-dependency command-line interface for zipnative — a
   pure-TypeScript, safe-by-default, deterministic, streaming ZIP engine.
-  zipnative-cli exposes 15 commands over the engine's frozen 1.0 surface:
+  zipnative-cli exposes 17 commands over the engine's frozen 1.x surface:
   creating reproducible archives (canonical order, pinned timestamps, a
   pinned pure-TS encoder for identical SHA-256 on every runtime, streaming
   and worker-parallel writers), listing and forensic inspection without
@@ -15,10 +15,11 @@ abstract: >-
   (zip-slip, symlink, overlap, duplicate-path and decompression-bomb
   refusals on by default), forward-only reading of unseekable streams,
   one-call deep integrity verification, CRC-32 and bounded raw-DEFLATE
-  decoding, incremental modification without recompression, and batch
+  decoding, incremental modification, canonicalisation and merging without
+  recompression (archives larger than memory read by byte ranges), and batch
   and manifest orchestration. An agent-first contract — a global --json
   envelope carrying a stable error class and the engine's frozen ZIP_*
-  code verbatim, --dry-run, --strict, eight CWE-tagged security bounds,
+  code verbatim, --dry-run, --strict, nine CWE-tagged security bounds,
   versioned JSON Schemas and a capability manifest — lets autonomous AI
   agents and CI pipelines drive the CLI deterministically, offline, under
   a human-in-the-loop governance model. Every archive the CLI writes is

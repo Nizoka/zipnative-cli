@@ -105,9 +105,9 @@ describe('schema', () => {
         expect(doc.zipnative).toBe(engineVersion());
         expect(doc.contract.network).toContain('none');
         expect(Object.keys(doc.contract.exitCodes).sort()).toEqual(['0', '1', '130', '143', '2']);
-        expect(doc.commands).toHaveLength(15);
+        expect(doc.commands).toHaveLength(17);
         expect(doc.commands.map((c) => c.name)).toEqual([
-            'create', 'modify', 'list', 'inspect', 'cat', 'extract', 'stream', 'verify', 'crc32', 'inflate',
+            'create', 'modify', 'canonicalize', 'merge', 'list', 'inspect', 'cat', 'extract', 'stream', 'verify', 'crc32', 'inflate',
             'batch', 'doctor', 'schema', 'completion', 'govern',
         ]);
         for (const c of doc.commands) {
@@ -120,9 +120,9 @@ describe('schema', () => {
         expect(doc.zipErrorCodes).toEqual([...ZIP_ERROR_CODES]);
         expect(doc.diagnosticCodes).toHaveLength(12);
         expect(doc.diagnosticCodes).toEqual([...ZIP_DIAGNOSTIC_CODES]);
-        expect(doc.limits).toHaveLength(8);
+        expect(doc.limits).toHaveLength(9);
         expect(doc.limits[0]).toEqual({ flag: '--max-entries', key: 'maxEntries', default: 100000, cwe: 'CWE-400' });
-        expect(doc.manifestCommands).toHaveLength(10);
+        expect(doc.manifestCommands).toHaveLength(12);
         expect(doc.manifestCommands).not.toContain('batch');
         expect(doc.dryRunCommands).toEqual(expect.arrayContaining(['create', 'extract', 'modify']));
         expect(doc.projectedCommands).toEqual(['list', 'inspect', 'verify', 'stream', 'batch']);
@@ -155,7 +155,7 @@ describe('schema', () => {
         expect(doc.properties.error.properties.zipCode.enum).toHaveLength(39);
     });
 
-    it('the limits schema carries the nine ZipLimits bounds (eight flagged) with engine defaults', () => {
+    it('the limits schema carries the nine ZipLimits bounds, each flagged, with engine defaults', () => {
         const doc = buildSchema('limits') as { properties: Record<string, { default: number; description: string }> };
         expect(Object.keys(doc.properties)).toEqual([
             'maxEntries', 'maxEntryUncompressedSize', 'maxEntryCompressedSize', 'maxTotalUncompressedSize', 'maxCompressionRatio',
@@ -163,9 +163,9 @@ describe('schema', () => {
         ]);
         expect(doc.properties['maxEntries']?.default).toBe(100000);
         expect(doc.properties['maxCompressionRatio']?.description).toContain('--max-ratio');
-        // zipnative 1.1: reported with its default, deliberately without a flag.
+        // zipnative 1.1, flagged since 1.1.0 --range (ADR 0011).
         expect(doc.properties['maxEntryCompressedSize']?.default).toBe(1024 ** 3 + 1024 ** 2);
-        expect(doc.properties['maxEntryCompressedSize']?.description).toContain('no flag');
+        expect(doc.properties['maxEntryCompressedSize']?.description).toContain('--max-entry-compressed-size');
     });
 
     it('the diagnostics schema enumerates the twelve codes and the doctor schema the ten checks', () => {
@@ -180,6 +180,6 @@ describe('schema', () => {
         expect(stream.properties.trust.const).toBe('local-headers-only');
         expect(stream.properties.mode.const).toBe('list');
         const bm = buildSchema('batch-manifest') as { properties: { tasks: { items: { properties: { command: { enum: string[] } } } } } };
-        expect(bm.properties.tasks.items.properties.command.enum).toHaveLength(10);
+        expect(bm.properties.tasks.items.properties.command.enum).toHaveLength(12);
     });
 });

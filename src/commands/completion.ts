@@ -34,7 +34,7 @@ export const GLOBAL_FLAGS: readonly string[] = [
 ];
 
 /** Commands that honour `--dry-run` (validate + plan, write nothing). */
-export const DRY_RUN_COMMANDS: readonly string[] = ['create', 'extract', 'modify', 'stream', 'cat', 'inflate', 'batch'];
+export const DRY_RUN_COMMANDS: readonly string[] = ['create', 'canonicalize', 'merge', 'extract', 'modify', 'stream', 'cat', 'inflate', 'batch'];
 
 const COMPRESSION_FLAGS = ['--method', '--level', '--deterministic'];
 const PROJECTION_FLAGS = ['--summary', '--fields'];
@@ -59,14 +59,26 @@ export const COMMANDS: readonly CommandSpec[] = [
         summary: 'Incremental edits: add/replace/remove/rename/comment, append-only or compact',
         flags: [
             '--input', '--output', '--add', '--add-dir', '--replace', '--remove', '--rename', '--comment', '--comment-file',
-            ...COMPRESSION_FLAGS, '--date', '--compact', '--in-place', '--from-manifest', '--overwrite',
+            ...COMPRESSION_FLAGS, '--date', '--compact', '--canonical', '--in-place', '--from-manifest', '--overwrite',
         ],
+    },
+    {
+        name: 'canonicalize',
+        group: 'Create & modify',
+        summary: 'Rewrite any archive into the canonical deterministic form (no recompression)',
+        flags: ['--input', '--output', '--date', '--keep-comments', '--normalize-modes', '--overwrite'],
+    },
+    {
+        name: 'merge',
+        group: 'Create & modify',
+        summary: 'Merge archives (or split one with filters): entries copied verified, never recompressed',
+        flags: ['--input', '--output', ...FILTER_FLAGS, '--on-duplicate', '--order', '--comment', '--comment-file', '--skip-unsupported', '--overwrite'],
     },
     {
         name: 'list',
         group: 'Read & extract',
         summary: 'List archive entries (text | json | ndjson)',
-        flags: ['--input', '--format', '--long', '--validate', ...FILTER_FLAGS, '--name-encoding', ...PROJECTION_FLAGS],
+        flags: ['--input', '--format', '--long', '--validate', ...FILTER_FLAGS, '--name-encoding', '--range', ...PROJECTION_FLAGS],
     },
     {
         name: 'inspect',
@@ -78,7 +90,7 @@ export const COMMANDS: readonly CommandSpec[] = [
         name: 'cat',
         group: 'Read & extract',
         summary: 'Stream one or more entries to stdout',
-        flags: ['--input', '--entry', '--output', '--raw', '--no-verify-crc', '--name-encoding', '--overwrite'],
+        flags: ['--input', '--entry', '--output', '--raw', '--no-verify-crc', '--name-encoding', '--range', '--overwrite'],
     },
     {
         name: 'extract',
@@ -104,7 +116,7 @@ export const COMMANDS: readonly CommandSpec[] = [
         name: 'verify',
         group: 'Integrity & codecs',
         summary: 'Deep integrity verification (CRC, sizes, local headers, diagnostics)',
-        flags: ['--input', '--entry', '--name-encoding', '--format', ...PROJECTION_FLAGS],
+        flags: ['--input', '--entry', '--name-encoding', '--range', '--format', ...PROJECTION_FLAGS],
     },
     {
         name: 'crc32',
@@ -167,6 +179,8 @@ export const GLOBAL_REPEATABLE_FLAGS: readonly string[] = ['codec'];
 export const REPEATABLE_FLAGS: Readonly<Record<string, readonly string[]>> = {
     create: ['input', 'include', 'exclude', 'entry-comment'],
     modify: ['add', 'add-dir', 'remove', 'rename', 'replace'],
+    canonicalize: [],
+    merge: ['input', 'include', 'exclude'],
     list: ['include', 'exclude'],
     inspect: ['entry', 'check'],
     cat: ['entry'],
@@ -194,6 +208,8 @@ export const OPERANDS: Readonly<Record<string, OperandRule>> = {
     inspect: { max: 1, for: 'input' },
     cat: { max: Infinity },
     extract: { max: 1, for: 'input' },
+    canonicalize: { max: 1, for: 'input' },
+    merge: { max: Infinity },
     stream: { max: 1, for: 'input' },
     verify: { max: 1, for: 'input' },
     crc32: { max: Infinity },

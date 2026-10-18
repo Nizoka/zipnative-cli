@@ -14,8 +14,8 @@
       "name": "AddFromReaderOptions",
       "kind": "interface",
       "subpath": ".",
-      "reach": "bridged",
-      "via": "not exposed in 1.1.0 — ROADMAP \"1.2 candidates\": addFromReader() (verbatim entry copy between archives, e.g. a merge command)"
+      "reach": "capability",
+      "via": "merge: addFromReader(reader, entry, { verify: true }) — every entry verified, no opt-out"
     },
     {
       "name": "AnalyzeDeterminismOptions",
@@ -28,8 +28,8 @@
       "name": "ByteRangeSource",
       "kind": "interface",
       "subpath": ".",
-      "reach": "bridged",
-      "via": "not exposed in 1.1.0 — ROADMAP \"1.2 candidates\": the { size, read(offset, length) } source openZipRange takes"
+      "reach": "capability",
+      "via": "fileRangeSource() in utils/io.ts: { size, read(offset, length) } over one descriptor of a regular file (--range)"
     },
     {
       "name": "ByteSource",
@@ -42,15 +42,15 @@
       "name": "CanonicalOptions",
       "kind": "interface",
       "subpath": ".",
-      "reach": "bridged",
-      "via": "not exposed in 1.1.0 — ROADMAP \"1.2 candidates\": { date, keepComments, keepExternalAttributes } of saveCompact({ canonical })"
+      "reach": "capability",
+      "via": "canonicalize; modify --compact --canonical (saveCompact({ canonical: { date } }))"
     },
     {
       "name": "CanonicalizeOptions",
       "kind": "interface",
       "subpath": ".",
-      "reach": "bridged",
-      "via": "not exposed in 1.1.0 — ROADMAP \"1.2 candidates\": options of canonicalizeZip"
+      "reach": "capability",
+      "via": "canonicalize: --date, --keep-comments, --normalize-modes"
     },
     {
       "name": "CodecCompressOptions",
@@ -63,8 +63,8 @@
       "name": "CompactOptions",
       "kind": "interface",
       "subpath": ".",
-      "reach": "bridged",
-      "via": "not exposed in 1.1.0 — ROADMAP \"1.2 candidates\": saveCompact({ canonical }); modify --compact calls saveCompact() without it"
+      "reach": "capability",
+      "via": "modify --compact --canonical (saveCompact({ canonical }))"
     },
     {
       "name": "CreateZipOptions",
@@ -224,15 +224,15 @@
       "name": "RawEntryMeta",
       "kind": "interface",
       "subpath": ".",
-      "reach": "bridged",
-      "via": "not exposed in 1.1.0 — ROADMAP \"1.2 candidates\": addRaw() metadata (pre-compressed payloads)"
+      "reach": "capability",
+      "via": "create --from-manifest entries with \"raw\": { method, crc32, uncompressedSize } → addRaw, after the CLI decodes and checks the payload"
     },
     {
       "name": "RawEntryReader",
       "kind": "interface",
       "subpath": ".",
-      "reach": "bridged",
-      "via": "not exposed in 1.1.0 — ROADMAP \"1.2 candidates\": the reader shape addFromReader() copies from"
+      "reach": "capability",
+      "via": "merge: the buffered ZipReader each source is opened as (eager validation)"
     },
     {
       "name": "ReadEntryOptions",
@@ -476,8 +476,8 @@
       "name": "ZipRangeReader",
       "kind": "interface",
       "subpath": ".",
-      "reach": "bridged",
-      "via": "not exposed in 1.1.0 — ROADMAP \"1.2 candidates\": the async random-access reader openZipRange returns"
+      "reach": "capability",
+      "via": "list / cat / verify --range (entries, getEntry, readEntryStream, readEntryRaw, verifyEntry)"
     },
     {
       "name": "ZipReader",
@@ -553,8 +553,8 @@
       "name": "canonicalizeZip",
       "kind": "function",
       "subpath": ".",
-      "reach": "bridged",
-      "via": "not exposed in 1.1.0 — ROADMAP \"1.2 candidates\": a canonicalize command / modify --compact --canonical (the \"fix\" half of inspect canonicalForm)"
+      "reach": "capability",
+      "via": "canonicalize (canonicalizeZip(bytes, { date, keepComments, keepExternalAttributes }))"
     },
     {
       "name": "crc32",
@@ -665,15 +665,15 @@
       "name": "openZipRange",
       "kind": "function",
       "subpath": ".",
-      "reach": "bridged",
-      "via": "not exposed in 1.1.0 — ROADMAP \"1.2 candidates\": a byte-range reader over a local file handle would lift --max-input-size without loading the archive (no network source: offline, always)"
+      "reach": "capability",
+      "via": "openArchiveSource() under --range: list, cat, verify (an archive larger than --max-input-size, never loaded whole)"
     },
     {
       "name": "rangeSourceFromBytes",
       "kind": "function",
       "subpath": ".",
-      "reach": "bridged",
-      "via": "not exposed in 1.1.0 — ROADMAP \"1.2 candidates\": the in-memory ByteRangeSource adapter (tests / the range-reader path)"
+      "reach": "capability",
+      "via": "the in-memory ByteRangeSource adapter; the CLI uses fileRangeSource() (one file descriptor) — re-exported for tests and parity"
     },
     {
       "name": "registerCodec",

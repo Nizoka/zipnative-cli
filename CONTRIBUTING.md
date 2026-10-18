@@ -65,9 +65,9 @@ npm run validate:zip   # build + corpus + veraZIP validation (see below)
 
 All new code must include tests. Coverage thresholds (enforced by `vitest.config.ts`, the single
 source of truth): **statements 95 %, branches 91 %, functions 97 %, lines 96 %** — ratcheted for
-1.1.0 from the measured 96.13 / 92.11 / 98.21 / 96.88 (2026-10-18), one point below the actuals
+1.1.0 from the measured 95.94 / 91.78 / 97.76 / 96.87 (2026-10-18), within one point of the actuals
 (1.0.0 kept three). Never lower them to make a
-change pass — add tests. The suite is 70 files / 1327 tests (9 are platform- or checkout-conditional
+change pass — add tests. The suite is 74 files / 1373 tests (9 are platform- or checkout-conditional
 and skip with a stated reason).
 
 Tests run the command functions **in-process** with `process.stdout` / `process.stderr` captured
@@ -82,7 +82,7 @@ committed archives are the two foreign-provenance interop fixtures listed in
 The documentation is part of the test surface — update the docs, not the tests:
 
 - **`tests/docs/consistency.test.ts`** pins README, `llms.txt`, AGENTS.md, the knowledge base,
-  SECURITY.md, CITATION.cff and the USAGE strings to the code: the 15-command count in every
+  SECURITY.md, CITATION.cff and the USAGE strings to the code: the 17-command count in every
   document; the 13 `E_*` codes (every token in the docs is real, every code is documented in
   AGENTS.md and `llms.txt`); the 106-export map (`docs/data/core-exports.json` ↔ KB §8 ↔ the
   bridge); the 39 `ZIP_*` codes and 12 diagnostics (`docs/data/errors.json` ↔ `ZIP_TO_CLI` ↔
@@ -112,11 +112,11 @@ Because of these relations, **CI runs on documentation changes too** (see below)
 
 ZIP has no reference validator the way PDF/A has veraPDF, so the CLI ships its own gate.
 `npm run validate:zip` builds `dist/cli.cjs`, drives the **built** CLI (plus an
-engine-independent raw builder for the canaries) to write a **39-archive corpus** to
+engine-independent raw builder for the canaries) to write a **41-archive corpus** to
 `test-output/zip/` with a `manifest.json` (`scripts/generate-zip-corpus.mjs`), then validates
 every archive against **ISO/IEC 21320-1:2015** (Document Container File — the
 ISO-standardised ZIP profile) with `scripts/validate-zip.mjs` and compares each verdict with
-the manifest's expectation. The expected verdict is **35 PASS, 4 XFAIL, 0 FAIL**.
+the manifest's expectation. The expected verdict is **37 PASS, 4 XFAIL, 0 FAIL**.
 
 **Independence.** `validate-zip.mjs` is **vendored** from the engine
 (`zipnative/scripts/validate-zip.ts`, commit `1e2ab42`, zipnative 1.1.0; the upstream commit and blob hashes
@@ -128,10 +128,10 @@ engine with the engine. When upstream's `validate-zip.ts` changes, re-port the p
 (`../zipnative` or `$ZIPNATIVE_ENGINE_CHECKOUT`), the vendor test also compares the pinned blobs
 with the upstream files at the tag of the installed engine and fails on divergence.
 
-**The corpus.** 35 conformant archives (39 = 35 + 4) cover every writer path (buffered,
+**The corpus.** 37 conformant archives (41 = 37 + 4) cover every writer path (buffered,
 `--stream` (and `--stream --zip64`, whose 8-byte data descriptor the `WF/DESCRIPTOR-WIDTH`
 check pairs with the local header's Zip64 extra), `--parallel`, `--deterministic`, a
-pre-1980 `--date` clamped to the DOS epoch, store / deflate, string and binary comments
+pre-1980 `--date` clamped to the DOS epoch, `canonicalize` (checked against `--check canonical-form`), `merge` (checked entry for entry), store / deflate, string and binary comments
 (`--comment-file`), `--order insertion` (an EPUB-style `mimetype`-first layout), manifest
 `extraFields`, directory entries, `modify` append-only and `--compact`, `--from-manifest`,
 `batch`). Three of them are **hostile-but-conformant** (zip-slip, a Windows device name,
@@ -361,8 +361,8 @@ The CLI is agent-native (see [AGENTS.md](AGENTS.md)). When you add or change a c
 src/
 ├── index.ts               # CLI entry: parse argv → env flags → config merge → dispatch → exit;
 │                          #   EPIPE guard, SIGINT/SIGTERM cleanup, the agent error envelope
-├── commands/              # one file per command (15) — create, modify, list, inspect, cat,
-│                          #   extract, stream, verify, crc32, inflate, batch, doctor, schema,
+├── commands/              # one file per command (17) — create, modify, canonicalize, merge,
+│                          #   list, inspect, cat, extract, stream, verify, crc32, inflate, batch, doctor, schema,
 │                          #   completion (the COMMANDS table + PATH_FLAGS), govern
 ├── utils/
 │   ├── args.ts            # zero-dep arg parser (boolean table aware, order-independent)
@@ -374,7 +374,7 @@ src/
 │   ├── inflight.ts        # files being written, removed on SIGINT / SIGTERM
 │   ├── ziperr.ts          # ZIP_TO_CLI (39 codes → E_*), mapZipError / guard
 │   ├── error.ts           # CliError + the 13 E_* codes
-│   ├── limits.ts          # the eight --max-* flags → ZipLimits, plus --max-input-size
+│   ├── limits.ts          # the nine --max-* flags → ZipLimits, plus --max-input-size
 │   ├── engine.ts          # prepareEngine (codecs + node:zlib tier)
 │   ├── diagnostics.ts     # the diagnostics sink (text | --json | --strict)
 │   ├── zipops.ts          # shared flag → core-option translation (dates, modes, extra fields)
@@ -383,7 +383,7 @@ src/
     └── index.ts           # the ONLY import point of zipnative / zipnative/worker
 scripts/                   # generate-zip-corpus.mjs, validate-zip.mjs (veraZIP), helpers/interop-tools.mjs
 tests/                     # vitest suite (mirrors src/) + tests/docs/ + tests/scripts/ + tests/helpers/ + tests/fixtures/
-samples/                   # .sh + .ps1 per command (45 demos), run-all.js (83 jobs)
+samples/                   # .sh + .ps1 per command (48 demos), run-all.js (96 jobs)
 ```
 
 ## Security

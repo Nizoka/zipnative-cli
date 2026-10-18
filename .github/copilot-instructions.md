@@ -51,7 +51,9 @@ src/
 ├── index.ts           # CLI entry: parse argv → global env flags → config merge → lazy dispatch → exit
 ├── commands/
 │   ├── create.ts      # Files/dirs/stdin/manifest → createZip | addStream+stream() | createParallelZip → output
-│   ├── modify.ts      # Archive + edits (remove→rename→replace→add→comment) → save() | saveCompact() | --in-place
+│   ├── modify.ts      # Archive + edits (remove→rename→replace→add→comment) → save() | saveCompact({ canonical? }) | --in-place
+│   ├── canonicalize.ts # canonicalizeZip → the canonical deterministic form (no recompression), proven by analyzeDeterminism
+│   ├── merge.ts       # addFromReader(…, { verify: true }) from eagerly opened sources: merge / split, never laundering
 │   ├── list.ts        # openZip (nothing decompressed) → text table | json | ndjson rows
 │   ├── inspect.ts     # Eager open → forensic report + determinism verdict + --check gate (E_CHECK_FAILED)
 │   ├── cat.ts         # readEntryStream / readEntryRaw → stdout or --output; CRC verified at stream end
@@ -81,6 +83,7 @@ src/
 │   ├── control.ts     # --timeout (one AbortController, E_LIMIT) and --progress (onProgress → stderr)
 │   ├── engines.ts     # Minimal engines.node range evaluator (doctor, the node-floor gate step)
 │   ├── sanitize.ts    # escapeTerminal / escapeLine: terminal-safe TEXT output (JSON stays exact)
+│   ├── rawentry.ts    # create-manifest "raw" entries: decoded once, size + CRC-32 checked, then addRaw
 │   ├── config.ts      # `.zipnativerc.json` discovery + PRESENTATION-ONLY defaults (CONFIG_KEYS; every other key E_USAGE)
 │   ├── version.ts     # CLI + engine version resolution (source layout and bundled dist/)
 │   ├── colors.ts      # ANSI helper decided on stderr: NO_COLOR off, FORCE_COLOR on, TERM=dumb off, else TTY

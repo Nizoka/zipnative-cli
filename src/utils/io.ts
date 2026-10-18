@@ -195,6 +195,61 @@ function writeStdout(data: Uint8Array): Promise<void> {
     });
 }
 
+/** A byte-range source over one open file, and the way to release it. */
+export interface FileRangeSource {
+    readonly source: { readonly size: number; read(offset: number, length: number): Promise<Uint8Array> };
+    close(): Promise<void>;
+}
+
+/**
+ * `--range`: a zipnative 1.1 `ByteRangeSource` over ONE descriptor of a
+ * regular file — the engine reads the central directory and each entry by
+ * range, so an archive larger than `--max-input-size` is never loaded whole
+ * (each entry fetch is bounded by `--max-entry-compressed-size`). The CLI
+ * owns the I/O; the engine owns every byte of structure. stdin, a pipe or a
+ * device has no random access and is refused (E_USAGE). The size is the one
+ * checked on the open descriptor; a read past it, or a short read (the file
+ * shrank), is refused rather than served stale.
+ */
+export async function fileRangeSource(filePath: string | undefined): Promise<FileRangeSource> {
+    if (filePath === undefined || filePath === '-') {
+        throw new CliError('--range reads a regular file by byte ranges: give the archive path (stdin has no random access).', 2);
+    }
+    let handle: FileHandle;
+    try {
+        handle = await open(filePath, 'r');
+    } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        throw new CliError(`Cannot read "${filePath}": ${message}`, 1, ErrorCode.IO);
+    }
+    const st = await handle.stat();
+    if (!st.isFile()) {
+        await handle.close();
+        throw new CliError(`--range needs a regular file; "${filePath}" is not one (a pipe or device has no random access).`, 2);
+    }
+    const size = st.size;
+    return {
+        source: {
+            size,
+            async read(offset: number, length: number): Promise<Uint8Array> {
+                checkAborted();
+                if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(length) || offset < 0 || length < 0 || offset + length > size) {
+                    throw new CliError(`Range read [${offset}, +${length}) is outside "${filePath}" (${size} bytes).`, 1, ErrorCode.IO);
+                }
+                const buf = Buffer.allocUnsafe(length);
+                let done = 0;
+                while (done < length) {
+                    const { bytesRead } = await handle.read(buf, done, length - done, offset + done);
+                    if (bytesRead === 0) throw new CliError(`"${filePath}" shrank while it was being read.`, 1, ErrorCode.IO);
+                    done += bytesRead;
+                }
+                return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+            },
+        },
+        close: () => handle.close(),
+    };
+}
+
 /**
  * Open a readable byte stream for a file path, or stdin when `filePath` is
  * undefined / `-`. Used by the streaming entry points (`stream`, `create
