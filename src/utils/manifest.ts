@@ -25,6 +25,9 @@ export const MANIFEST_COMMANDS: ReadonlySet<string> = new Set([
     'create', 'list', 'inspect', 'extract', 'cat', 'verify', 'stream', 'modify', 'crc32', 'inflate',
 ]);
 
+/** Global flags that act on the whole process, never on one task. */
+const PROCESS_WIDE_FLAGS: readonly string[] = ['timeout', 'json', 'quiet', 'q', 'no-color', 'config', 'no-config', 'progress', 'help', 'h', 'version', 'V'];
+
 /** Hard cap on manifest size in tasks (DoS guard; far above any real pipeline). */
 const MAX_TASKS = 1000;
 
@@ -260,11 +263,13 @@ export function parseManifest(raw: string, manifestDir: string): ManifestPlan {
         }
 
         const { flags, dependsOn } = resolveFlags(id, flagsRaw, manifestDir, priorOutputs);
-        // The deadline is one per process (utils/control.ts): a task-level
-        // `timeout` would bound every later task too. Bound the pipeline on
-        // the batch invocation instead.
-        if (flags['timeout'] !== undefined) {
-            throw usageError(`Manifest task "${id}": "timeout" is not a task flag — the deadline bounds the whole run; pass --timeout to batch itself.`);
+        // Process-wide settings belong to the batch invocation: every task
+        // inherits its mode (SECURITY.md), so a task-level value would be
+        // accepted and ignored — or, for `timeout`, bound every later task.
+        for (const name of PROCESS_WIDE_FLAGS) {
+            if (flags[name] !== undefined) {
+                throw usageError(`Manifest task "${id}": "${name}" is not a task flag — it applies to the whole batch run; pass --${name} to batch itself.`);
+            }
         }
 
         const outputValue = flags['output'];

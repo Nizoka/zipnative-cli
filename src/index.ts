@@ -187,8 +187,8 @@ Output modes:
                            Refused (exit 2) with a --codec module registering
                            method 0/8, or a deflateImpl without --deterministic:
                            workers never see the module
-  --workers <n>            Worker count (default cores-1, max 8; 0 = main
-                           thread)
+  --workers <n>            Worker count (default min(cores-1, 8); 0 = main
+                           thread; at most 64)
   --min-job-size <size>    Minimum entry size sent to a worker (default 32k)
   --job-timeout <ms>       Per-job cap before inline fallback (default 60000)
 
@@ -672,7 +672,8 @@ async function main(): Promise<void> {
     // starting with "-" is not consumed), so the bare token decides — before
     // `--`, after which every token is an operand.
     const endOfFlags = argv.indexOf('--');
-    if ((endOfFlags === -1 ? argv : argv.slice(0, endOfFlags)).includes('--json')) process.env['ZIPNATIVE_JSON'] = '1';
+    const flagTokens = endOfFlags === -1 ? argv : argv.slice(0, endOfFlags);
+    if (flagTokens.some((t) => t === '--json' || /^--json=(?:true|1|yes|on)$/i.test(t))) process.env['ZIPNATIVE_JSON'] = '1';
     const args = parseArgs(argv);
 
     // Global output flags (recognised anywhere in argv).

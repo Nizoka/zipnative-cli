@@ -53,7 +53,8 @@ describe('parseArgs boolean-flag table', () => {
             parseArgs(['-lq']);
         } catch (e) {
             expect((e as CliError).exitCode).toBe(2);
-            expect((e as CliError).message).toContain('-l -q');
+            expect((e as CliError).message).toContain('-i -o -d -e -f -h -q -V');
+            expect((e as CliError).message).not.toContain('-l ');
         }
     });
 

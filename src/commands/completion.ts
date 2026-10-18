@@ -12,9 +12,9 @@
 //     zipnative completion fish > ~/.config/fish/completions/zipnative.fish
 //     zipnative completion powershell >> $PROFILE
 
-import { type OperandRule, type ParsedArgs, assertKnownFlags, assertOperands, assertSingleValues } from '../utils/args.js';
+import { type OperandRule, type ParsedArgs, assertKnownFlags, assertOperands, assertSingleValues, assertSwitchValues } from '../utils/args.js';
 import { CliError } from '../utils/error.js';
-import { isBooleanFlag } from '../utils/flags.js';
+import { BOOLEAN_FLAGS, isBooleanFlag } from '../utils/flags.js';
 import { LIMIT_FLAG_NAMES } from '../utils/limits.js';
 
 export { BOOLEAN_FLAGS, COMMAND_BOOLEAN_FLAGS, GLOBAL_BOOLEAN_FLAGS, isBooleanFlag } from '../utils/flags.js';
@@ -40,7 +40,7 @@ const COMPRESSION_FLAGS = ['--method', '--level', '--deterministic'];
 const PROJECTION_FLAGS = ['--summary', '--fields'];
 const FILTER_FLAGS = ['--include', '--exclude'];
 /** `create`'s flags other than its inputs and output — also `batch` directory mode's (forwarded). */
-const CREATE_TREE_FLAGS = [
+export const CREATE_TREE_FLAGS: readonly string[] = [
     '--prefix', '--dir-entries', ...FILTER_FLAGS, '--follow-symlinks', ...COMPRESSION_FLAGS, '--order', '--date', '--mtime',
     '--comment', '--comment-file', '--entry-comment', '--preserve-mode', '--store-ext', '--stream', '--zip64', '--chunk-size',
     '--parallel', '--workers', '--min-job-size', '--job-timeout', '--overwrite',
@@ -224,6 +224,7 @@ export function repeatableFlags(command: string): ReadonlySet<string> {
 export function assertInvocation(command: string, args: ParsedArgs): void {
     assertKnownFlags(args.flags, knownFlags(command), command);
     assertSingleValues(args.flags, repeatableFlags(command), command);
+    assertSwitchValues(args.flags, BOOLEAN_FLAGS);
     assertOperands(args, OPERANDS[command] ?? { max: Infinity }, command);
 }
 

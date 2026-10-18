@@ -177,8 +177,12 @@ describe('hasFlag', () => {
         expect(hasFlag({ stream: true }, 'stream')).toBe(true);
     });
 
-    it('returns true for a string-valued flag', () => {
-        expect(hasFlag({ output: 'x' }, 'output')).toBe(true);
+    it('refuses an unrecognised switch value instead of reading it as ON (1.1.0 review M-01)', () => {
+        for (const v of ['flase', '', 'maybe', 'x']) {
+            expect(() => hasFlag({ overwrite: v }, 'overwrite'), v).toThrow(CliError);
+        }
+        expect(hasFlag({ overwrite: 'yes' }, 'overwrite')).toBe(true);
+        expect(hasFlag({ overwrite: 'off' }, 'overwrite')).toBe(false);
     });
 
     it('returns false when flag is absent', () => {
@@ -199,7 +203,7 @@ describe('getBoolFlag', () => {
         expect(getBoolFlag({ color: true }, 'color')).toBe(true);
     });
 
-    it.each(['true', '1', 'yes', 'on', 'TRUE', ' Yes ', ''])('returns true for %j', (v) => {
+    it.each(['true', '1', 'yes', 'on', 'TRUE', ' Yes '])('returns true for %j', (v) => {
         expect(getBoolFlag({ color: v }, 'color')).toBe(true);
     });
 
@@ -207,8 +211,16 @@ describe('getBoolFlag', () => {
         expect(getBoolFlag({ color: v }, 'color')).toBe(false);
     });
 
-    it('uses the first value of a repeated flag', () => {
-        expect(getBoolFlag({ color: ['false', 'true'] }, 'color')).toBe(false);
+    it('refuses an empty value and a repeated switch (no first-value-wins)', () => {
+        expect(() => getBoolFlag({ color: '' }, 'color')).toThrow(CliError);
+        expect(() => getBoolFlag({ color: ['false', 'true'] }, 'color')).toThrow(CliError);
+    });
+
+    it('never echoes the refused value (ADR 0003)', () => {
+        try { getBoolFlag({ overwrite: 'secret-typo' }, 'overwrite'); } catch (e) {
+            expect((e as CliError).exitCode).toBe(2);
+            expect((e as CliError).message).not.toContain('secret-typo');
+        }
     });
 
     it('checks aliases in order', () => {

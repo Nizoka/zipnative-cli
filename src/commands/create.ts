@@ -605,10 +605,15 @@ function assertCodecModulesHonest(parallel: boolean, deterministic: boolean, dry
     }
 }
 
-/** `--workers` accepts 0 (main thread only), unlike the other positive-int flags. */
+/** Upper bound of `--workers` (same ceiling as `batch --concurrency`): each worker is a thread. */
+const MAX_WORKERS = 64;
+
+/** `--workers` accepts 0 (main thread only) up to {@link MAX_WORKERS}, unlike the other positive-int flags. */
 function parseIntFlagAllowZero(args: ParsedArgs, flag: string): number | undefined {
     const raw = getStringFlag(args.flags, flag);
     if (raw === undefined) return undefined;
     if (!/^\d+$/.test(raw.trim())) throw new CliError(`--${flag} expects a non-negative integer, got "${raw}".`, 2);
-    return Number(raw);
+    const n = Number(raw);
+    if (n > MAX_WORKERS) throw new CliError(`--${flag} ${raw} exceeds the maximum of ${MAX_WORKERS} (each worker is a thread; the default is min(cores - 1, 8)).`, 2);
+    return n;
 }

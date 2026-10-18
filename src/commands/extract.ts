@@ -24,7 +24,7 @@
 // is never materialised), `--skip-symlinks` drops them.
 
 import { chmod, mkdir, utimes } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { type ParsedArgs, getStringFlag, getStringFlagAll, hasFlag } from '../utils/args.js';
 import { emitStatus, isDryRun, isJsonMode, progress } from '../utils/agent.js';
 import {
@@ -85,6 +85,44 @@ function isUndecodable(entry: ZipEntry): boolean {
     return m !== METHOD_STORE && m !== METHOD_DEFLATE && getCodec(m) === null;
 }
 
+/** Comparison form of a destination path (case-folded where the filesystem folds case). */
+function pathKey(p: string): string {
+    return process.platform === 'win32' || process.platform === 'darwin' ? p.toLowerCase() : p;
+}
+
+/**
+ * Refuse a plan that writes a path both as a file and as a directory (a file
+ * entry `f` with `f/child`, or with a directory entry `f/`): E_IO naming the
+ * entry that cannot be written, before anything touches the disk.
+ */
+function assertNoFileDirConflict(
+    planned: readonly PlannedFile[],
+    dirTargets: readonly { readonly name: string; readonly target: string }[],
+): void {
+    const files = new Map<string, string>();
+    for (const p of planned) files.set(pathKey(p.target), p.entry.name);
+    const check = (target: string, name: string, self: boolean): void => {
+        let parent = dirname(target);
+        if (!self) {
+            const hit = files.get(pathKey(target));
+            if (hit !== undefined) {
+                throw new CliError(`Entry "${name}" is a directory, but the archive also writes "${hit}" as a file at the same path; nothing was extracted.`, 1, ErrorCode.IO, { entryName: name });
+            }
+        }
+        for (;;) {
+            const hit = files.get(pathKey(parent));
+            if (hit !== undefined) {
+                throw new CliError(`Entry "${name}" needs "${hit}" to be a directory, but the archive also writes "${hit}" as a file; nothing was extracted.`, 1, ErrorCode.IO, { entryName: name });
+            }
+            const up = dirname(parent);
+            if (up === parent) return;
+            parent = up;
+        }
+    };
+    for (const p of planned) check(p.target, p.entry.name, true);
+    for (const d of dirTargets) check(d.target, d.name, false);
+}
+
 export async function extract(args: ParsedArgs): Promise<void> {
     await prepareEngine(args);
 
@@ -122,6 +160,17 @@ export async function extract(args: ParsedArgs): Promise<void> {
         for (const e of reader.entries()) allEntries.push(e);
     } catch (e) {
         throw mapZipError(e, 'Failed to read the central directory');
+    }
+
+    // An explicit --entry that names nothing is a typo, never an empty
+    // success (parity with `cat` / `verify --entry`): refused before any write.
+    if (wanted.size > 0) {
+        const names = new Set(allEntries.map((e) => e.name));
+        for (const name of wanted) {
+            if (!names.has(name)) {
+                throw new CliError(`Entry not found: ${name} (run \`zipnative list\` for the exact names).`, 1, ErrorCode.NOT_FOUND, { entryName: name, zipCode: 'ZIP_ENTRY_NOT_FOUND' });
+            }
+        }
     }
 
     const skipped: Skipped[] = [];
@@ -213,6 +262,12 @@ export async function extract(args: ParsedArgs): Promise<void> {
         }
     }
 
+    // ── Phase 1b: a path the plan writes as a FILE cannot also be a parent
+    // directory of another target (`f` and `f/child`). Refused here, with the
+    // entry named, so --dry-run and the real run agree and nothing is written
+    // (the sink's mkdir would otherwise fail midway with a raw EEXIST).
+    assertNoFileDirConflict(planned, dirTargets);
+
     // ── Phase 2a: whole-plan refusal before writing anything (the exclusive
     // open in phase 2b is the authoritative guard; this keeps a refused run
     // from producing a partial tree).
@@ -239,7 +294,7 @@ export async function extract(args: ParsedArgs): Promise<void> {
 
     if (dryRun) {
         if (!isJsonMode()) {
-            const lines = planned.map((p) => `plan  ${p.relPath}  ${p.entry.uncompressedSize}`);
+            const lines = planned.map((p) => `plan  ${escapeLine(p.relPath)}  ${p.entry.uncompressedSize}`);
             for (const s of skipped) lines.push(`skip  ${escapeLine(s.name)}  (${s.reason})`);
             process.stdout.write(escapeTerminal(lines.join('\n') + (lines.length > 0 ? '\n' : '')));
         }
@@ -254,10 +309,12 @@ export async function extract(args: ParsedArgs): Promise<void> {
 
     // ── Phase 2b: write (utils/sink.ts: realpath containment + exclusive open)
     await mkdir(root, { recursive: true });
-    for (const d of dirTargets) await ensureSinkDir(root, d.target, d.name);
+    for (const d of dirTargets) {
+        try { await ensureSinkDir(root, d.target, d.name); } catch (e) { throw mapZipError(e, `Failed to create the directory of "${d.name}"`, d.name); }
+    }
     let written = 0;
     for (const p of planned) {
-        await ensureSinkParent(root, p.target, p.entry.name);
+        try { await ensureSinkParent(root, p.target, p.entry.name); } catch (e) { throw mapZipError(e, `Failed to create the parent directory of "${p.entry.name}"`, p.entry.name); }
         try {
             written += await writeSinkFile(p.target, p.stream(), { overwrite });
         } catch (e) {

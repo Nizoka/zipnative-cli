@@ -481,7 +481,7 @@ cat file | zipnative create --stdin-name <name> -o <out.zip>
 | `--zip64` | false | With `--stream` / `--stdin-name`: write every streamed entry with a Zip64 local header and the 24-byte data descriptor, so it may exceed 4 GiB (zipnative 1.1 `AddEntryOptions.zip64`; refused without a streamed input — buffered entries are already Zip64 when they need it) |
 | `--chunk-size <size>` | `65536` | Output chunk size for the chunked writer (`--stream` or `--stdin-name`; refused otherwise; a warning outside 1 KiB–16 MiB) |
 | `--parallel` | false | Deflate across a worker pool (`zipnative/worker`); byte-identical to the sequential writer per tier. Refused (exit 2) with a `--codec` module that registers method 0/8, or a `deflateImpl` without `--deterministic` — the workers never see the module |
-| `--workers <n>` | cores − 1, max 8 | Worker count (`0` = main thread); requires `--parallel` |
+| `--workers <n>` | min(cores − 1, 8) | Worker count, `0`–`64` (`0` = main thread); requires `--parallel` |
 | `--min-job-size <size>` | `32k` | Minimum entry size dispatched to a worker; requires `--parallel` |
 | `--job-timeout <ms>` | `60000` | Per-job cap before inline fallback; requires `--parallel` |
 | `--dry-run` | false | Walk inputs, validate names, print the plan; write nothing |
