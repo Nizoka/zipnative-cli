@@ -1,34 +1,22 @@
 name: CodeQL
 
+# Two languages: the TypeScript sources AND the workflows themselves
+# (`actions`: untrusted input in run:, excessive permissions, unpinned
+# actions). `build-mode: none` for both — CodeQL extracts TypeScript without
+# a build, so no dependency code runs in this job. `security-extended` adds
+# the lower-precision security queries to the default suite.
+#
+# No path filter: a skipped required check stays pending forever.
+
 on:
   push:
     branches: [main, master]
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - '.github/ISSUE_TEMPLATE/**'
-      - '.github/*.md'
-      - '.github/FUNDING.yml'
-      - 'LICENSE'
-      - '.editorconfig'
-      - '.gitignore'
   pull_request:
     branches: [main, master]
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - '.github/ISSUE_TEMPLATE/**'
-      - '.github/*.md'
-      - '.github/FUNDING.yml'
-      - 'LICENSE'
-      - '.editorconfig'
-      - '.gitignore'
   schedule:
     - cron: '27 3 * * 1'
 
 permissions:
-  security-events: write
-  actions: read
   contents: read
 
 concurrency:
@@ -37,30 +25,42 @@ concurrency:
 
 jobs:
   analyze:
-    name: Analyze
+    name: Analyze (${{ matrix.language }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      security-events: write # Upload the analysis to code scanning.
+      actions: read # Read the workflow run the analysis belongs to.
+      contents: read # Read the source.
 
     strategy:
       fail-fast: false
       matrix:
-        language: [javascript-typescript]
+        include:
+          - { language: actions, build-mode: none }
+          - { language: javascript-typescript, build-mode: none }
 
     steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit # 2026-10-18: the CodeQL bundle and its query packs come from hosts not baselined yet
+
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
+      # init and analyze MUST share one release: CodeQL refuses a run whose
+      # steps disagree (the failure Dependabot's per-step PRs produced).
       - name: Initialize CodeQL
         uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           languages: ${{ matrix.language }}
-
-      - name: Autobuild
-        uses: github/codeql-action/autobuild@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+          build-mode: ${{ matrix.build-mode }}
+          queries: security-extended
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
-          category: "/language:${{ matrix.language }}"
+          category: /language:${{ matrix.language }}

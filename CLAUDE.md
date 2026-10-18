@@ -132,7 +132,13 @@ A new command touches **all** of these — miss one and it half-works:
 ## Build, test, verify
 
 ```bash
-npm run typecheck:all   # tsc for src + tests — must be clean
+npm run gate            # THE definition of green (scripts/gate.mjs --ci): typecheck, lint, build,
+                        #   reproducible build, bundle check, smoke, coverage, engine data,
+                        #   the pinned tarball list — run it before claiming a change works
+npm run gate:fast       # the inner loop: typecheck:all, lint, test
+node scripts/gate.mjs --publish --require-all   # what publish.yml runs (+ samples, veraZIP,
+                        #   install smoke test)
+npm run typecheck:all   # tsc for src + tests + the @ts-check scripts — must be clean
 npm run lint            # eslint src/ tests/ — type-aware strictTypeChecked on src/, 0 errors
 npm run test            # vitest run — all pass; keep coverage ≥ thresholds
 npm run build           # tsup → dist/cli.cjs (the bin — the only artefact)

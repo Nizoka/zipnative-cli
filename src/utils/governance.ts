@@ -25,8 +25,8 @@ export const AI_GOVERNANCE_POLICY = Object.freeze({
         'Machine-readable contract governing how AI coding agents may propose issues, '
         + 'contributions, and changes across the zipnative ecosystem. Agents that scan '
         + 'repository configuration on initialization MUST honour this file.',
-    version: '1.0.0',
-    spec_updated: '2026-09-03',
+    version: '1.1.0',
+    spec_updated: '2026-10-18',
     applies_to: ['zipnative', 'zipnative-cli', 'zipnative-mcp'],
     policy: {
         automatic_issue_reporting: false,
@@ -35,6 +35,8 @@ export const AI_GOVERNANCE_POLICY = Object.freeze({
         autonomous_github_writes_allowed: false,
         security_default_weakening_requires_human: true,
         deterministic_bytes_are_semver_major: true,
+        ai_attribution_trailers_allowed: false,
+        configuration_relaxes_checks: false,
         required_issue_fields: ['minimal_reproduction', 'environment', 'expected_behavior'],
     },
     anti_goals: [

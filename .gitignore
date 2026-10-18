@@ -35,6 +35,5 @@ Thumbs.db
 *.swo
 .vscode/settings.json
 
-# npm
+# npm (the project .npmrc IS tracked: ignore-scripts, engine-strict, audit level)
 *.tgz
-.npmrc

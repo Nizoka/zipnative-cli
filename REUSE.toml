@@ -1,0 +1,13 @@
+# REUSE 3.3 (https://reuse.software/spec-3.3/): the copyright and licence of
+# every file, in one place, so no source file carries a header. Checked by
+# the `workflow lint` job of .github/workflows/ci.yml (`reuse lint`).
+version = 1
+SPDX-PackageName = "zipnative-cli"
+SPDX-PackageSupplier = "Nizoka — Plika"
+SPDX-PackageDownloadLocation = "https://github.com/Nizoka/zipnative-cli"
+
+[[annotations]]
+path = "**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Nizoka — Plika (https://plika.app)"
+SPDX-License-Identifier = "MIT"

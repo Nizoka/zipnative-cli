@@ -808,7 +808,7 @@ See [AGENTS.md](../AGENTS.md) for the agent-facing summary.
 | Terminal escape / bidi injection through archive names | `escapeTerminal()` on every text sink (reports, progress lines, text diagnostics, text errors); JSON exact; `rawNameHex` (docs/adr/0004); `tests/docs/source-hygiene.test.ts` keeps the sources free of raw controls |
 | Data remanence in `modify` | Documented on `--help` and printed as an `info:` line; `--compact` is the deletion path |
 | Forward-reader trust (`stream`) | Attribute-dependent flags refused; `trust: "local-headers-only"` in every JSON output; a `warning:` line at start; descriptor rows carry zero sizes (`bytesKnown: false` in the summary) |
-| Supply-chain risk | Zero extra runtime dependencies; Trusted Publishing (OIDC) with provenance; CodeQL + Scorecard CI; CycloneDX SBOM per release, attested with `actions/attest-build-provenance` |
+| Supply-chain risk | Zero extra runtime dependencies; a four-job release (guard → build → publish → attest, docs/adr/0009): no token where dev code runs, the `npm-publish` environment, Trusted Publishing (OIDC) with provenance, the published tarball re-verified against the gated one, CycloneDX + SPDX SBOMs and the tarball attested (Sigstore); every job hardened (`harden-runner`) and installing with `--ignore-scripts`; one SHA per action; zizmor, actionlint, CodeQL (TypeScript + workflows), Scorecard, dependency review, weekly npm audit + OSV-Scanner; rulesets as code; `tests/tools/workflows.test.ts` holds it all |
 | False conformance claims | Blocking veraZIP gate (`verazip.yml` on Linux + Windows on every PR, and pre-publish in `publish.yml`): a 37-archive corpus — 33 conformant (30 CLI-produced or crafted + 3 hostile-but-conformant archives `extract` must refuse) and 4 raw-crafted negative canaries — validated by an engine-independent ISO/IEC 21320-1 parser (`33 PASS, 4 XFAIL, 0 FAIL`) |
 
 **Network:** none. No command opens a socket in any mode.
@@ -1031,8 +1031,13 @@ Every one of the 106 exports of zipnative 1.1.0 (101 from `zipnative`, 5 from `z
 ## 9. Development Quick Reference
 
 ```bash
-# Install
+# Install (the tracked .npmrc sets ignore-scripts=true)
 npm ci
+
+# The single definition of "green" (scripts/gate.mjs; logs in test-output/.gate/)
+npm run gate:fast           # typecheck:all, lint, test
+npm run gate                # --ci: + build, reproducible, bundle check, smoke, coverage, engine data, tarball list
+node scripts/gate.mjs --publish --require-all   # + samples, veraZIP (fail-closed), install smoke test
 
 # Build (outputs dist/cli.cjs — the bin; CJS only, no ESM build, no .d.ts, no source maps)
 npm run build
@@ -1060,7 +1065,7 @@ node dist/cli.cjs schema manifest | head
 node samples/run-all.js                                       # 73 jobs, dependency-free
 ```
 
-The published tarball holds 7 files: `dist/cli.cjs`, `AGENTS.md`, `LICENSE`, `README.md`, `llms.txt`, `docs/data/errors.json`, `package.json`.
+The published tarball holds 10 files, pinned in `docs/data/package-files.json` (`npm run check:package`): `dist/cli.cjs`, `AGENTS.md`, `CHANGELOG.md`, `LICENSE`, `README.md`, `SECURITY.md`, `THIRD-PARTY-NOTICES.md`, `llms.txt`, `docs/data/errors.json`, `package.json`.
 
 ---
 

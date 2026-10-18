@@ -119,8 +119,10 @@ Official CLI for the [`zipnative`](https://github.com/Nizoka/zipnative) engine �
 - **Stdin / stdout by default** — every command is shell-pipeline friendly.
 - **TypeScript strict, ESM source** — bundled by tsup into one CommonJS bin (`dist/cli.cjs`).
   The package is a command-line tool only: no programmatic entry point, no type declarations.
-- **npm provenance** — Trusted Publishing (OIDC) with provenance attestations and a CycloneDX
-  SBOM per release.
+- **Verifiable releases** — Trusted Publishing (OIDC) with npm provenance, from a four-job
+  pipeline where dev-dependency code never runs next to the publishing token; the published
+  tarball is fetched back and checked against the gated one, and the tarball plus CycloneDX /
+  SPDX SBOMs are attested (Sigstore) and attached to the GitHub Release.
 
 ## Supported Features
 
@@ -1120,10 +1122,21 @@ See [AGENTS.md](AGENTS.md) and the [`samples/agent/`](samples/agent) scripts.
   above.
 - **JSON size cap** — manifests, drafts and JSON inputs are capped at 50 MB before parsing
   (config files at 1 MiB, size-checked on the open descriptor).
-- Signed builds with npm provenance (Trusted Publishing / OIDC) and a CycloneDX SBOM per
-  release; the SBOM and the tarball are attested with `actions/attest-build-provenance` — verify with
-  `npm audit signatures`. CI runs on Ubuntu 22/24, Windows 22/24 (blocking) and macOS 22; the
-  veraZIP gate runs on Linux and Windows for every pull request.
+- **Release integrity** ([ADR 0009](docs/adr/0009-release-integrity.md)) — published by
+  `publish.yml` in four jobs (guard → build → publish → attest): the tag must match the version,
+  the publish gate (`scripts/gate.mjs --publish --require-all`) runs where no token can be
+  minted, the `npm-publish` environment gates the one job that publishes the handed-on tarball
+  (both digests re-checked, npm client pinned by SHA-512) through Trusted Publishing with
+  provenance, and the last job re-downloads it from the registry, runs `npm audit signatures`
+  and attests the tarball and its CycloneDX / SPDX SBOMs. Verify with
+  `npm audit signatures` and `gh attestation verify zipnative-cli-<version>.tgz -R
+  Nizoka/zipnative-cli`. Every CI job starts with `harden-runner` and installs with
+  `--ignore-scripts`; every action is SHA-pinned; zizmor, actionlint, CodeQL (TypeScript and
+  workflows), OpenSSF Scorecard, dependency review, a weekly npm audit + OSV-Scanner and the
+  rulesets (`.github/rulesets/`) guard the repository. CI runs on Ubuntu, Windows and macOS
+  (Node 22 / 24, all blocking); the veraZIP gate and the samples run on Linux and Windows for
+  every pull request. Security contacts: [SECURITY.md](SECURITY.md),
+  [security.txt](docs/.well-known/security.txt), [Security Insights](.github/SECURITY-INSIGHTS.yml).
 
 See [SECURITY.md](SECURITY.md) for the full security policy and vulnerability disclosure procedure.
 

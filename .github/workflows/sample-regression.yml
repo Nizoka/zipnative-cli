@@ -1,0 +1,58 @@
+name: Sample Regression
+
+# Every sample the README and the knowledge base point to keeps working: the
+# jobs of samples/run-all.js run against the BUILT binary on Linux and
+# Windows (the samples ship as .sh and .ps1), including the byte-identity
+# assertions of the deterministic and stream-parity jobs and the expected
+# refusals (exit codes and E_* codes). Offline: the runner reads only the
+# repository. No path filter (a required check must always report).
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sample-regression-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sample-regression:
+    name: sample-regression (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit # 2026-10-18: one step serves the Windows leg (vendor matrix)
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Build
+        run: npm run build
+
+      - name: Run every sample job
+        run: node scripts/gate.mjs --only samples --require-all

@@ -15,7 +15,8 @@
  *   node scripts/sync-engine-data.mjs [--engine <zipnative checkout>] [--check]
  *
  *   --engine  path to a zipnative checkout at the tag the CLI pins
- *             (default: ../zipnative, the ecosystem's sibling layout)
+ *             (default: $ZIPNATIVE_ENGINE_CHECKOUT, else ../zipnative — the
+ *             ecosystem's sibling layout; CI clones the pinned tag there)
  *   --check   compare only; exit 1 when a file would change (CI-friendly)
  *
  * A NEW engine code or export cannot be completed mechanically — its CLI
@@ -44,7 +45,7 @@ function fail(msg, code = 2) {
 }
 
 const argv = process.argv.slice(2);
-let engineDir = resolve(ROOT, '..', 'zipnative');
+let engineDir = resolve(process.env['ZIPNATIVE_ENGINE_CHECKOUT'] ?? join(ROOT, '..', 'zipnative'));
 let check = false;
 for (let i = 0; i < argv.length; i++) {
     const a = argv[i];

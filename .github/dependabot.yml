@@ -1,5 +1,10 @@
 version: 2
 
+# Every ecosystem waits seven days before it proposes a new version: a
+# freshly published release is the window in which a compromised maintainer
+# account or a hijacked package is still undetected (zizmor
+# dependabot-cooldown; Dependabot's own default is three days). The cooldown
+# applies to version updates only — security updates are never delayed.
 updates:
   - package-ecosystem: npm
     directory: /
@@ -7,6 +12,8 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 10
+    cooldown:
+      default-days: 7
     labels:
       - dependencies
     commit-message:
@@ -16,6 +23,8 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "eslint"
         update-types: ["version-update:semver-major"]
+      - dependency-name: "@eslint/js"
+        update-types: ["version-update:semver-major"]
       - dependency-name: "vitest"
         update-types: ["version-update:semver-major"]
       - dependency-name: "@vitest/coverage-v8"
@@ -24,14 +33,21 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "tsup"
         update-types: ["version-update:semver-major"]
-      # Exact-pinned SBOM generator run inside the publish job (publish.yml):
-      # majors are reviewed by hand, minors/patches flow through the group.
-      - dependency-name: "@cyclonedx/cyclonedx-npm"
+      # engines.node starts at the 22 line and .nvmrc pins 22: the type
+      # definitions follow the Node line, not the newest major (a @types/node
+      # 26 would type-check code against APIs Node 22 does not have — #10).
+      - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
     groups:
+      # The engine is the ONE runtime dependency: its bumps come alone, never
+      # inside a "dev" group (#11 bumped zipnative there and broke the build),
+      # so each one is reviewed against the engine-data sync, the export
+      # ledger and the veraZIP corpus (CONTRIBUTING.md §Bumping the engine).
       dev-dependencies:
         patterns:
           - "*"
+        exclude-patterns:
+          - "zipnative"
         update-types:
           - minor
           - patch
@@ -42,8 +58,18 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
     labels:
       - dependencies
       - ci
     commit-message:
       prefix: "chore(ci):"
+    # One pull request for every action bump of a week, so the workflows move
+    # together and every action stays pinned at ONE SHA across the tree — the
+    # four github/codeql-action steps must run the same release, which
+    # one-PR-per-step bumps broke (#3, #4, #5, #7).
+    groups:
+      actions:
+        patterns:
+          - "*"

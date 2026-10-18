@@ -12,11 +12,13 @@ npm ci
 
 ### Requirements
 
-- Node.js >= 22
-- npm >= 10 for development (`npm ci`); publishing needs npm >= 11.5.1 (Trusted Publishing)
-  and happens only in `publish.yml`, which resolves the newest Node for that reason. There is
-  deliberately no `packageManager` field: Corepack would force every Node 22 contributor to
-  fetch npm 11 for a step nobody runs locally.
+- Node.js >= 22 (`.nvmrc` / `.node-version`: 22 — the line CI, the release and contributors
+  share)
+- npm >= 10 for development (`npm ci`; `packageManager` names npm 10.9.2, as across the
+  ecosystem). Publishing needs npm >= 11.5.1 (Trusted Publishing) and happens only in
+  `publish.yml`, which fetches a client pinned by its SHA-512 for that one step.
+- The tracked `.npmrc` sets `ignore-scripts=true` (no dependency lifecycle script runs on
+  your machine either), `engine-strict=true`, `audit-level=moderate` and `fund=false`.
 
 ## Build
 
@@ -26,10 +28,30 @@ npm run build          # tsup → dist/cli.cjs — the CJS bin only (no ESM buil
 npm run dev            # tsup --watch
 ```
 
-The package is bin-only: `package.json` has no `module` / `types` entry point and `files` ships
-exactly `dist/cli.cjs`, `AGENTS.md`, `llms.txt`, `docs/data/errors.json`, `README.md`,
-`LICENSE` and `package.json` (7 files; `npm pack --dry-run` shows them, and `publish.yml` verifies
-the tarball before publishing).
+The package is bin-only: `package.json` has no `main` / `module` / `types` entry point (a
+`require('zipnative-cli')` is not an API) and `files` ships exactly `dist/cli.cjs`,
+`AGENTS.md`, `llms.txt`, `docs/data/errors.json`, `README.md`, `CHANGELOG.md`,
+`SECURITY.md`, `THIRD-PARTY-NOTICES.md`, `LICENSE` and `package.json` — 10 files, pinned in
+`docs/data/package-files.json` (`npm run check:package`; `node scripts/package-files.mjs
+--update` after a deliberate change, the legal texts pinned by SHA-256).
+
+## The quality gate
+
+`scripts/gate.mjs` is the single definition of "green". CI, the release, the sample workflow,
+this file and the agent instructions point at it instead of repeating a list of commands:
+
+```bash
+npm run gate:fast                               # typecheck:all, lint, test — the inner loop
+npm run gate                                    # --ci: + build, reproducible build, bundle check,
+                                                #   smoke, coverage, engine data, the tarball list
+node scripts/gate.mjs --publish --require-all   # what publish.yml runs: + samples, veraZIP
+                                                #   (fail-closed), the install smoke test
+node scripts/gate.mjs --only smoke | --from build | --json
+```
+
+Each step logs to `test-output/.gate/<step>.log`; the first failure prints the tail and stops.
+`--require-all` turns a SKIP into a FAIL (the engine-data step needs a zipnative checkout next to
+this repository, or `ZIPNATIVE_ENGINE_CHECKOUT`; CI clones the pinned tag).
 
 ## Test
 
@@ -197,32 +219,86 @@ All must pass before opening a PR.
 
 ## Continuous integration and branch protection
 
-Every push to `main` and every pull request runs the whole gate — **documentation changes
-included**, because the pinned-docs tests above read README, AGENTS.md, `llms.txt`, the
-knowledge base, SECURITY.md and CITATION.cff. The only paths CI ignores are `LICENSE`,
-`.editorconfig`, `.gitignore`, `.github/FUNDING.yml` and `.github/ISSUE_TEMPLATE/**`.
+Every push to `main` and every pull request runs the whole gate — **every change included**,
+because the pinned-docs tests above read README, AGENTS.md, `llms.txt`, the knowledge base,
+SECURITY.md and CITATION.cff, and because a path-filtered required check stays pending forever.
+No workflow carries a `paths` filter (`tests/tools/workflows.test.ts` holds it). Every job
+starts with `step-security/harden-runner`, installs with `npm ci --ignore-scripts`, keeps no
+checkout credentials, and every action is pinned to one SHA across the tree.
 
 | Workflow | Job (check name) | Runner | What it runs |
 |---|---|---|---|
-| `ci.yml` | `ci (22)`, `ci (24)` | ubuntu-latest, Node 22 / 24 | `npm audit --audit-level=high`, typecheck, lint, `test:coverage` (thresholds), build, dist shape (CJS bin only), built-binary smoke (`--help`, `--version`, `schema manifest` = 15 commands), the spawn integration suite |
-| `ci.yml` | `windows (22)`, `windows (24)` | windows-latest, Node 22 / 24 | typecheck, lint, tests, build, dist shape, smoke, spawn suite — **blocking**: a ZIP CLI lives or dies on `\` separators, reserved device names, the case-insensitive filesystem and CRLF checkouts; any `skip on win32` needs a stated reason |
-| `ci.yml` | `macos` | macos-latest, Node 22 | tests, build, spawn suite — the second case-insensitive filesystem the sink handles (`CASE_INSENSITIVE_FS` covers win32 and darwin) |
-| `ci.yml` (every job) | reproducible build, start-up budget | — | `dist/cli.cjs` is built twice and the SHA-256 must match; `tests/integration/startup-budget.test.ts` pins the bundle shape (the worker is reachable only through the lazy `import()`; the engine is the single hoisted external) and keeps the start-up overhead over bare Node under 250 ms |
+| `ci.yml` | `ci (22)`, `ci (24)` | ubuntu-latest, Node 22 / 24 | `node scripts/gate.mjs --ci --require-all`; `ci (22)` also runs `npm audit --audit-level=moderate` and clones the pinned zipnative tag for the engine-data step |
+| `ci.yml` | `windows (22)`, `windows (24)`, `macos (22)` | windows-latest / macos-latest | the same gate — **blocking**: `\` separators, reserved device names, the case-insensitive filesystems the sink handles (win32 and darwin), Windows symlink semantics for the exclusive writes, CRLF checkouts, the npm.cmd shim |
+| `ci.yml` | `workflow lint` | ubuntu-latest | zizmor (workflow security), actionlint by the SHA-256 of its release archive (syntax, expressions, shellcheck), `reuse lint` (REUSE.toml) |
+| `ci.yml` | `commitlint` | ubuntu-latest, PRs only | every commit subject and the PR title match the Conventional Commits pattern below (advisory) |
 | `verazip.yml` | `verazip-linux`, `verazip-windows` | ubuntu-latest / windows-latest, Node 22 | build → `corpus:zip` → `validate-zip.mjs` with `VERAZIP_REQUIRED=1`; tool versions in the job summary; reports uploaded as artifacts |
-| `codeql.yml` | `Analyze (javascript-typescript)` | ubuntu-latest | CodeQL on code changes (keeps a docs path filter, so it is not a required check — a docs-only PR would wait forever) and weekly |
+| `sample-regression.yml` | `sample-regression (ubuntu-latest)`, `sample-regression (windows-latest)` | Node 22 | every `samples/run-all.js` job against the built binary (byte identities, expected refusals) |
+| `dependency-review.yml` | `dependency-review` | ubuntu-latest, PRs | a new dependency with a high advisory or a licence outside the allow-list fails (the MPL-2.0 lightningcss exception named package by package) |
+| `codeql.yml` | `Analyze (actions)`, `Analyze (javascript-typescript)` | ubuntu-latest | CodeQL `security-extended` over the TypeScript AND the workflows, no build; results required by the ruleset (`code_scanning`) |
+| `node-current.yml` | `node 26 (current, advisory)` | ubuntu-latest | the CI gate on Node 26 — information, not a required check |
+| `audit.yml` | `npm audit`, `OSV-Scanner` | ubuntu-latest, weekly | the lockfile against npm's and OSV's advisory databases |
 | `scorecard.yml` | `Scorecard analysis` | ubuntu-latest | OpenSSF Scorecard on push to `main` and weekly (not a PR check) |
-| `publish.yml` | `publish` | ubuntu-latest, newest Node ≥ 22.14 | the whole gate again + veraZIP, CycloneDX SBOM from the exact-pinned generator, tarball packed, verified and **attested** with `actions/attest-build-provenance` (the SBOM too), the packed file published with `npm publish <tgz> --provenance` via Trusted Publishing — on a published GitHub Release |
-| `ci.yml` | `commitlint` | ubuntu-latest, PRs only | every commit subject and the PR title match the Conventional Commits pattern below (no dependency; not a required check yet) |
+| `publish.yml` | `guard` → `build and pack` → `publish to npm` → `attest and attach` | ubuntu-latest, `.nvmrc` | on a published GitHub Release — see [Release](#release) and docs/adr/0009 |
 
-**Branch protection** on `main` (a repository setting the maintainers apply; recorded here so it
-is reviewable): required checks `ci (22)`, `ci (24)`, `windows (22)`, `windows (24)`, `macos`,
-`verazip-linux` and `verazip-windows`, all up to date with the base branch; linear history;
-no force-push; no bypass for anyone, maintainers included. None of the required workflows
-carries a `paths:` filter (a filtered workflow that does not run reports "Expected — Waiting for
-status" and blocks the merge). Every action is pinned to a commit SHA and Dependabot keeps the
-pins current. Alongside the ruleset the maintainers enable **secret scanning with push
+**Branch protection is code**: `.github/rulesets/main.json` (required checks `ci (22)`,
+`ci (24)`, `windows (22)`, `windows (24)`, `macos (22)`, `workflow lint`, `verazip-linux`,
+`verazip-windows`, both `sample-regression` legs and `dependency-review`, strict; CodeQL results
+required at high-or-higher; squash merges only; resolved review threads; no deletion, no
+force-push) and `.github/rulesets/tags.json` (`v*` tags can be neither deleted, moved nor
+updated). The maintainer imports both (repository → Settings → Rules → Rulesets → Import);
+`tests/tools/workflows.test.ts` holds every required context to a job that reports it.
+Dependabot keeps the pins current after a seven-day cooldown, with the actions grouped (so the
+four codeql-action steps move together) and the engine excluded from the dev group (it bumps
+alone — see [Bumping the engine](#bumping-the-engine)). Alongside the ruleset the maintainers enable **secret scanning with push
 protection** and Dependabot alerts (repository → Security → Code security); no npm token exists
 anywhere — publishing is OIDC-only.
+
+## Release
+
+The maintainer releases; an agent prepares (see AGENT_RULES.md). One-time setup on GitHub and
+npm, before the first publish of a line:
+
+1. **Environment** — repository → Settings → Environments → `npm-publish` with a required
+   reviewer (the maintainer). The `publish to npm` job cannot mint a token before that approval.
+2. **Trusted Publishing** — npmjs.com → `zipnative-cli` → Settings → Trusted Publishing:
+   repository `Nizoka/zipnative-cli`, workflow `publish.yml`, environment `npm-publish`.
+   No `NPM_TOKEN` exists anywhere.
+3. **Rulesets** — import `.github/rulesets/main.json` and `tags.json`.
+
+Every release:
+
+1. On a release branch: bump `package.json` (and `CITATION.cff`), move `[Unreleased]` in
+   `CHANGELOG.md` under the version and date, write `release-notes/vX.Y.Z.md`, run
+   `node scripts/gate.mjs --publish --require-all` locally, open the PR, merge it once every
+   required check is green.
+2. Publish the GitHub Release `vX.Y.Z` (which creates the tag) from `main`. `publish.yml`
+   runs `guard` (the tag must equal `v<package.json version>`), `build and pack` (the whole
+   publish gate, one tarball, its SHA-256 / SHA-512), waits for the `npm-publish` approval,
+   publishes exactly that tarball with provenance, then `attest and attach` fetches it back
+   from the registry, checks both digests and `npm audit signatures`, and attaches the tarball,
+   the CycloneDX / SPDX / toolchain SBOMs and the Sigstore bundle to the release.
+3. Verify like a consumer: `npm install zipnative-cli@X.Y.Z && npm audit signatures`, and
+   `gh attestation verify zipnative-cli-X.Y.Z.tgz -R Nizoka/zipnative-cli`.
+
+## Bumping the engine
+
+`zipnative` is the only runtime dependency; Dependabot never bumps it inside the dev group.
+A bump is a reviewed change of its own:
+
+1. `npx npm@11 install zipnative@^X.Y.Z --ignore-scripts`, then check out the matching tag of
+   zipnative next to this repository (`../zipnative`, or set `ZIPNATIVE_ENGINE_CHECKOUT`).
+2. `npm run typecheck:all` — `ZIP_TO_CLI` and the diagnostic table are typed against the
+   engine's unions, so a new error or diagnostic code fails `tsc` until the CLI maps it.
+3. Re-export every new name in `src/core-bridge/index.ts` (the docs test requires it).
+4. `npm run build && node scripts/sync-engine-data.mjs` — re-derives the engine half of
+   `docs/data/errors.json` and `docs/data/core-exports.json` and names every row a human must
+   complete (`raisedBy` for a new diagnostic; `reach` / `via` for a new export — `bridged`
+   with a ROADMAP reason when no command reaches it yet). `--check` is the CI form.
+5. Map each export in `docs/KNOWLEDGE_BASE.md` §8, read the engine's CHANGELOG for behaviour
+   changes (a reclassified error, a widened union, a new default), regenerate the veraZIP corpus
+   and compare its SHA-256 with the previous build — a byte change under `--deterministic` is a
+   semver-major event.
 
 ## Code Style
 
@@ -312,7 +388,9 @@ samples/                   # .sh + .ps1 per command (41 demos), run-all.js (73 j
 - `modify` verifies every entry it re-emits (`verifyEntry()`), with no opt-out. Do not add one.
 - `--codec` is the only dynamic import of user code — argv only, refused from config files, gated in manifests, reported truthfully when it shapes the writer. Do not add another.
 - No command may open a socket. Do not add a network path.
-- A CycloneDX **SBOM** is generated in CI by `@cyclonedx/cyclonedx-npm` (an exact-pinned devDependency, installed from the lockfile — never fetched by `npx` inside the publish job) and attested with the tarball; build-time only — never a runtime dependency. `npm audit` runs at `--audit-level=moderate`.
+- The configuration file is presentation only (docs/adr/0001): never add an operational key to `CONFIG_KEYS`. Every bound is finite (0002), every invocation is checked (0003), text output is terminal-safe (0004), writes are exclusive or temp + rename (0005). Do not loosen any of them.
+- Never write a raw control or bidi character in a source file (`tests/docs/source-hygiene.test.ts`); use escapes.
+- The release pipeline (docs/adr/0009) keeps dev-dependency code away from the publishing token: do not add a step that installs or runs repository code to the `publish` job, and do not give `build` an `id-token`. SBOMs are written by `npm sbom` from the lockfile (CycloneDX and SPDX) in the `attest` job. `npm audit` runs at `--audit-level=moderate`.
 
 ## Versioning, stability and deprecation
 
@@ -326,7 +404,8 @@ by it:
 - the envelope keys (`ok`, `command`, `error.{code, message, zipCode, entryName, detail,
   remedy}`, the status-envelope fields listed in AGENTS.md §2), the JSON report shapes and
   their schema `$id`s, the `schema manifest` shape and `docs/data/errors.json`;
-- the `.zipnativerc.json` keys and the `ZIPNATIVE_*` environment variables;
+- the `.zipnativerc.json` keys (presentation only since 1.1.0 — `CONFIG_KEYS`) and the
+  `ZIPNATIVE_*` environment variables;
 - the bytes written under `--deterministic` — the engine's frozen contract; a byte change is
   semver-**major** (`ai-governance.json` → `deterministic_bytes_are_semver_major`).
 

@@ -12,3 +12,8 @@ samples/input/binary/** binary
 *.jar binary
 *.bin binary
 *.png binary
+
+# Generated data (scripts/sync-engine-data.mjs, scripts/package-files.mjs): collapsed in diffs
+docs/data/core-exports.json linguist-generated
+docs/data/errors.json linguist-generated
+docs/data/package-files.json linguist-generated
