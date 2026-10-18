@@ -17,19 +17,19 @@
 
 Official CLI for the [`zipnative`](https://github.com/Nizoka/zipnative) engine — create deterministic ZIP archives, list and inspect without extracting, extract with secure-by-default guards, verify integrity in one call, read unseekable streams, and modify archives without recompression, directly from the terminal. Zero extra runtime dependencies. Offline, always.
 
-> **What's new in v1.0.0** — first release, built on **zipnative 1.0.0**. **15 commands** in four
-> groups: `create` / `modify` (deterministic writer, worker-parallel deflate, append-only or
-> `--compact` edits), `list` / `inspect` / `cat` / `extract` / `stream` (random access, forensic
-> report with `--check` assertions, zip-slip / bomb / symlink / duplicate guards on by default,
-> forward-only reader for pipes), `verify` / `crc32` / `inflate` (one-call deep verification, the
-> ZIP checksum, a bounded raw-DEFLATE decoder), and `batch` / `doctor` / `schema` / `completion` /
-> `govern` (manifest pipelines, environment preflight, JSON Schemas and a capability manifest,
-> four shells, the AI-governance contract). A global **`--json`** envelope carries a stable
-> **`E_*`** class **and** zipnative's frozen **`ZIP_*`** code verbatim; **`--dry-run`**,
-> **`--summary`** / **`--fields`**, **`--strict`**, eight **`--max-*`** security bounds and
-> **`--max-input-size`** complete the agent contract. Every archive the CLI writes is validated against
-> **ISO/IEC 21320-1:2015** in CI (the veraZIP gate). **Node ≥ 22**.
-> See [release notes](release-notes/v1.0.0.md) and [AGENTS.md](AGENTS.md).
+> **What's new in v1.1.0** — built on **zipnative 1.1.0**: all 106 engine exports bridged;
+> **`create --stream --zip64`** for streamed entries past 4 GiB; **`--name-encoding`** for legacy
+> (Shift_JIS, GBK, Windows-1252 …) names; a global **`--timeout`** (`E_LIMIT`) and **`--progress`**
+> (stderr, NDJSON under `--json`); `inspect`'s engine-measured **`canonicalForm`** with
+> **`offenders`** and `--check canonical-form`; `--long` rows with extended **timestamps** and
+> **Unix ids**; custom codecs in `stream`. Hardened to the pkinative-cli level — and three
+> **behaviour changes shipped as security fixes**: `.zipnativerc.json` is **presentation only**
+> (an opt-out or a limit in it is `E_USAGE`), an **undeclared, repeated or surplus flag is
+> `E_USAGE`** (a typo is no longer ignored), and **`--max-* none` is refused** (every bound is
+> finite). `--overwrite` now replaces a planted symlink instead of following it, text output
+> escapes terminal control characters, and the release ships through a four-job attested
+> pipeline. Migration notes: [CHANGELOG](CHANGELOG.md#security-and-behaviour-changes-migration),
+> decisions: [docs/adr/](docs/adr/README.md), [release notes](release-notes/v1.1.0.md).
 >
 > ⭐ Star [`zipnative`](https://github.com/Nizoka/zipnative) — the zero-dependency ZIP engine that powers this CLI.
 
@@ -47,7 +47,7 @@ Official CLI for the [`zipnative`](https://github.com/Nizoka/zipnative) engine �
   `ndjson`, `--long` for flags, offsets and extra fields), or open the archive **eagerly** for a
   forensic report — per-method statistics, a determinism verdict, every engine diagnostic — and
   turn it into a CI gate with repeatable **`--check`** assertions (`deterministic`,
-  `no-encryption`, `no-symlinks`, `max-ratio=N`, `has=<name>`, …; exit 1 / `E_CHECK_FAILED`).
+  `canonical-form`, `no-encryption`, `no-symlinks`, `max-ratio=N`, `has=<name>`, …; exit 1 / `E_CHECK_FAILED`).
 - **`extract`** — secure by default. The engine sanitises every path; the CLI is the filesystem
   sink and re-proves containment under `--output-dir` — lexically and physically (`realpath`)
   — before writing a byte, and opens every file exclusively. Zip-slip, Windows device names,
@@ -149,7 +149,7 @@ Official CLI for the [`zipnative`](https://github.com/Nizoka/zipnative) engine �
 | Global `--json` envelope | ✅ | Status on success, `{ ok: false, command, error: { code, message, zipCode?, entryName?, detail?, remedy? } }` on failure — `remedy` names the flag that lifts the refusal |
 | Stable error classes | ✅ | 13 `E_*` codes — `E_USAGE`, `E_INPUT`, `E_PARSE`, `E_IO`, `E_SECURITY`, `E_DATA`, `E_LIMIT`, `E_UNSUPPORTED`, `E_NOT_FOUND`, `E_VERIFY_FAILED`, `E_CHECK_FAILED`, `E_POLICY`, `E_RUNTIME` |
 | Exact cause | ✅ | `error.zipCode` = zipnative's frozen `ZIP_*` code, verbatim (39 codes; `schema errors` prints the mapping) |
-| Diagnostics channel | ✅ | 11 `ZIP_*` diagnostic codes: text on stderr, arrays under `--json`, `--strict` escalates the first into `E_CHECK_FAILED` |
+| Diagnostics channel | ✅ | 12 `ZIP_*` diagnostic codes: text on stderr, arrays under `--json`, `--strict` escalates the first into `E_CHECK_FAILED` |
 | Capability manifest | ✅ | `schema manifest` (JSON) + `llms.txt` — for agent tool discovery |
 | `--dry-run` validation | ✅ | `create` / `extract` / `modify` / `stream` / `cat` / `inflate` / `batch` |
 | Token economy | ✅ | `--summary`, `--fields a,b.c`, compact JSON under `--json` (`--pretty` opts out) on `list` / `inspect` / `verify` / `stream` / `batch` |
@@ -181,7 +181,7 @@ Official CLI for the [`zipnative`](https://github.com/Nizoka/zipnative) engine �
 
 **Note:** everything listed works today. Planned work is tracked in [ROADMAP.md](ROADMAP.md).
 
-### Conformance status (v1.0.0)
+### Conformance status (v1.1.0)
 
 ZIP has no veraPDF, so the CLI ships its own gate — **veraZIP**: an ISO/IEC 21320-1:2015
 (Document Container File) validator vendored from the engine
@@ -189,8 +189,9 @@ ZIP has no veraPDF, so the CLI ships its own gate — **veraZIP**: an ISO/IEC 21
 EOCD / central-directory / local-header reader and never imports `zipnative`** — a validator that
 shared the engine's parser would attest the engine with the engine. `npm run validate:zip` builds
 the CLI, drives the **built binary** to write a **39-archive corpus** (35 conformant archives —
-30 across every writer path: buffered, `--stream`, `--parallel`, `--deterministic`, `--order
-insertion`, manifest extra fields, binary comments, `modify` append-only and `--compact` — plus
+32 across every writer path: buffered, `--stream`, `--stream --zip64`, `--parallel`,
+`--deterministic`, a clamped pre-1980 `--date`, `--order insertion`, manifest extra fields, binary
+comments, `modify` append-only and `--compact` — plus
 **4 raw-crafted negative canaries** the validator must reject with a declared clause id), then
 validates every file clause by clause. Three of the conformant archives are
 **hostile-but-conformant** (zip-slip, a Windows device name, duplicate paths): the ISO profile
@@ -223,7 +224,7 @@ package ships one CommonJS bin (`dist/cli.cjs`) plus `README.md`, `AGENTS.md`, `
 ## Documentation
 
 - 📘 **[Quick Start](#quick-start)** (below) — Create, inspect and extract in 5 minutes
-- 🏛️ **[KNOWLEDGE_BASE.md](docs/KNOWLEDGE_BASE.md)** — Full CLI reference, architecture, the 77-export API mapping, integration patterns
+- 🏛️ **[KNOWLEDGE_BASE.md](docs/KNOWLEDGE_BASE.md)** — Full CLI reference, architecture, the 106-export API mapping, integration patterns
 - 🤖 **[AGENTS.md](AGENTS.md)** — The agent contract: envelopes, codes, token economy, the recommended loop
 - 📚 **[samples/README.md](samples/README.md)** — runnable `.sh` + `.ps1` samples per command
 - 🔧 **[zipnative engine](https://github.com/Nizoka/zipnative)** — the underlying ZIP engine docs
@@ -400,7 +401,7 @@ zipnative govern verify-issue ./draft.md        # exit 1 / E_POLICY on a violati
 
 Ready-to-run examples are in [`samples/`](samples/), one directory per command — 41 demos,
 each shipped as a Bash (`.sh`) **and** a PowerShell (`.ps1`) pair, plus a dependency-free runner
-that replays them as 73 jobs:
+that replays them as 83 jobs:
 
 | Category | Description |
 |----------|-------------|

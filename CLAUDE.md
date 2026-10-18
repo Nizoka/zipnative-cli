@@ -30,7 +30,7 @@ this file wins on Claude-Code workflow specifics.
 3. **All core imports go through [src/core-bridge/index.ts](src/core-bridge/index.ts).**
    Never import from `zipnative` or `zipnative/worker` directly in a command
    or util — add a selective re-export to the bridge instead. The bridge is
-   the 77-export coverage ledger mapped in `docs/KNOWLEDGE_BASE.md` §8.
+   the 106-export coverage ledger mapped in `docs/KNOWLEDGE_BASE.md` §8.
 4. **Agent-first.** stdout = artifact, stderr = diagnostics/envelopes, stable
    exit codes (0/1/2), 13 stable `E_*` classes and the engine's `ZIP_*` code
    carried verbatim as `zipCode`. Every core call is wrapped with
@@ -118,7 +118,7 @@ A new command touches **all** of these — miss one and it half-works:
    `docs/data/errors.json` and update the mapping tables.
 6. `tests/**` — a command test (in-process) plus an integration round-trip
    where meaningful; **`tests/docs/consistency.test.ts`** must still pass
-   (command counts, `E_*` codes, `ZIP_*` mapping, the 77-export map, the
+   (command counts, `E_*` codes, `ZIP_*` mapping, the 106-export map, the
    limits table, the schema subject count).
 7. `samples/<name>/` — a `.sh` and a `.ps1` (keep them runnable, offline).
    If the command **writes archives**, add a corpus entry to
@@ -149,9 +149,9 @@ npm run validate:zip    # veraZIP gate: build + corpus:zip + scripts/validate-zi
                         #   VERAZIP_REQUIRED=1 (CI) fails closed when no level-1 tool exists
 ```
 
-Coverage thresholds live in `vitest.config.ts` (statements 93 / branches 88 /
-functions 94 / lines 93 — ratcheted after the 1.0.0 audit pass, three points
-below the measured actuals). Do not lower them to make a change pass — add
+Coverage thresholds live in `vitest.config.ts` (statements 95 / branches 91 /
+functions 97 / lines 96 — ratcheted for 1.1.0, one point below the measured
+actuals). Do not lower them to make a change pass — add
 tests.
 
 > **Bundle gotcha:** tsup flattens `src/**` into one `dist/cli.cjs` — the

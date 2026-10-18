@@ -4,6 +4,42 @@ This document outlines the planned development direction for zipnative-cli. Prio
 
 ## Released
 
+### v1.1.0 — zipnative 1.1.0 parity and hardening _(2026-10-18)_
+
+- [x] **`zipnative` pinned** to `^1.1.0` — all 106 exports bridged (101 + 5 worker), the 12th
+  diagnostic `ZIP_TIMESTAMP_CLAMPED`, `maxEntryCompressedSize` reported by `doctor` /
+  `schema limits` without a flag (ADR 0007); `docs/data/core-exports.json` grades the exports
+  no command reaches yet as `bridged` (see "1.2 candidates" below).
+- [x] **Streamed Zip64** — `create --stream|--stdin-name --zip64` (`AddEntryOptions.zip64`):
+  streamed entries past 4 GiB.
+- [x] **Legacy name encodings** — `--name-encoding <label>` on `list`, `inspect`, `cat`,
+  `extract`, `stream` (the engine's `nameDecoder`, applied before sanitising).
+- [x] **Deadline and progress** — global `--timeout <duration>` (`AbortSignal`, `E_LIMIT`
+  `detail.limit: "timeout"`, ADR 0006) and `--progress` (`onProgress`, stderr text or NDJSON).
+- [x] **Determinism from the engine** — `inspect` reports `analyzeDeterminism()`
+  (`canonicalForm`, `offenders`) and `--check canonical-form`.
+- [x] **Richer entry rows** — `--long` adds `timestamps` (UT / NTFS / DOS) and `unixIds`.
+- [x] **`stream` with custom codecs** — `--codec` methods decode through
+  `createDecompressor()`; codecs without one are refused before the first byte.
+- [x] **Engine asks closed** — every compensation for an engine gap is removed: zlib error
+  translation, the skip re-derivation in `verify` / `modify`, the Unix-mode encoder.
+  `dosTimeMode` is deliberately not adopted (ADR 0008).
+- [x] **Runtime hardening** (pkinative-cli parity, ADRs 0001–0005) — presentation-only
+  configuration, strict invocation (undeclared / repeated / surplus input is `E_USAGE`), finite
+  bounds only, one-descriptor bounded reads, `lstat` + exclusive creates and temp + rename
+  overwrites, terminal-safe text output.
+- [x] **Release integrity** (ADR 0009) — four-job publish (guard → build → publish → attest),
+  one gate script (`scripts/gate.mjs`), reproducible build, bundle probe, frozen tarball list,
+  install smoke test, harden-runner and `--ignore-scripts` on every job, zizmor / actionlint /
+  reuse, OSV-Scanner, dependency review, rulesets as code, SECURITY-INSIGHTS, security.txt.
+- [x] **Fuzzing of the CLI-owned parsers** (audit A-25, ADR 0010) — seeded campaigns over argv,
+  sizes, durations, globs, projections, manifests, the config file, name encodings and the
+  terminal escaper; one real bug found and fixed (an out-of-order glob range).
+- [x] **Documentation verified by tests** — relative links and anchors resolve, LF line
+  endings, fixture SHA-256s, the ADR index; veraZIP re-ported from zipnative 1.1.0
+  (`WF/DESCRIPTOR-WIDTH`) with a divergence test against the engine checkout; corpus of 39
+  archives (35 PASS, 4 XFAIL).
+
 ### v1.0.0 — zipnative 1.0.0: the agent-grade ZIP CLI _(released 2026-09-05)_
 
 - [x] **`zipnative` pinned** to `^1.0.0` — the engine's frozen 77-export surface, 39-code error
@@ -62,7 +98,7 @@ This document outlines the planned development direction for zipnative-cli. Prio
 - [x] **Global flags before the command name** — `zipnative --json list a.zip` and
   `list --long a.zip` both work: `src/utils/flags.ts` is the boolean-flag table, so a boolean
   never consumes the next token and flags and positionals are order-independent (audit A-01)
-- **Type-aware lint and `noUncheckedIndexedAccess`** — ESLint runs `strictTypeChecked` over `src/` (three relaxations, each justified in `eslint.config.js`; tests keep the non-type-checked strict set) and `tsconfig.json` enables `noUncheckedIndexedAccess`. (audit A-44, phase 3).
+- [x] **Type-aware lint and `noUncheckedIndexedAccess`** — ESLint runs `strictTypeChecked` over `src/` (three relaxations, each justified in `eslint.config.js`; tests keep the non-type-checked strict set) and `tsconfig.json` enables `noUncheckedIndexedAccess`. (audit A-44, phase 3).
 - [x] **Relative parent paths on argv** — `zipnative list ../a.zip`, `-o ../out.zip` and
   `--output-dir ../x` are ordinary shell usage and are accepted: argv paths are the user's own
   filesystem authority; the `..` refusal (`validatePath`, `E_INPUT`) now applies only to path
@@ -82,9 +118,9 @@ This document outlines the planned development direction for zipnative-cli. Prio
   (11 codes), token economy (`--summary`, `--fields`, compact JSON), `llms.txt`,
   `docs/data/core-exports.json`, `docs/data/errors.json`, `AGENTS.md` — `AGENTS.md`, `llms.txt`
   and `docs/data/errors.json` ship in the npm tarball.
-- [x] **Blocking veraZIP gate** — `npm run validate:zip` over a 39-archive corpus written by the
-  built CLI (35 conformant incl. 3 hostile-but-conformant that `extract` must refuse, + 4
-  raw-crafted negative canaries → 35 PASS, 4 XFAIL), validated by the ISO/IEC 21320-1:2015
+- [x] **Blocking veraZIP gate** — `npm run validate:zip` over a 37-archive corpus written by the
+  built CLI (33 conformant incl. 3 hostile-but-conformant that `extract` must refuse, + 4
+  raw-crafted negative canaries → 33 PASS, 4 XFAIL), validated by the ISO/IEC 21320-1:2015
   parser vendored from the engine (independent by construction), level 1 foreign integrity
   tools, blocking in `verazip.yml` (Linux + Windows, on every push and PR) and pre-publish.
 - [x] **Governance & supply chain** — CI on Ubuntu 22 / 24, Windows 22 / 24 (blocking) and
@@ -121,7 +157,7 @@ decision, not an engine wait:
   `AddFromReaderOptions` / `RawEntryReader`, and `addRaw` with `RawEntryMeta` for
   pre-compressed payloads (`verify: true` by default, so a lying source is refused).
 
-### Ideas feasible now
+### Ideas feasible now (deferred from 1.1.0, which is scoped to engine parity)
 
 - **`--explain <ZIP_CODE>`** — print `raisedWhen` / `remedy` / class / CLI mapping for one
   error or diagnostic code from `docs/data/errors.json`, so an agent can resolve a `zipCode`

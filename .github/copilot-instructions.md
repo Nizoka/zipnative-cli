@@ -94,7 +94,7 @@ src/
 │   ├── manifest.ts    # `batch --manifest` parsing: strict validation, @id refs, 1000-task cap, codec policy
 │   └── governance.ts  # AI-governance policy + AGENT_RULES text + pure draft validator
 └── core-bridge/
-    └── index.ts       # Selective re-exports from zipnative — the ONLY import point of the engine (77 exports)
+    └── index.ts       # Selective re-exports from zipnative — the ONLY import point of the engine (106 exports)
 ```
 
 ## Entry Point Contract (`src/index.ts`)
@@ -227,7 +227,7 @@ src/
 - **ESM-first source** — all internal imports use `.js` extension; tsup bundles it into the
   single CommonJS bin `dist/cli.cjs` (`zipnative` / `zipnative/worker` stay external).
 - **Lint covers `src/` AND `tests/`** (`npm run lint`, tests under a relaxed override);
-  coverage thresholds are 93 / 88 / 94 / 93 (`vitest.config.ts`).
+  coverage thresholds are 95 / 91 / 97 / 96 (`vitest.config.ts`).
 - **`const` over `let`** — never use `var`.
 - **No `any`** — use `unknown` with type narrowing.
 - **No `console.log`** — use `process.stdout.write(msg + '\n')` / `process.stderr.write(msg + '\n')`.

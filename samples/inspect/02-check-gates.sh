@@ -2,9 +2,10 @@
 # inspect/02-check-gates.sh — CI assertions with --check (pass, then fail)
 #
 # --check turns the report into a gate. Assertions are repeatable and
-# comma-separable: deterministic, epoch-timestamps, canonical-order,
-# utf8-names, no-data-descriptor, no-zip64, no-encryption, no-symlinks,
-# safe-names, no-duplicates, no-diagnostics, store-only, deflate-only, max-entries=N,
+# comma-separable: deterministic, canonical-form, epoch-timestamps,
+# canonical-order, utf8-names, no-data-descriptor, canonical-layout, no-zip64,
+# zip64, no-encryption, no-symlinks, safe-names, no-duplicates, no-diagnostics,
+# store-only, deflate-only, max-entries=N,
 # min-entries=N, max-uncompressed=<size>, max-ratio=N, has=<name>,
 # method=store|deflate. Any failure prints the report and exits 1 with
 # E_CHECK_FAILED — the second call below is EXPECTED to fail.

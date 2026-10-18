@@ -127,12 +127,19 @@ const JOBS = [
     after: () => byteIdentical(OUT('create', '06-sequential.zip'), OUT('create', '06-parallel.zip')),
   },
   { category: 'create', id: '07-comment-and-order', args: ['create', IN('text'), '--comment', 'built by samples/run-all.js', '--entry-comment', 'text/readme.txt=the readme', '--order', 'insertion', '--date', '2024-01-02T03:04:06Z', '--output', OUT('create', '07-comment-and-order.zip')] },
+  { category: 'create', id: '08-zip64-stream', input: IN('binary', 'pattern.bin'), args: ['create', '--stdin-name', 'data/pattern.bin', '--stream', '--zip64', '--output', OUT('create', '08-zip64-stream.zip')] },
+  { category: 'create', id: '08-zip64-check', args: ['inspect', '--input', OUT('create', '08-zip64-stream.zip'), '--summary', '--check', 'zip64'] },
 
   // ── list ────────────────────────────────────────────────────────────────
   { category: 'list', id: '00-setup', args: ['create', IN('text'), IN('unicode'), '--output', OUT('list', 'archive.zip')] },
   { category: 'list', id: '01-table', stdout: OUT('list', '01-table.txt'), args: ['list', '--input', OUT('list', 'archive.zip'), '--long'] },
   { category: 'list', id: '02-json-fields', stdout: OUT('list', '02-json-fields.json'), args: ['list', '--input', OUT('list', 'archive.zip'), '--format', 'json', '--fields', 'entries.name,entries.uncompressedSize'] },
   { category: 'list', id: '03-ndjson', stdout: OUT('list', '03-ndjson.ndjson'), args: ['list', '--input', OUT('list', 'archive.zip'), '--format', 'ndjson', '--include', '**/*.md'] },
+  {
+    category: 'list', id: '04-name-encoding', stdout: OUT('list', '04-name-encoding.json'),
+    args: ['list', '--input', IN('legacy', 'shift-jis-names.zip'), '--name-encoding', 'shift_jis', '--long', '--format', 'json', '--fields', 'entries.name,entries.nameEncoding,entries.rawNameHex'],
+    after: () => { const e = JSON.parse(readFileSync(OUT('list', '04-name-encoding.json'), 'utf8')).entries[0]; if (e.name !== '日本語/挨拶.txt' || e.nameEncoding !== 'custom') throw new Error(`Shift_JIS name not decoded: ${e.name} (${e.nameEncoding})`); },
+  },
 
   // ── inspect ─────────────────────────────────────────────────────────────
   { category: 'inspect', id: '00-setup', args: ['create', IN('text'), IN('binary'), '--deterministic', '--output', OUT('inspect', 'archive.zip')] },
@@ -144,6 +151,13 @@ const JOBS = [
     before: () => prependStub(OUT('inspect', 'archive.zip'), OUT('inspect', '03-prepended.zip')),
     args: ['inspect', '--input', OUT('inspect', '03-prepended.zip'), '--strict', '--json', '--summary'],
   },
+  { category: 'inspect', id: '04-setup-dated', args: ['create', IN('text'), '--date', '2024-01-02T03:04:06Z', '--output', OUT('inspect', '04-dated.zip')] },
+  { category: 'inspect', id: '04-canonical-pass', args: ['inspect', '--input', OUT('inspect', 'archive.zip'), '--summary', '--check', 'canonical-form,deterministic'] },
+  {
+    category: 'inspect', id: '04-offenders', stdout: OUT('inspect', '04-offenders.json'), args: ['inspect', '--input', OUT('inspect', '04-dated.zip'), '--format', 'json', '--fields', 'determinism'],
+    after: () => { const d = JSON.parse(readFileSync(OUT('inspect', '04-offenders.json'), 'utf8')).determinism; if (d.canonicalForm !== false || d.offenders.length !== 3 || d.offenders.some((o) => o.concern !== 'timestamp')) throw new Error(`unexpected offenders: ${JSON.stringify(d.offenders)}`); },
+  },
+  { category: 'inspect', id: '04-canonical-fail', expectExit: 1, expectCode: 'E_CHECK_FAILED', args: ['inspect', '--input', OUT('inspect', '04-dated.zip'), '--json', '--summary', '--check', 'canonical-form'] },
 
   // ── extract ─────────────────────────────────────────────────────────────
   { category: 'extract', id: '00-setup', args: ['create', IN('text'), IN('unicode'), '--output', OUT('extract', 'archive.zip')] },
@@ -248,6 +262,8 @@ const JOBS = [
   { category: 'agent', id: '03-token-economy-summary', stdout: OUT('agent', '03-summary.json'), args: ['inspect', '--input', OUT('agent', '01-status.zip'), '--json', '--summary'] },
   // --summary and --fields do not combine (summary wins); project the full report instead.
   { category: 'agent', id: '03-token-economy-fields', stdout: OUT('agent', '03-fields.json'), args: ['inspect', '--input', OUT('agent', '01-status.zip'), '--json', '--fields', 'archive.bytes,determinism.deterministic'] },
+  { category: 'agent', id: '04-timeout', expectExit: 1, expectCode: 'E_LIMIT', args: ['create', INPUT_DIR, '--stream', '--timeout', '1ms', '--output', OUT('agent', '04-timed-out.zip'), '--json'], after: () => { if (existsSync(OUT('agent', '04-timed-out.zip'))) throw new Error('--timeout left a partial file'); } },
+  { category: 'agent', id: '04-progress', args: ['create', INPUT_DIR, '--stream', '--progress', '--json', '--output', OUT('agent', '04-progress.zip')] },
 
   // ── govern (print-only) ─────────────────────────────────────────────────
   { category: 'govern', id: '01-rules', args: ['govern', 'rules'] },

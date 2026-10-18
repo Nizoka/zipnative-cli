@@ -32,8 +32,8 @@ authors:
 repository-code: "https://github.com/Nizoka/zipnative-cli"
 url: "https://zipnative.dev"
 license: MIT
-version: 1.0.0
-date-released: "2026-09-05"
+version: 1.1.0
+date-released: "2026-10-18"
 keywords:
   - zip
   - unzip
@@ -64,7 +64,7 @@ keywords:
 references:
   - type: software
     title: "zipnative — A safe, deterministic, streaming ZIP engine for modern apps"
-    version: 1.0.0
+    version: 1.1.0
     authors:
       - name: "Nizoka"
     repository-code: "https://github.com/Nizoka/zipnative"

@@ -73,6 +73,11 @@ machine-readable JSON manifest run `zipnative schema manifest`.
   on `list`, `inspect`, `verify`, `stream`, `batch`.
 - **`--dry-run`** validates inputs and prints the plan without writing output
   (`create`, `extract`, `modify`, `stream`, `cat`, `inflate`, `batch`).
+- **`--progress`** (or `ZIPNATIVE_PROGRESS=1`): engine progress on stderr
+  where it is measured (`create --stream` / `--stdin-name` / `--parallel`,
+  `extract` without `--buffered`, `stream`, `cat`) — a text line, or NDJSON
+  `{"type":"progress","command","entriesDone","entriesTotal","bytesIn","bytesOut"}`
+  under `--json`; off under `--quiet`; stdout untouched.
 - **`--strict`** escalates the first engine diagnostic into `E_CHECK_FAILED`
   before any output byte (`verify --strict`: fail on any diagnostic).
 - **Limits** (always on, CWE-tagged): `--max-entries 100000`,
@@ -107,24 +112,34 @@ machine-readable JSON manifest run `zipnative schema manifest`.
   (`--stdin-name`) or a JSON manifest (`--from-manifest`, with `extraFields`
   and `commentBase64`); `--deterministic` pins the pure-TS encoder (identical
   SHA-256 on every runtime), `--stream` (constant memory, data-descriptor
-  layout — reproducible but not canonical; entries > 4 GiB refused),
+  layout — reproducible but not canonical; entries > 4 GiB refused unless
+  `--zip64`, which writes a Zip64 local header for every streamed entry),
   `--parallel` (worker pool; refused with a `--codec` module that shapes the
   writer), `--method store|deflate`, `--level`, `--order canonical|insertion`
   (insertion = argv order, e.g. an EPUB `mimetype` first), `--date` (ISO dates
   are UTC wall-clock, 2-second resolution, 1980–2107; `now`/`--mtime` are
   local and not reproducible), `--comment` / `--comment-file` (raw bytes),
-  globs, `--overwrite`. Envelope reports `layout: buffered|data-descriptor`.
+  globs, `--overwrite`. Envelope reports `layout: buffered|data-descriptor`
+  and `zip64`.
 - `modify` — add/replace/remove/rename entries or set the comment without
   recompressing untouched entries; every re-emitted entry is VERIFIED (CRC,
   sizes, local header — one decompress pass, no opt-out; encrypted /
-  sync-less-codec entries counted in `verifySkipped`); default save is
+  sync-less-codec entries have their local header checked and are counted in
+  `verifySkipped`; an unregistered method is `E_UNSUPPORTED`); default save is
   APPEND-ONLY (removed content remains recoverable; 7-Zip mis-reads the
   layout) — `--compact` for true deletion; `--in-place`; `--overwrite`.
 - `list` — entries without decompressing (`text | json | ndjson`, `--long`
-  adds `rawNameHex` / `commentHex`, `--validate eager`, `--include/--exclude`).
+  adds `rawNameHex` / `commentHex`, `timestamps { mtime, atime, ctime, source }`
+  and `unixIds { uid, gid }`, `--validate eager`, `--include/--exclude`).
+  `--name-encoding <label>` (also inspect, cat, extract, stream) decodes names
+  stored without the UTF-8 flag (`shift_jis`, `gbk`, `windows-1252`, … —
+  default cp437) → `nameEncoding: "custom"`; the engine decodes BEFORE it
+  sanitises, so extraction guards still apply.
 - `inspect` — eager forensic report (stats, diagnostics, determinism verdict:
-  `deterministic` = reproducibility, `canonicalLayout` = no data descriptors)
-  with `--check` assertions (`deterministic`, `canonical-layout`,
+  `deterministic` = reproducibility, `canonicalLayout` = no data descriptors,
+  `canonicalForm` = the engine's stricter `analyzeDeterminism()` verdict with
+  `offenders: [{ name, concern }]`) with `--check` assertions (`deterministic`,
+  `canonical-form`, `canonical-layout`,
   `no-encryption`, `no-symlinks`, `no-duplicates`, `max-ratio=N`, `has=<name>`,
   …) → exit 1 / `E_CHECK_FAILED`.
 - `cat` — stream entries to stdout by random access (`--raw` for the
@@ -142,7 +157,8 @@ machine-readable JSON manifest run `zipnative schema manifest`.
   carries `trust: "local-headers-only"`; `--summary` = `{ entries, bytes,
   descriptorEntries, bytesKnown, trust }`; prefer `list`/`extract` on a file.
 - `verify` — one-call deep verification (`verifyZip`): CRC / size /
-  local-header agreement per entry, encrypted entries honestly `skipped`;
+  local-header agreement per entry; encrypted / stream-only-codec entries are
+  `skipped` (their local header still checked), an unregistered method fails;
   `--entry <name>` (repeatable) verifies selected entries after the
   structural check; exit 1 / `E_VERIFY_FAILED` (`zipCode` set for structural
   refusals).
@@ -214,7 +230,7 @@ Shipped in the package (next to this file):
 On GitHub:
 
 - https://github.com/Nizoka/zipnative-cli/blob/main/docs/KNOWLEDGE_BASE.md —
-  deep reference incl. the 77-export API mapping.
+  deep reference incl. the 106-export API mapping.
 - https://github.com/Nizoka/zipnative-cli/blob/main/SECURITY.md — security
   posture and disclosure.
 - https://github.com/Nizoka/zipnative-cli/blob/main/samples/README.md —

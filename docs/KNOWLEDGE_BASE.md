@@ -8,7 +8,7 @@
 ## 1. Context
 
 **What is zipnative-cli?**
-The official command-line interface for [`zipnative`](https://github.com/Nizoka/zipnative) — a zero-dependency, pure-TypeScript ZIP engine (random access, secure-by-default extraction, streaming, deterministic output, incremental modification) whose 1.0 surface — 77 exports, 39 error codes, `deterministic: true` bytes — is frozen under semver. The CLI exposes 15 commands, grouped by purpose (the global `--help` shows the same grouping):
+The official command-line interface for [`zipnative`](https://github.com/Nizoka/zipnative) — a zero-dependency, pure-TypeScript ZIP engine (random access, secure-by-default extraction, streaming, deterministic output, incremental modification) whose surface — 106 exports in 1.1.0 (77 in 1.0, none removed), 39 error codes, `deterministic: true` bytes — is frozen under semver. The CLI exposes 15 commands, grouped by purpose (the global `--help` shows the same grouping):
 
 | Group | Commands |
 |-------|----------|
@@ -20,7 +20,7 @@ The official command-line interface for [`zipnative`](https://github.com/Nizoka/
 `schema` (self-validation + capability manifest) and `doctor` (capability pre-flight) support agent automation.
 
 **Philosophy:**
-- Zero extra runtime dependencies — `zipnative` (`^1.0.0`) is the *only* dependency.
+- Zero extra runtime dependencies — `zipnative` (`^1.1.0`) is the *only* dependency.
 - Pure dispatch layer — **no ZIP parsing logic lives in the CLI**. The CLI owns argv, the filesystem, stdout/stderr and the agent contract; every byte of ZIP structure is the engine's.
 - The CLI is the **filesystem trust boundary** — the engine never touches disk; `extract` / `stream` are the sinks and re-prove containment themselves (lexically and physically).
 - Composable — every command reads from stdin and writes to stdout by default.
@@ -97,7 +97,7 @@ scripts/
 ├── sync-engine-data.mjs      # the engine-bump step: re-derives docs/data/{errors,core-exports}.json (--check for CI)
 └── helpers/interop-tools.mjs # level-1 foreign integrity tools (bsdtar, unzip, 7z, python-zipfile, jar)
 
-tests/                                   # 56 vitest files (in-process; stdout/stderr captured via helpers/capture.ts)
+tests/                                   # 69 vitest files (in-process; stdout/stderr captured via helpers/capture.ts)
 ├── commands/, utils/, docs/, scripts/   # per-command suites, util suites, tests/docs/consistency.test.ts, vendored-validator drift
 ├── integration/                         # round trips, modify incremental, parallel identity, refusal posture, forward read,
 │                                        #   one spawn smoke test against dist/cli.cjs (exit codes, EPIPE, signals)
@@ -771,7 +771,7 @@ See [AGENTS.md](../AGENTS.md) for the agent-facing summary.
 
 ## 6. Security Model
 
-### The engine's guards (zipnative 1.0.0)
+### The engine's guards (zipnative 1.1.0)
 
 | Threat | Defence | CWE | `zipCode` | CLI switch |
 |--------|---------|-----|-----------|------------|
@@ -1042,9 +1042,9 @@ node scripts/gate.mjs --publish --require-all   # + samples, veraZIP (fail-close
 # Build (outputs dist/cli.cjs — the bin; CJS only, no ESM build, no .d.ts, no source maps)
 npm run build
 
-# Test (56 vitest files, in-process; one spawn smoke test against the built binary)
+# Test (69 vitest files, in-process; one spawn smoke test against the built binary)
 npm test
-npm run test:coverage       # thresholds: statements 93 / branches 88 / functions 94 / lines 93
+npm run test:coverage       # thresholds: statements 95 / branches 91 / functions 97 / lines 96
                             # (measured 96.32 / 92.52 / 97.93 / 96.91 on 2026-09-05; never lower them — add tests)
 
 # Conformance (veraZIP — ISO/IEC 21320-1:2015; level 0 needs no external tool)
@@ -1062,7 +1062,7 @@ node dist/cli.cjs doctor                                      # deflate-tier mus
 node dist/cli.cjs create src/ --deterministic -o /tmp/src.zip && node dist/cli.cjs verify --input /tmp/src.zip
 node dist/cli.cjs create src/ --parallel -o /tmp/p.zip        # proves zipnative/worker resolves from the bundle
 node dist/cli.cjs schema manifest | head
-node samples/run-all.js                                       # 73 jobs, dependency-free
+node samples/run-all.js                                       # 83 jobs, dependency-free
 ```
 
 The published tarball holds 10 files, pinned in `docs/data/package-files.json` (`npm run check:package`): `dist/cli.cjs`, `AGENTS.md`, `CHANGELOG.md`, `LICENSE`, `README.md`, `SECURITY.md`, `THIRD-PARTY-NOTICES.md`, `llms.txt`, `docs/data/errors.json`, `package.json`.
@@ -1071,7 +1071,7 @@ The published tarball holds 10 files, pinned in `docs/data/package-files.json` (
 
 ## 10. Samples
 
-Complete, runnable examples live in [`samples/`](../samples/), one directory per command plus `config` and `agent`; every script ships as a Bash (`.sh`) **and** a PowerShell (`.ps1`) pair — 41 dual-shell demos — and runs offline against the committed input tree in `samples/input/`:
+Complete, runnable examples live in [`samples/`](../samples/), one directory per command plus `config` and `agent`; every script ships as a Bash (`.sh`) **and** a PowerShell (`.ps1`) pair — 45 dual-shell demos — and runs offline against the committed input tree in `samples/input/`:
 
 | Directory | Description |
 |-----------|-------------|
@@ -1091,7 +1091,7 @@ Complete, runnable examples live in [`samples/`](../samples/), one directory per
 | [`govern/`](../samples/govern/) | Rules, policy, `verify-issue` on a passing and a failing draft |
 | [`agent/`](../samples/agent/) | `--json` + `--dry-run`, the error envelope catalogue, token economy |
 
-Run every sample at once (73 jobs, no dependencies):
+Run every sample at once (83 jobs, no dependencies):
 
 ```bash
 node samples/run-all.js

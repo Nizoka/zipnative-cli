@@ -64,11 +64,11 @@ npm run validate:zip   # build + corpus + veraZIP validation (see below)
 ```
 
 All new code must include tests. Coverage thresholds (enforced by `vitest.config.ts`, the single
-source of truth): **statements 93 %, branches 88 %, functions 94 %, lines 93 %** — ratcheted after
-the 1.0.0 audit pass from the measured 96.32 / 92.52 / 97.93 / 96.91 (2026-09-05), three points
-below the actuals so a legitimate refactor does not flap the gate. Never lower them to make a
-change pass — add tests. The suite is 61 files / 1202 tests (9 are platform-conditional and skip
-with a stated reason).
+source of truth): **statements 95 %, branches 91 %, functions 97 %, lines 96 %** — ratcheted for
+1.1.0 from the measured 96.28 / 92.20 / 98.19 / 97.03 (2026-10-18), one point below the actuals
+(1.0.0 kept three). Never lower them to make a
+change pass — add tests. The suite is 69 files / 1311 tests (8 are platform- or checkout-conditional
+and skip with a stated reason).
 
 Tests run the command functions **in-process** with `process.stdout` / `process.stderr` captured
 (`tests/helpers/capture.ts`); adversarial archives (overlaps, zip-slip, CRC lies, descriptor
@@ -84,8 +84,8 @@ The documentation is part of the test surface — update the docs, not the tests
 - **`tests/docs/consistency.test.ts`** pins README, `llms.txt`, AGENTS.md, the knowledge base,
   SECURITY.md, CITATION.cff and the USAGE strings to the code: the 15-command count in every
   document; the 13 `E_*` codes (every token in the docs is real, every code is documented in
-  AGENTS.md and `llms.txt`); the 77-export map (`docs/data/core-exports.json` ↔ KB §8 ↔ the
-  bridge); the 39 `ZIP_*` codes and 11 diagnostics (`docs/data/errors.json` ↔ `ZIP_TO_CLI` ↔
+  AGENTS.md and `llms.txt`); the 106-export map (`docs/data/core-exports.json` ↔ KB §8 ↔ the
+  bridge); the 39 `ZIP_*` codes and 12 diagnostics (`docs/data/errors.json` ↔ `ZIP_TO_CLI` ↔
   AGENTS.md, plus a `raisedBy` list per diagnostic); the README global-options table (every
   `--max-*` flag with its engine default, the `--max-input-size` row with default and CWE, the
   `--dry-run` command list); the README schema section (exactly the 22 subjects); the manifest /
@@ -382,7 +382,7 @@ src/
     └── index.ts           # the ONLY import point of zipnative / zipnative/worker
 scripts/                   # generate-zip-corpus.mjs, validate-zip.mjs (veraZIP), helpers/interop-tools.mjs
 tests/                     # vitest suite (mirrors src/) + tests/docs/ + tests/scripts/ + tests/helpers/ + tests/fixtures/
-samples/                   # .sh + .ps1 per command (41 demos), run-all.js (73 jobs)
+samples/                   # .sh + .ps1 per command (45 demos), run-all.js (83 jobs)
 ```
 
 ## Security

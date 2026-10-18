@@ -61,6 +61,16 @@ describe('fixture policy (tests/fixtures/README.md)', () => {
         }
     });
 
+    it('the one archive committed under samples/input/ is recorded, with its SHA-256, in samples/README.md', () => {
+        const samplesRoot = join(process.cwd(), 'samples', 'input');
+        const committed = walk(samplesRoot).filter((p) => p.toLowerCase().endsWith('.zip'));
+        expect(committed.map((p) => p.slice(samplesRoot.length + 1).replace(/\\/g, '/'))).toEqual(['legacy/shift-jis-names.zip']);
+        const readme = readFileSync(join(process.cwd(), 'samples', 'README.md'), 'utf8');
+        const row = readme.split('\n').find((l) => l.startsWith('| `legacy/shift-jis-names.zip`'));
+        const recorded = /`([0-9a-f]{64})`/.exec(row ?? '')?.[1];
+        expect(createHash('sha256').update(readFileSync(committed[0] as string)).digest('hex')).toBe(recorded);
+    });
+
     it('only ZIP archives are committed as binary fixtures', () => {
         const others = files.filter((p) => !p.toLowerCase().endsWith('.zip'));
         expect(others).toEqual([]);

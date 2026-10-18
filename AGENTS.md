@@ -142,11 +142,15 @@ to their JSON format and compact it).
 { "ok": false, "command": "list", "error": { "code": "E_LIMIT", "message": "\"a.zip\" exceeds --max-input-size (10 bytes; observed 3361). …", "detail": { "limit": "maxInputSize", "configured": 10, "observed": 3361 } } }
 ```
 
+```json
+{ "ok": false, "command": "create", "error": { "code": "E_LIMIT", "message": "Timed out after 1 ms (--timeout); the operation was stopped at the next chunk or entry boundary and the file being written was removed.", "detail": { "limit": "timeout", "configured": 1, "observed": 12 }, "remedy": "--timeout <duration> (a larger deadline)" } }
+```
+
 `error.code` is the **class** (13 values, below), `error.zipCode` is the exact
 **cause** — zipnative's frozen `err.code`, verbatim (39 values). `entryName` and
 `detail` appear when known: `{ limit, configured, observed }` for `E_LIMIT`
 (the engine's `ZipLimits` keys, or the CLI's own `maxInputSize` /
-`captureBytes`), `{ feature }` for `E_UNSUPPORTED`, `{ expectedCrc, actualCrc }`
+`captureBytes` / `timeout` — milliseconds for the last), `{ feature }` for `E_UNSUPPORTED`, `{ expectedCrc, actualCrc }`
 for `E_DATA` / `crc32 --expect`.
 
 **On success**, `create` / `modify` / `extract` / `stream` (extract and cat
@@ -154,7 +158,7 @@ modes, or list mode under `--dry-run`) / `cat` / `inflate` / `crc32` write a
 status line to stderr (`zipnative schema status`):
 
 ```json
-{ "ok": true, "command": "create", "output": "out.zip", "entries": 12, "files": 11, "directories": 1, "bytesIn": 131072, "method": "deflate", "level": 6, "deterministic": true, "order": "canonical", "stream": false, "layout": "buffered", "parallel": false, "skipped": [], "dryRun": false, "bytes": 48213, "tier": "pure-pinned", "diagnostics": [] }
+{ "ok": true, "command": "create", "output": "out.zip", "entries": 12, "files": 11, "directories": 1, "bytesIn": 131072, "method": "deflate", "level": 6, "deterministic": true, "order": "canonical", "stream": false, "zip64": false, "layout": "buffered", "parallel": false, "skipped": [], "dryRun": false, "bytes": 48213, "tier": "pure-pinned", "diagnostics": [] }
 ```
 
 ```json
@@ -169,7 +173,7 @@ Command-specific fields (all confirmed against the built binary):
 
 | Command | Envelope fields beyond `ok`, `command`, `dryRun`, `diagnostics` |
 |---------|-------------------------------------------------------------------|
-| `create` | `output`, `entries`, `files`, `directories`, `bytesIn`, `method`, `level`, `deterministic`, `order`, `stream`, `layout: "buffered" \| "data-descriptor"` (streamed entries), `parallel: false \| { workers }`, `skipped: [{ name, path, reason: "symlink" \| "special" \| "filtered" }]`, `tier` and `bytes` (both absent under `--dry-run`; under `--parallel` `tier` is `node-zlib` or `pure-pinned`, never `injected`) |
+| `create` | `output`, `entries`, `files`, `directories`, `bytesIn`, `method`, `level`, `deterministic`, `order`, `stream`, `zip64` (`--zip64`: streamed entries carry a Zip64 local header), `layout: "buffered" \| "data-descriptor"` (streamed entries), `parallel: false \| { workers }`, `skipped: [{ name, path, reason: "symlink" \| "special" \| "filtered" }]`, `tier` and `bytes` (both absent under `--dry-run`; under `--parallel` `tier` is `node-zlib` or `pure-pinned`, never `injected`) |
 | `modify` | `output`, `bytes`, `edits: [{ op, name, to? }]` (a binary comment shows as `"<N bytes>"`), `layout: "append-only" \| "compact"`, `changed` (false when the save returned the same bytes), `verified` (untouched entries verified before re-emission), `verifySkipped` (encrypted / stream-only-codec entries copied as-is), `tier` (deflate tier of new payloads) |
 | `extract` | `outputDir`, `entries`, `files`, `directories`, `bytes`, `skipped: [{ name, reason: "unsafe-path" \| "symlink" \| "filtered" \| "duplicate" \| "unsupported" }]`, `symlinksAsData` |
 | `stream` | `mode`, `trust: "local-headers-only"`, `outputDir?`, `entries`, `bytes?` (extract / cat modes), `skipped?: [{ name, reason: "unsafe-path" \| "filtered" \| "duplicate" \| "unsupported" }]`, `stoppedAt: "central-directory" \| "eof"` |
@@ -187,11 +191,21 @@ selects / compacts the JSON format. Shapes worth knowing:
 - `list` / `inspect`: `archive.commentHex` (the raw comment bytes) whenever
   `commentBytes > 0` — `comment` is the lossy UTF-8 decode; `--long` rows carry
   `rawNameHex` (always) and `commentHex` (when the entry has a comment);
-  `unixMode` is four octal digits (`"0644"`, `"4755"`) or `null`.
+  `unixMode` is four octal digits (`"0644"`, `"4755"`) or `null`. `--long` rows also
+  carry `timestamps: { mtime, atime, ctime, source: "ut" | "ntfs" | "dos" }` (the
+  most precise stored clock: UT `0x5455`, NTFS `0x000a` or DOS; `atime` / `ctime`
+  `null` when absent) and
+  `unixIds: { uid, gid }` or `null` (the `0x7875` extra field). Under
+  `--name-encoding <label>` a name stored without the UTF-8 flag is decoded with that
+  label and its row says `nameEncoding: "custom"`; `rawNameHex` keeps the stored bytes.
 - `inspect`: `determinism.deterministic` (reproducible: epoch timestamps +
   canonical order + UTF-8 flags) is separate from `determinism.canonicalLayout`
   (no data descriptors) — a `create --stream` archive is reproducible but not
-  canonical.
+  canonical. `determinism.canonicalForm` is the engine's stricter verdict
+  (`analyzeDeterminism()`: also canonical extra fields and version-made-by `0x032D`), and
+  `determinism.offenders: [{ name, concern }]` says which entry breaks it and why
+  (`timestamp` | `order` | `utf8-flag` | `extra-field` | `version-made-by`, plus an
+  informational `data-descriptor`). Gate on it with `--check canonical-form`.
 - `verify --entry <name>` (repeatable): `entries` lists only the selected
   names, `entryCount` stays the archive total, `selected: [names]` is added.
 - `stream --list` rows for data-descriptor entries carry zero sizes and CRC
@@ -577,6 +591,10 @@ the first failing task's `E_*` code and `zipCode`.
   (`E_LIMIT`, `detail.limit: "timeout"`).
   JSON inputs are capped at 50 MB; a captured `batch --json` task stdout at 64 MiB.
   `inflate` always has an output bound.
+- **Decoded names are still guarded.** `--name-encoding` only changes how a name stored
+  without the UTF-8 flag is decoded; the engine applies the decoder **before**
+  `sanitizeEntryPath()`, so `extract` and `stream` refuse a decoded traversal exactly like
+  a UTF-8 one. Compare names by `rawNameHex` when the label is uncertain.
 - **Argv paths are yours; data paths are checked.** `--input ../a.zip` or
   `-o ../out.zip` is ordinary shell usage and is not second-guessed. Paths that arrive as
   *data* — batch-manifest path flags, create/modify-manifest `path` values — are refused
