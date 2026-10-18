@@ -34,8 +34,8 @@ zn inspect --input "$ZIP" --json --summary                  > "$OUTPUT_DIR/03-su
 zn inspect --input "$ZIP" --json --fields archive.bytes,determinism.deterministic > "$OUTPUT_DIR/03-fields.json"
 zn list    --input "$ZIP" --json --fields entries.name      > "$OUTPUT_DIR/03-list-names.json"
 
-# NOTE: --summary and --fields do not combine — when both are passed the
-# summary shape wins and --fields is ignored. Project the FULL report instead.
+# NOTE: --summary and --fields combine — `--fields` then projects the SUMMARY
+# shape (e.g. `inspect --summary --fields unsafeNames,symlinks` is ~50 bytes).
 echo "→ Same archive, six report sizes:"
 size "inspect --format json --entries (pretty)" "$OUTPUT_DIR/03-full-pretty.json"
 size "inspect --json --entries (compact)"       "$OUTPUT_DIR/03-full-compact.json"

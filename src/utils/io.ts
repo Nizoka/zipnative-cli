@@ -117,7 +117,15 @@ export async function readFileOrStdin(filePath: string | undefined, maxBytes: nu
     if (filePath === undefined || filePath === '-') {
         return readStdin(filePath === '-', maxBytes);
     }
-    const handle = await open(filePath, 'r');
+    let handle: FileHandle;
+    try {
+        handle = await open(filePath, 'r');
+    } catch (e) {
+        // A path that cannot be opened is the caller's input, not a CLI bug:
+        // E_IO, as every other reader reports it (release audit D-31).
+        const reason = (e as NodeJS.ErrnoException).code ?? (e instanceof Error ? e.message : String(e));
+        throw new CliError(`Cannot read "${filePath}": ${reason}.`, 1, ErrorCode.IO);
+    }
     try {
         const st = await handle.stat();
         if (st.isDirectory()) {
@@ -213,7 +221,7 @@ export interface FileRangeSource {
  */
 export async function fileRangeSource(filePath: string | undefined): Promise<FileRangeSource> {
     if (filePath === undefined || filePath === '-') {
-        throw new CliError('--range reads a regular file by byte ranges: give the archive path (stdin has no random access).', 2);
+        throw new CliError('--range reads a regular file by byte ranges: give the archive path (stdin has no random access).', 2, ErrorCode.USAGE, { remedy: '<archive path> (a regular file), or omit --range' });
     }
     let handle: FileHandle;
     try {
@@ -225,7 +233,7 @@ export async function fileRangeSource(filePath: string | undefined): Promise<Fil
     const st = await handle.stat();
     if (!st.isFile()) {
         await handle.close();
-        throw new CliError(`--range needs a regular file; "${filePath}" is not one (a pipe or device has no random access).`, 2);
+        throw new CliError(`--range needs a regular file; "${filePath}" is not one (a pipe or device has no random access).`, 2, ErrorCode.USAGE, { remedy: '<archive path> (a regular file), or omit --range' });
     }
     const size = st.size;
     return {
@@ -543,6 +551,10 @@ export async function readJsonInput(filePath: string, what: string): Promise<unk
     try {
         buf = await readFileOrStdin(filePath, JSON_SIZE_LIMIT + 1);
     } catch (e) {
+        // readFileOrStdin names the path; this reader names what the path was for.
+        if (e instanceof CliError && e.code === ErrorCode.IO && e.message.startsWith('Cannot read "')) {
+            throw new CliError(`Cannot read ${what} ${e.message.slice('Cannot read '.length)}`, 1, ErrorCode.IO);
+        }
         if (e instanceof CliError) throw e;
         const message = e instanceof Error ? e.message : String(e);
         throw new CliError(`Cannot read ${what} "${filePath}": ${message}`, 1, ErrorCode.IO);

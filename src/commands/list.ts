@@ -59,7 +59,10 @@ export function listSummary(report: ListReport): Record<string, unknown> {
         directories,
         compressedSize,
         uncompressedSize,
+        // The Zip64 EOCD record and the entries carrying a Zip64 extra field:
+        // a streamed --zip64 archive has the second without the first.
         zip64: report.archive.isZip64,
+        zip64Entries: report.entries.filter((e) => e.usesZip64 === true).length,
         encrypted,
     };
 }
@@ -111,6 +114,10 @@ function render(
     }
 
     if (format === 'ndjson') {
+        // NDJSON rows are complete: the projection flags shape the JSON report
+        // only, and a silent no-op would hide that (release audit D-25).
+        const ignored = ['summary', 'fields'].filter((f) => args.flags[f] !== undefined && args.flags[f] !== false);
+        if (ignored.length > 0) progress(`warning: ${ignored.map((f) => `--${f}`).join(' and ')} shape the JSON report only; NDJSON rows are complete (use --format json).`);
         for (const row of rows) process.stdout.write(serializeJson(row, false) + '\n');
         // No wrapper to carry diagnostics: surface them as text on stderr
         // (progress lines — suppressed by --quiet like every other text line).

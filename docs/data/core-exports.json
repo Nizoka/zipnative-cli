@@ -673,7 +673,7 @@
       "kind": "function",
       "subpath": ".",
       "reach": "capability",
-      "via": "the in-memory ByteRangeSource adapter; the CLI uses fileRangeSource() (one file descriptor) — re-exported for tests and parity"
+      "via": "the engine's in-memory ByteRangeSource adapter: the CLI reaches openZipRange through its own fileRangeSource() (one descriptor, utils/io.ts) and never holds the archive in memory under --range, so no command calls it; tests/commands/core-surfaces-1-1.test.ts drives openZipRange through it and checks the two sources list the same entries"
     },
     {
       "name": "registerCodec",

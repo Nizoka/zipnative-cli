@@ -214,8 +214,8 @@ refuses such a module because its workers never see it.
 
 No encryption (read or write) — encrypted entries are detected and refused
 with `ZIP_UNSUPPORTED_ENCRYPTION` (skippable with `--skip-unsupported`). No
-other archive formats. No multi-disk archives. No archive repair. No streamed
-entries > 4 GiB (buffer instead). No network access, ever.
+other archive formats. No multi-disk archives. No archive repair. A streamed
+entry > 4 GiB needs `--zip64` (refused otherwise). No network access, ever.
 
 ## Conformance
 

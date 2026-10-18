@@ -1,5 +1,5 @@
 {
-  "$comment": "Copy of zipnative docs/data/errors.json (the frozen 39-code error vocabulary and 11 diagnostic codes, with raisedWhen/remedy per code) plus, per error code, the CLI mapping \"cli\": { code: E_*, exitCode } taken from src/utils/ziperr.ts (ZIP_TO_CLI), and, per diagnostic, \"raisedBy\": the CLI commands whose engine paths can emit it (batch surfaces whatever its tasks raise). The --json error envelope carries error.code (the E_* class) and error.zipCode (the ZIP_* cause, verbatim). tests/docs/consistency.test.ts enforces sync with the source table. cli.remedy (when present) is the CLI flag or command that lifts the refusal — the machine-actionable counterpart of the engine message, also emitted as error.remedy in the --json envelope (source: ZIP_REMEDY in src/utils/agent.ts).",
+  "$comment": "Copy of zipnative docs/data/errors.json (the frozen 39-code error vocabulary and 12 diagnostic codes, with raisedWhen/remedy per code) plus, per error code, the CLI mapping \"cli\": { code: E_*, exitCode } taken from src/utils/ziperr.ts (ZIP_TO_CLI), and, per diagnostic, \"raisedBy\": the CLI commands whose engine paths can emit it (batch surfaces whatever its tasks raise). The --json error envelope carries error.code (the E_* class) and error.zipCode (the ZIP_* cause, verbatim). tests/docs/consistency.test.ts enforces sync with the source table. cli.remedy (when present) is the CLI flag or command that lifts the refusal — the machine-actionable counterpart of the engine message, also emitted as error.remedy in the --json envelope (source: ZIP_REMEDY in src/utils/agent.ts).",
   "package": "zipnative",
   "zipnativeVersion": "1.1.0",
   "verifiedOn": "2026-10-08",
@@ -619,7 +619,8 @@
       "remedy": "Pass a Date within 1980-2107 (dosTimeMode selects the wall-clock it is read with), or omit it for the deterministic epoch default.",
       "raisedBy": [
         "create",
-        "modify"
+        "modify",
+        "canonicalize"
       ],
       "raisedByNote": "Every write path that encodes a date: create --date <ISO>, a manifest date, or --mtime on a file older than 1980 (also --parallel and batch --task create), and modify --date / manifest dates. An error (ZIP_STRICT_DIAGNOSTIC) under --strict."
     }

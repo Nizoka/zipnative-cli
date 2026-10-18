@@ -6,7 +6,7 @@
 //         becomes <output-dir>/<name>.zip through the full `create` command
 //         (every create flag — method, level, deterministic, order, date,
 //         comment … — is honoured) with a bounded-concurrency pool.
-//       --task verify: every *.zip in --input-dir is verified (verifyZip) and
+//       --task verify: every *.zip in --input-dir is verified (verifyAll) and
 //         the per-archive verdicts are reported; any failure exits 1.
 //   • Manifest mode (--manifest tasks.json): run an ordered multi-command
 //     pipeline (create → verify → extract → …) with "@id" output references,
@@ -16,17 +16,16 @@ import { readdir, mkdir, readFile, stat } from 'node:fs/promises';
 import { join, basename, dirname, extname, resolve } from 'node:path';
 import { type ParsedArgs, getStringFlag, hasFlag } from '../utils/args.js';
 import { assertJsonSizeLimit, captureStdout, readFileOrStdin } from '../utils/io.js';
-import { CliError, ErrorCode, type ErrorCodeValue } from '../utils/error.js';
+import { CliError, ErrorCode, type ErrorCodeValue, type ErrorDetail } from '../utils/error.js';
 import { isJsonMode, isDryRun, progress, remedyFor } from '../utils/agent.js';
 import { selectFields, serializeJson, parseFieldList } from '../utils/projection.js';
 import { style } from '../utils/colors.js';
 import { escapeTerminal, escapeLine } from '../utils/sanitize.js';
-import { verifyZip } from '../core-bridge/index.js';
+import { verifyAll } from './verify.js';
 import { prepareEngine } from '../utils/engine.js';
-import { parseInputSizeFlag, parseLimitFlags } from '../utils/limits.js';
+import { parseInputSizeFlag } from '../utils/limits.js';
 import { entryPasses } from '../utils/zipops.js';
 import { parsePositiveInt } from '../utils/sizes.js';
-import { guard } from '../utils/ziperr.js';
 import {
     parseManifest,
     assertCodecPolicy,
@@ -56,6 +55,11 @@ interface FileResult {
     readonly code?: ErrorCodeValue;
     /** The engine's ZIP_* cause, when one is known (as in a manifest task's error). */
     readonly zipCode?: string;
+    /** The failing entry when exactly one failed (as `verify` reports it). */
+    readonly entryName?: string;
+    /** `verify`'s `{ failedEntries, failedCount }`, or a bound's `{ limit, configured, observed }`. */
+    readonly detail?: ErrorDetail;
+    readonly remedy?: string;
 }
 
 /** Build the per-directory ParsedArgs forwarded to `create` (batch flags stripped). */
@@ -430,7 +434,6 @@ export async function batch(args: ParsedArgs): Promise<void> {
         if (zips.length === 0) {
             throw new CliError(`No .zip files found in ${inputDir}: --task verify checks every *.zip directly inside the directory (not recursively).`, 1, ErrorCode.INPUT);
         }
-        const limits = parseLimitFlags(args);
         // The same bound as `verify`: one descriptor, size-checked (a FIFO or
         // a symlink named *.zip is byte-counted, never read whole).
         const maxInputSize = parseInputSizeFlag(args);
@@ -443,20 +446,37 @@ export async function batch(args: ParsedArgs): Promise<void> {
             }
             try {
                 const buf = await readFileOrStdin(input, maxInputSize);
-                const report = guard('Verification failed', () => verifyZip(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength), limits !== undefined ? { limits } : undefined));
+                // The same path as `verify`: a declared size over a bound is E_LIMIT, not a verdict.
+                const { core: report } = verifyAll(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength), args);
                 if (report.ok) {
                     results.push({ input, ok: true, error: null });
                     progress(`${style('✓', 'green')} ${file}`);
                 } else {
-                    const failedEntries = report.entries.filter((e) => !entryPasses(e)).length;
-                    const error = report.error !== null ? `${report.error.code}: ${report.error.message}` : `${failedEntries} entries failed verification`;
-                    results.push({ input, ok: false, error, code: ErrorCode.VERIFY_FAILED, ...(report.error !== null ? { zipCode: report.error.code } : {}) });
+                    // The failing names travel with the row, as `verify` reports them (capped at 16).
+                    const failedNames = report.entries.filter((e) => !entryPasses(e)).map((e) => e.name);
+                    const error = report.error !== null ? `${report.error.code}: ${report.error.message}` : `${failedNames.length} entries failed verification`;
+                    results.push({
+                        input, ok: false, error, code: ErrorCode.VERIFY_FAILED,
+                        ...(report.error !== null ? { zipCode: report.error.code } : {}),
+                        ...(failedNames.length === 1 ? { entryName: failedNames[0] as string } : {}),
+                        ...(failedNames.length > 0 ? { detail: { failedEntries: failedNames.slice(0, 16).join(', '), failedCount: failedNames.length } } : {}),
+                    });
                     progress(`${style('✗', 'red')} ${file}: ${error}`);
                     if (failFast) aborted = true;
                 }
             } catch (e) {
                 const error = e instanceof Error ? e.message : String(e);
-                results.push({ input, ok: false, error, ...(e instanceof CliError ? { code: e.code, ...(e.zipCode !== undefined ? { zipCode: e.zipCode } : {}) } : {}) });
+                const remedy = e instanceof CliError ? remedyFor(e) : undefined;
+                results.push({
+                    input, ok: false, error,
+                    ...(e instanceof CliError ? {
+                        code: e.code,
+                        ...(e.zipCode !== undefined ? { zipCode: e.zipCode } : {}),
+                        ...(e.entryName !== undefined ? { entryName: e.entryName } : {}),
+                        ...(e.detail !== undefined ? { detail: e.detail } : {}),
+                        ...(remedy !== undefined ? { remedy } : {}),
+                    } : {}),
+                });
                 progress(`${style('✗', 'red')} ${file}: ${error}`);
                 if (failFast) aborted = true;
             }

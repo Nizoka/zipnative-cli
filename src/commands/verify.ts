@@ -15,8 +15,10 @@
 import { type ParsedArgs, getStringFlag, getStringFlagAll, hasFlag } from '../utils/args.js';
 import { isJsonMode, isStrict } from '../utils/agent.js';
 import {
+    DEFAULT_ZIP_LIMITS,
     verifyZip,
     type EntryVerification,
+    type ZipEntry,
     type ZipVerificationReport,
 } from '../core-bridge/index.js';
 import { createDiagnosticSink, diagnosticRows, type DiagnosticRow } from '../utils/diagnostics.js';
@@ -99,8 +101,65 @@ function renderText(report: VerifyReport, source: string): string {
 }
 
 /** The whole-archive report from the engine's `verifyZip`. */
-function verifyAll(bytes: Uint8Array, args: ParsedArgs): { core: CoreOutcome; diagnostics: readonly DiagnosticRow[] } {
+/** The per-entry bound a verifier's fetch applies, keyed by `ZipLimits`. */
+const ENTRY_BOUNDS = {
+    maxEntryCompressedSize: { flag: 'max-entry-compressed-size', what: 'compressed size', of: (e: ZipEntry) => e.compressedSize },
+    maxEntryUncompressedSize: { flag: 'max-entry-size', what: 'uncompressed size', of: (e: ZipEntry) => e.uncompressedSize },
+} as const;
+
+/**
+ * A declared size over a bound is a refusal, not a verdict: the engine's
+ * verifiers (`verifyZip`, `verifyEntry` on both readers) report a fetch their
+ * bound stopped as a plain CRC / size mismatch, which reads as corruption
+ * (engine draft: .github/drafts/upstream-range-verify-swallows-limit.md). The
+ * same bound is checked here first, so the verdict is E_LIMIT with the flag
+ * that lifts it, as `cat` and `extract` report it (release audit A-70, D-03f).
+ */
+function entryBoundBreach(entry: ZipEntry, args: ParsedArgs, keys: readonly (keyof typeof ENTRY_BOUNDS)[]): CliError | null {
+    const limits = { ...DEFAULT_ZIP_LIMITS, ...parseLimitFlags(args) };
+    for (const key of keys) {
+        const bound = ENTRY_BOUNDS[key];
+        const configured = limits[key];
+        const observed = bound.of(entry);
+        if (observed > configured) {
+            return new CliError(
+                `Entry "${entry.name}" ${bound.what} ${observed} exceeds --${bound.flag} (${configured} bytes); the entry was not verified.`,
+                1,
+                ErrorCode.LIMIT,
+                {
+                    entryName: entry.name,
+                    zipCode: 'ZIP_LIMIT_EXCEEDED',
+                    detail: { limit: key, configured, observed },
+                    remedy: `--${bound.flag} <size> (raise the bound for trusted input only)`,
+                },
+            );
+        }
+    }
+    return null;
+}
+
+const BUFFERED_BOUNDS = ['maxEntryUncompressedSize'] as const;
+const RANGE_BOUNDS = ['maxEntryCompressedSize', 'maxEntryUncompressedSize'] as const;
+
+/** The whole-archive verification `verify` and `batch --task verify` share: the bound check, then `verifyZip`. */
+export function verifyAll(bytes: Uint8Array, args: ParsedArgs): { core: CoreOutcome; diagnostics: readonly DiagnosticRow[] } {
     const limits = parseLimitFlags(args);
+    // The declared sizes first (a lazy open, metadata only): a bound the
+    // verification would hit is E_LIMIT, and a structural limit refusal
+    // (maxEntries, maxCentralDirectoryBytes, …) surfaces as the bound it is
+    // instead of a failed verification. Anything else is verifyZip's report.
+    let declared: readonly ZipEntry[] = [];
+    try {
+        const reader = openArchive(bytes, { ...commonOptions(args, createDiagnosticSink(), 'verify'), strict: false });
+        declared = guard('Failed to read the central directory', () => [...reader.entries()]);
+    } catch (e) {
+        // A structural refusal is verifyZip's report; only a bound surfaces here.
+        if (e instanceof CliError && e.code === ErrorCode.LIMIT) throw e;
+    }
+    for (const entry of declared) {
+        const breach = entryBoundBreach(entry, args, BUFFERED_BOUNDS);
+        if (breach !== null) throw breach;
+    }
     // verifyZip only throws for caller bugs (invalid limits) — pre-validated,
     // but still mapped so an unexpected throw carries a proper code.
     const core = guard('Verification failed', () => verifyZip(bytes, limits !== undefined ? { limits } : undefined));
@@ -121,6 +180,8 @@ function verifySelected(bytes: Uint8Array, args: ParsedArgs, names: readonly str
         reader = openArchive(bytes, { ...commonOptions(args, sink, 'verify'), validate: 'eager' });
     } catch (e) {
         if (!(e instanceof CliError)) throw e;
+        // A bound is not a verdict: it keeps its class and its detail (V-03).
+        if (e.code === ErrorCode.LIMIT) throw e;
         // A structural refusal is the report's `error`, as with verifyZip.
         return {
             core: { ok: false, error: { code: e.zipCode ?? e.code, message: e.message }, entryCount: 0, entries: [] },
@@ -133,6 +194,8 @@ function verifySelected(bytes: Uint8Array, args: ParsedArgs, names: readonly str
         if (entry === null) {
             throw new CliError(`Entry not found: ${name} (run \`zipnative list\` for the exact names).`, 1, ErrorCode.NOT_FOUND, { entryName: name, zipCode: 'ZIP_ENTRY_NOT_FOUND' });
         }
+        const breach = entryBoundBreach(entry, args, BUFFERED_BOUNDS);
+        if (breach !== null) throw breach;
         let v: EntryVerification;
         try {
             v = reader.verifyEntry(entry);
@@ -161,8 +224,9 @@ async function verifyRange(args: ParsedArgs, inputPath: string | undefined, name
     try {
         source = await openArchiveSource(args, inputPath, { ...commonOptions(args, sink, 'verify'), validate: 'eager' });
     } catch (e) {
-        // A structural refusal is the report's `error`, as with verifyZip.
-        if (!(e instanceof CliError) || e.zipCode === undefined) throw e;
+        // A structural refusal is the report's `error`, as with verifyZip; a
+        // bound keeps its class and its detail (V-03).
+        if (!(e instanceof CliError) || e.zipCode === undefined || e.code === ErrorCode.LIMIT) throw e;
         return { core: { ok: false, error: { code: e.zipCode, message: e.message }, entryCount: 0, entries: [] }, diagnostics: sink.diagnostics };
     }
     try {
@@ -178,6 +242,9 @@ async function verifyRange(args: ParsedArgs, inputPath: string | undefined, name
             : guard('Failed to read the central directory', () => [...reader.entries()]);
         const entries: VerifiedEntry[] = [];
         for (const entry of targets) {
+            // Both fetch bounds apply under --range (see entryBoundBreach).
+            const breach = entryBoundBreach(entry, args, RANGE_BOUNDS);
+            if (breach !== null) throw breach;
             try {
                 entries.push({ name: entry.name, ...(await reader.verifyEntry(entry)) });
             } catch (e) {
@@ -198,7 +265,7 @@ export async function verify(args: ParsedArgs): Promise<void> {
     // The whole-archive verifyZip takes no name decoder: --name-encoding only
     // decodes the names --entry looks up (a flag never accepted for nothing).
     if (selected.length === 0 && getStringFlag(args.flags, 'name-encoding') !== undefined) {
-        throw new CliError('--name-encoding applies to --entry lookups (the whole-archive verification reports names as stored): add --entry <decoded name>.', 2);
+        throw new CliError('--name-encoding applies to --entry lookups (the whole-archive verification reports names as stored): add --entry <decoded name>.', 2, ErrorCode.USAGE, { remedy: '--entry <decoded name> (or omit --name-encoding)' });
     }
 
     const inputPath = resolveInputPath(args);
@@ -246,6 +313,8 @@ export async function verify(args: ParsedArgs): Promise<void> {
         const failedNames = core.entries.filter((e) => !entryPasses(e)).map((e) => e.name);
         throw new CliError(reason, 1, ErrorCode.VERIFY_FAILED, {
             ...(core.error !== null ? { zipCode: core.error.code } : {}),
+            // The strict escalation names its cause like `list --strict` does.
+            ...(core.error === null && strictFail && core.ok ? { zipCode: 'ZIP_STRICT_DIAGNOSTIC' } : {}),
             ...(failedNames.length === 1 ? { entryName: failedNames[0] as string } : {}),
             ...(failedNames.length > 0 ? { detail: { failedEntries: failedNames.slice(0, 16).join(', '), failedCount: failedNames.length } } : {}),
         });

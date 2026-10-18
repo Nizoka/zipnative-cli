@@ -312,12 +312,14 @@ function entriesSummarySchema(): JsonSchema {
         $id: id('entries-summary'),
         title: 'zipnative-cli list --summary output',
         type: 'object',
-        required: ['entries', 'files', 'directories', 'compressedSize', 'uncompressedSize', 'zip64', 'encrypted'],
+        required: ['entries', 'files', 'directories', 'compressedSize', 'uncompressedSize', 'zip64', 'zip64Entries', 'encrypted'],
         additionalProperties: false,
         properties: {
             entries: { type: 'integer' }, files: { type: 'integer' }, directories: { type: 'integer' },
             compressedSize: { type: 'integer' }, uncompressedSize: { type: 'integer' },
-            zip64: { type: 'boolean' }, encrypted: { type: 'integer' },
+            zip64: { type: 'boolean', description: 'The archive carries a Zip64 end-of-central-directory record.' },
+            zip64Entries: { type: 'integer', description: 'Entries carrying a Zip64 extra field (a streamed --zip64 archive has these and no Zip64 EOCD).' },
+            encrypted: { type: 'integer' },
         },
     };
 }
@@ -402,11 +404,13 @@ function inspectSummarySchema(): JsonSchema {
         $id: id('inspect-summary'),
         title: 'zipnative-cli inspect --summary output',
         type: 'object',
-        required: ['entries', 'bytes', 'uncompressedSize', 'zip64', 'encrypted', 'deterministic', 'canonicalLayout', 'canonicalForm', 'unsafeNames', 'symlinks', 'duplicateNames', 'diagnostics'],
+        required: ['entries', 'bytes', 'uncompressedSize', 'zip64', 'zip64Entries', 'encrypted', 'deterministic', 'canonicalLayout', 'canonicalForm', 'unsafeNames', 'symlinks', 'duplicateNames', 'diagnostics'],
         additionalProperties: false,
         properties: {
             entries: { type: 'integer' }, bytes: { type: 'integer' }, uncompressedSize: { type: 'integer' },
-            zip64: { type: 'boolean' }, encrypted: { type: 'integer' }, deterministic: { type: 'boolean' },
+            zip64: { type: 'boolean', description: 'The archive carries a Zip64 end-of-central-directory record.' },
+            zip64Entries: { type: 'integer', description: 'Entries carrying a Zip64 extra field (--check zip64 passes on either fact).' },
+            encrypted: { type: 'integer' }, deterministic: { type: 'boolean' },
             canonicalLayout: { type: 'boolean' }, canonicalForm: { type: 'boolean' },
             unsafeNames: { type: 'integer', description: 'Entry names sanitizeEntryPath() refuses (traversal, absolute, drive/UNC, NUL, ADS, device names).' },
             symlinks: { type: 'integer' }, duplicateNames: { type: 'integer' },
@@ -517,7 +521,17 @@ function batchSchema(): JsonSchema {
             total: { type: 'integer' }, succeeded: { type: 'integer' }, failed: { type: 'integer' }, skipped: { type: 'integer' },
             results: {
                 type: 'array',
-                items: { type: 'object', required: ['input', 'ok', 'error'], properties: { input: { type: 'string' }, output: { type: 'string' }, ok: { type: 'boolean' }, error: { type: ['string', 'null'] }, code: { enum: ERROR_CODES } } },
+                items: {
+                    type: 'object',
+                    required: ['input', 'ok', 'error'],
+                    properties: {
+                        input: { type: 'string' }, output: { type: 'string' }, ok: { type: 'boolean' }, error: { type: ['string', 'null'] },
+                        code: { enum: ERROR_CODES }, zipCode: { enum: ZIP_CODES },
+                        entryName: { type: 'string', description: 'The failing entry when exactly one failed.' },
+                        detail: { type: 'object', description: "verify: { failedEntries, failedCount }; a bound: { limit, configured, observed }." },
+                        remedy: { type: 'string' },
+                    },
+                },
             },
             tasks: {
                 type: 'array',

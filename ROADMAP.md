@@ -167,6 +167,13 @@ should carry (recorded in the release PR's *Independent audit* section —
 - **A `remedy` on diagnostic rows** — `ZIP_NONDETERMINISTIC_CODEC` → `--deterministic`,
   `ZIP_DEAD_BYTES_RATIO` → `--compact`, from the `ZIP_REMEDY` table. The engine-side message
   vocabulary is drafted for zipnative (`.github/drafts/upstream-message-vocabulary.md`).
+- **From the 1.1.0 release audit** (`/release-audit`, ledger local under `.audit/1.1.0/`):
+  a committed SHA-256 list of the previous release's conformance corpus, checked by the gate
+  (today the byte-identity claim is a comparison the maintainer prepares); a `stream --codec`
+  sample with a minimal codec module (the `createDecompressor()` contract is documented, not
+  demonstrated); the engine's verifiers surfacing a bound as a bound
+  (`.github/drafts/upstream-range-verify-swallows-limit.md`), after which the CLI's declared-size
+  pre-check in `verify` can go.
 
 ### Ideas feasible now (deferred from 1.1.0, which is scoped to engine parity)
 

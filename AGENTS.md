@@ -78,8 +78,10 @@ parent directory holds. Since 1.1.0 a config file is **presentation only** — `
 …) makes the run fail with `E_USAGE` naming the file. It can therefore change the
 SHAPE of your output, not its safety: still pass `--no-config` (or `--config <file>`) in
 a pipeline so stdout is exactly what you asked for. When a file did apply defaults, the
-envelopes carry `config: { path, applied: [keys] }` and text mode prints `info:
-defaults from <path>: …`. An explicit flag always wins over the file.
+status and error envelopes carry `config: { path, applied: [keys] }` and text mode prints
+`info: defaults from <path>: …`; a read report under `--json` (`list`, `inspect`, `verify`,
+`stream`) names it nowhere — one more reason for `--no-config`. An explicit flag always wins
+over the file.
 
 **Parse stderr line by line.** Under `--json` stderr is newline-delimited and may still
 carry text lines (`warning:` progress for skipped entries, `--codec` notices, NDJSON
@@ -150,7 +152,7 @@ to their JSON format and compact it).
 ```
 
 ```json
-{ "ok": false, "command": "create", "error": { "code": "E_LIMIT", "message": "Timed out after 1 ms (--timeout); the operation was stopped at the next chunk or entry boundary and the file being written was removed.", "detail": { "limit": "timeout", "configured": 1, "observed": 12 }, "remedy": "--timeout <duration> (a larger deadline)" } }
+{ "ok": false, "command": "create", "error": { "code": "E_LIMIT", "message": "Timed out after 1 ms (--timeout); the operation was stopped at the next chunk or entry boundary and any file being written was removed.", "detail": { "limit": "timeout", "configured": 1, "observed": 12 }, "remedy": "--timeout <duration> (a larger deadline)" } }
 ```
 
 `error.code` is the **class** (13 values, below), `error.zipCode` is the exact
@@ -301,7 +303,7 @@ The mapping is `ZIP_TO_CLI` in `src/utils/ziperr.ts`, also printed by
 | `ZIP_UNSUPPORTED_ENCRYPTION` | `E_UNSUPPORTED` | Encrypted entry — route around it (`list` shows `isEncrypted`; `extract --skip-unsupported` / `stream --skip-unsupported`; `modify` copies it unverified and counts `verifySkipped`) |
 | `ZIP_UNSUPPORTED_METHOD` | `E_UNSUPPORTED` | No codec for the method — `--codec <module>`, or `extract` / `stream --skip-unsupported` |
 | `ZIP_UNSUPPORTED_MULTI_DISK` | `E_UNSUPPORTED` | Spanned archive — an explicit anti-goal |
-| `ZIP_UNSUPPORTED_ZIP64_STREAMING` | `E_UNSUPPORTED` | `create --stream` (or `--stdin-name`) entry > 4 GiB — buffer (omit `--stream`) or split |
+| `ZIP_UNSUPPORTED_ZIP64_STREAMING` | `E_UNSUPPORTED` | `create --stream` (or `--stdin-name`) entry > 4 GiB without `--zip64` — add `--zip64`, buffer (omit `--stream`) or split |
 | `ZIP_UNSUPPORTED_CD_LESS_DESCRIPTOR` | `E_UNSUPPORTED` | `stream` cannot delimit this bit-3 entry — use `list` / `extract` on the whole file |
 | `ZIP_UNSUPPORTED_CODEC_MODE` | `E_UNSUPPORTED` | The codec supports only the other access mode (`cat` already falls back to a buffered read for sync-only codecs; `extract --buffered` needs `decompressSync`) |
 
@@ -333,7 +335,7 @@ entry read twice yields one row. `--strict` escalates the **first** one into
 | `ZIP_TIMESTAMP_NOT_PINNED` | info | `create --date now` (also `--parallel`, `batch --task create`), `modify --date now` | The wall clock makes the output non-reproducible |
 | `ZIP_NONDETERMINISTIC_CODEC` | info | `create` with a pinned `--date <ISO>` on the `node-zlib` tier without `--deterministic` (also `--parallel`, `batch --task create`) | Timestamps pinned but a platform codec in use — pass `--deterministic` |
 | `ZIP_DEAD_BYTES_RATIO` | info | `modify` (append-only, not `--compact`) | An append-only `modify` left > 50 % dead bytes — pass `--compact` |
-| `ZIP_TIMESTAMP_CLAMPED` | info | `create` (`--date <ISO>`, a manifest `date`, `--mtime` on a pre-1980 file; also `--parallel`, `batch --task create`), `modify --date` / manifest dates | A date outside 1980-01-01 .. 2107-12-31 (or an invalid one) was clamped to the DOS range (zipnative 1.1); an error (`ZIP_STRICT_DIAGNOSTIC`) under `--strict` |
+| `ZIP_TIMESTAMP_CLAMPED` | info | `create` (`--date <ISO>`, a manifest `date`, `--mtime` on a pre-1980 file; also `--parallel`, `batch --task create`), `modify --date` / manifest dates, `canonicalize --date` | A date outside 1980-01-01 .. 2107-12-31 (or an invalid one) was clamped to the DOS range (zipnative 1.1); an error (`ZIP_STRICT_DIAGNOSTIC`) under `--strict` |
 
 ---
 
@@ -382,7 +384,9 @@ entries-summary`, `inspect-summary`, `verify-summary`, `stream-summary`,
 ## 4. Validate first — `--dry-run`
 
 `create`, `extract`, `modify`, `stream`, `cat`, `inflate` and `batch` accept
-`--dry-run`: inputs are fully validated (inputs walked and names checked,
+`--dry-run`: inputs are fully validated (inputs walked and names checked — except in
+`batch --manifest`, whose plan validates the manifest, its `@ref` graph and every task's
+flags, while a task's own inputs are opened when it runs;
 archives opened and every destination proven safe — existing files are already
 refused — edits applied to the modifier and every untouched entry verified,
 manifests parsed and their `@ref` graph and `--json` stdout policy resolved) but
@@ -634,8 +638,9 @@ the first failing task's `E_*` code and `zipCode`.
 - **Forward reading is unverified metadata.** `stream` trusts local headers alone — no
   central directory to cross-check names, sizes or methods — so mode / symlink policy is
   unavailable, data-descriptor entries show zero sizes (`bytesKnown: false`), a custom
-  method decodes only through a codec's `createDecompressor()` (otherwise refused before
-  its first byte), and every JSON output says `trust: "local-headers-only"`.
+  method decodes only through a codec's `createDecompressor(maxOutput)` — the engine's
+  `ZipDecompressor`, `{ push(chunk): Uint8Array[]; end(): Uint8Array[] }` — (otherwise
+  refused before its first byte), and every JSON output says `trust: "local-headers-only"`.
   Use it only for streams you cannot seek; prefer `list` / `extract` on a complete file.
 - **`--codec` runs user code and shapes what you write.** It is the CLI's only dynamic
   import (same trust as `node -r`): argv only, refused from `.zipnativerc.json` (like every non-presentation key), refused

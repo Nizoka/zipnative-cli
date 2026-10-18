@@ -366,7 +366,11 @@ export function inspectSummary(report: InspectReport): Record<string, unknown> {
         entries: report.archive.entryCount,
         bytes: report.archive.bytes,
         uncompressedSize: report.stats.uncompressedSize,
+        // `zip64` is the Zip64 EOCD record; a streamed --zip64 archive has
+        // Zip64 entries and no record, so both facts travel (--check zip64
+        // passes on either).
         zip64: report.archive.isZip64,
+        zip64Entries: report.stats.zip64Entries,
         encrypted: report.stats.encrypted,
         deterministic: report.determinism.deterministic,
         canonicalLayout: report.determinism.canonicalLayout,

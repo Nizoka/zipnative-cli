@@ -91,7 +91,8 @@ describe('readStdin / readFileOrStdin', () => {
         await writeFile(file, 'ok');
         const viaParent = join(dir, 'sub', '..', 'via-parent.bin');
         expect((await readFileOrStdin(viaParent)).toString()).toBe('ok');
-        await expect(readFileOrStdin(join(dir, '..', 'no-such-file-zipnative'))).rejects.toMatchObject({ code: 'ENOENT' });
+        // A path that cannot be opened is E_IO naming the cause, never a raw Node error (release audit D-31).
+        await expect(readFileOrStdin(join(dir, '..', 'no-such-file-zipnative'))).rejects.toMatchObject({ code: 'E_IO', exitCode: 1, message: expect.stringContaining('ENOENT') as string });
     });
 
     it('reads stdin for "-" and for undefined', async () => {

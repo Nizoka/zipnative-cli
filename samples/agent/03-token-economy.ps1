@@ -5,8 +5,8 @@
 # the named dot-paths (array elements are projected), and --json makes the
 # output compact (single line) unless --pretty is added. The script prints
 # the byte count of each variant side by side.
-# NOTE: --summary and --fields do not combine — when both are passed the
-# summary shape wins and --fields is ignored. Project the FULL report instead.
+# NOTE: --summary and --fields combine — `--fields` then projects the SUMMARY
+# shape (e.g. `inspect --summary --fields unsafeNames,symlinks` is ~50 bytes).
 #
 # Usage:
 #   pwsh -File samples/agent/03-token-economy.ps1

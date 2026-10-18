@@ -33,9 +33,11 @@ Security fixes that change behaviour, each with its migration.
   `--skip-unsafe` or `--allow-symlinks` for every command run below it. Any other key is now
   `E_USAGE` naming the file; `__proto__` / `constructor` / `prototype` are refused; only a
   regular file is read, through one bounded descriptor; a key applies only to a command that
-  declares the flag. The file that applied is announced on stderr
+  declares the flag. The file that applied is announced on stderr in text mode
   (`info: defaults from <path>: <keys>`) and carried as `config: { path, applied }` in the
-  envelopes. **Migration:** move safety and limit settings from the file to argv (or to a
+  status and error envelopes; a read report under `--json` (`list`, `inspect`, `verify`,
+  `stream`) names it nowhere — pass `--no-config` when the shape must not depend on a file.
+  **Migration:** move safety and limit settings from the file to argv (or to a
   `batch` manifest task's `flags`).
 - **Strict invocation** ([ADR 0003](docs/adr/0003-strict-invocation.md)). A flag the command
   does not declare (`--overwite`), a single-value flag given twice, a repeated switch, an
@@ -112,7 +114,8 @@ Security fixes that change behaviour, each with its migration.
   stored without the UTF-8 flag are decoded with any WHATWG label the runtime knows
   (`shift_jis`, `gbk`, `windows-1252`, …) through the engine's `nameDecoder`, which applies it
   **before** sanitising for extraction. `nameEncoding` becomes `"custom"`; `--long` keeps the
-  bytes in `rawNameHex`. `verify` does not take it (`VerifyZipOptions` has no decoder).
+  bytes in `rawNameHex`. `verify` takes it for its `--entry` lookups only (the whole-archive
+  `VerifyZipOptions` has no decoder; without `--entry` the flag is `E_USAGE`).
 - **`--timeout <duration>`** (global: `500`, `500ms`, `30s`, `5m`, `1h`): one `AbortSignal`
   deadline for the run. Past it the run stops at the next chunk or entry boundary with
   **`E_LIMIT`** (`detail.limit: "timeout"`, `configured`, `observed`) and the file being written
@@ -157,7 +160,7 @@ Security fixes that change behaviour, each with its migration.
 - **`scripts/sync-engine-data.mjs`** (`npm run sync:engine`, `--check` in CI): re-derives the
   engine half of `docs/data/errors.json` and `docs/data/core-exports.json` from a zipnative
   checkout, and the CLI mapping from the built CLI.
-- Ten **ADRs** under [docs/adr/](docs/adr/README.md), pinned to the code by a consistency test.
+- Twelve **ADRs** under [docs/adr/](docs/adr/README.md), pinned to the code by a consistency test.
 
 ### Changed
 
@@ -191,7 +194,7 @@ Security fixes that change behaviour, each with its migration.
   `noPropertyAccessFromIndexSignature`, `lib` without `dom`; ESLint adds
   `no-non-null-assertion`, `no-console` and a rule forbidding a `zipnative` import outside the
   core bridge. Coverage thresholds ratcheted to 95 / 91 / 97 / 96 (measured
-  95.92 / 91.77 / 97.78 / 96.83).
+  95.91 / 91.48 / 97.81 / 96.77).
 - **veraZIP** re-ported from zipnative 1.1.0 (`scripts/validate-zip.ts`, commit `1e2ab42`, blob
   `604321f`): the new `WF/DESCRIPTOR-WIDTH` check keys the data-descriptor width on the local
   header's Zip64 extra (APPNOTE 4.3.9.2), a 23-id vocabulary. The corpus gains `create --stream
@@ -259,9 +262,44 @@ Security fixes that change behaviour, each with its migration.
   `.claude/settings.json` (attribution off, the GitHub and npm writes denied). Review and triage
   reports of a release live outside the tree (`.audit/<version>/`, `.github/drafts/`) and are
   summarised in the release PR; `release-notes/draft/` holds the PR bodies only.
+- The release audit's documentation findings: `create --stream --zip64` is how a streamed entry
+  passes 4 GiB (the README feature table, llms.txt, AGENTS.md and the knowledge base said it
+  was refused); SECURITY.md describes the ninth bound and its flag; the `createDecompressor()`
+  contract of a `--codec` module is spelled out; `batch --manifest --dry-run` says what it
+  validates; the `--summary` / `--fields` combination in the token-economy sample; the
+  `doctor` Node check reads `engines.node`; the config announcement is text-mode only.
 
 ### Fixed
 
+- **`verify --range` names a bound, not a corruption**: an entry over
+  `--max-entry-compressed-size` is `E_LIMIT` / `ZIP_LIMIT_EXCEEDED` with `entryName`,
+  `detail { limit, configured, observed }` and the flag as `remedy`, as `cat --raw --range`
+  reports it — the engine's range `verifyEntry()` reports the refused fetch as a plain CRC / size
+  mismatch (drafted upstream), which read as a corrupt archive (release audit A-70).
+- **`--summary` tells the two Zip64 facts apart**: `list` and `inspect` summaries carry
+  `zip64Entries` (entries with a Zip64 extra field) next to `zip64` (the Zip64 EOCD record); a
+  streamed `--zip64` archive has the first and not the second, which `--check zip64` already
+  accepted (audit B-53). The `entries-summary` and `inspect-summary` schemas declare both.
+- **A misspelt `ZIPNATIVE_*` value is refused in the mode argv asked for**: with `--json` the
+  `E_USAGE` arrives as an envelope (the switches were normalised before the `--json` token was
+  read; audit V-01).
+- **A bound is never a verdict in `verify`**: the buffered paths too — an entry whose declared
+  size exceeds `--max-entry-size` is `E_LIMIT` with the bound, not a CRC / size failure (the
+  engine's `verifyZip()` and `verifyEntry()` swallow the refusal; drafted upstream), and a
+  structural limit refusal at open (`--max-entries`, …) keeps `E_LIMIT` and its `detail`
+  instead of becoming `E_VERIFY_FAILED` (audit D-03f, V-03). `verify --strict` names
+  `ZIP_STRICT_DIAGNOSTIC` as `zipCode` like `list --strict` (D-19b).
+- **A missing or unreadable file is `E_IO` on every path**: `govern verify-issue <missing>` and
+  a manifest `raw` entry whose `path` does not exist were `E_RUNTIME` with the raw `ENOENT`
+  (audit D-31).
+- **Remedies where the message already knew the answer**: `--date now`, `--zip64` or
+  `--chunk-size` without a streamed input, `--canonical` without `--compact`,
+  `--name-encoding` without `--entry`, a malformed `--timeout`, `--range` on stdin or a pipe,
+  and `stream --cat` on a name that never arrives carry the lifting flag or command as
+  `error.remedy` (D-32, D-33). CRC details are numbers on every path (`raw` manifest entries
+  printed hex strings; D-20c). `list --format ndjson` warns when `--summary` / `--fields` are
+  ignored (D-25). `batch --task verify` rows carry `entryName`, `detail` and `remedy`, and
+  `schema batch` declares them with `zipCode` (D-17b).
 - **`--timeout` fires while an input is stalled**: a silent pipe made `list -`, `crc32`,
   `create --stdin-name`, `stream` and `extract -` wait forever; the input streams now carry the
   deadline, and the dispatcher fails a run still pending 500 ms after it.

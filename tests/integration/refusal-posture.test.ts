@@ -349,17 +349,21 @@ describe('integration: refusal posture over crafted archives', () => {
         expect(raised.error).toMatchObject({ code: ErrorCode.DATA });
     });
 
-    it('declared-bomb: list shows the declared size, verify fails the entry, inspect --check gates it', async () => {
+    it('declared-bomb: list shows the declared size, verify names the bound, inspect --check gates it', async () => {
         const ls = await listJson('declared-bomb');
         expect(ls.error).toBeUndefined();
         expect(ls.report?.entries[0]?.uncompressedSize).toBe(2 * 1024 * 1024 * 1024);
-        const vr = await verifyJson('declared-bomb');
-        expect(vr.error).toMatchObject({ code: ErrorCode.VERIFY_FAILED });
-        expect(vr.error).not.toHaveProperty('zipCode', expect.any(String));
-        expect(vr.report.ok).toBe(false);
-        expect(vr.report.error).toBeNull();
-        expect(vr.report.entries[0]).toMatchObject({ name: 'bomb.bin', ok: false, sizeMatch: false });
-        expect(vr.report.failed).toBe(1);
+        // The declared size is over --max-entry-size: a bound, not a verdict —
+        // E_LIMIT naming the entry and the flag, no report (release audit D-03f;
+        // verifyZip would have reported the entry as a size mismatch).
+        const vr = await run(() => verify(parseArgs(['--input', paths['declared-bomb'], '--format', 'json'])));
+        expect(vr.error).toMatchObject({ code: ErrorCode.LIMIT, zipCode: 'ZIP_LIMIT_EXCEEDED', entryName: 'bomb.bin', detail: { limit: 'maxEntryUncompressedSize' } });
+        expect(vr.text).toBe('');
+        // Under a bound the declared size fits, the lie is the verdict.
+        const lie = await verifyJson('declared-bomb', '--max-entry-size', '3g');
+        expect(lie.error).toMatchObject({ code: ErrorCode.VERIFY_FAILED });
+        expect(lie.report.entries[0]).toMatchObject({ name: 'bomb.bin', ok: false, sizeMatch: false });
+        expect(lie.report.failed).toBe(1);
         const ins = await inspectJson('declared-bomb', '--check', 'max-uncompressed=1m,max-entries=5');
         expect(ins.error).toMatchObject({ code: ErrorCode.CHECK_FAILED, exitCode: 1 });
         expect(ins.report?.checks).toEqual([

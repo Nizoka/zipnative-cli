@@ -359,6 +359,7 @@ describe('inspect', () => {
                 bytes: expect.any(Number),
                 uncompressedSize: DET_TOTAL,
                 zip64: false,
+                zip64Entries: 0,
                 encrypted: 0,
                 deterministic: true,
                 canonicalLayout: true,

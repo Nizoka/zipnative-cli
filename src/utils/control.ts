@@ -39,11 +39,11 @@ const UNIT_MS: Readonly<Record<string, number>> = { ms: 1, s: 1000, m: 60_000, h
 export function parseDuration(raw: string, flag: string): number {
     const m = DURATION_RE.exec(raw.trim().toLowerCase());
     if (m === null) {
-        throw new CliError(`--${flag} expects a duration such as 500, 500ms, 30s, 5m or 1h, got "${raw}".`, 2);
+        throw new CliError(`--${flag} expects a duration such as 500, 500ms, 30s, 5m or 1h, got "${raw}".`, 2, ErrorCode.USAGE, { remedy: `--${flag} <n>[ms|s|m|h]` });
     }
     const ms = Number(m[1]) * (UNIT_MS[m[2] ?? 'ms'] ?? 1);
     if (!Number.isSafeInteger(ms) || ms <= 0 || ms > MAX_TIMEOUT_MS) {
-        throw new CliError(`--${flag} must be between 1 ms and ${MAX_TIMEOUT_MS} ms (about 24.8 days), got "${raw}".`, 2);
+        throw new CliError(`--${flag} must be between 1 ms and ${MAX_TIMEOUT_MS} ms (about 24.8 days), got "${raw}".`, 2, ErrorCode.USAGE, { remedy: `--${flag} <1ms .. 24d>` });
     }
     return ms;
 }
@@ -56,7 +56,7 @@ let armedMs: number | undefined;
 function timeoutError(ms: number, startedAt: number): CliError {
     const observed = Date.now() - startedAt;
     return new CliError(
-        `Timed out after ${ms} ms (--timeout); the operation was stopped at the next chunk or entry boundary and the file being written was removed.`,
+        `Timed out after ${ms} ms (--timeout); the operation was stopped at the next chunk or entry boundary and any file being written was removed.`,
         1,
         ErrorCode.LIMIT,
         { detail: { limit: 'timeout', configured: ms, observed }, remedy: '--timeout <duration> (a larger deadline)' },

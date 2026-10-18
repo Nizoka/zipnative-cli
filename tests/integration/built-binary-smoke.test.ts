@@ -344,4 +344,20 @@ describe.skipIf(!existsSync(BIN))('integration: built binary smoke (dist/cli.cjs
         expect(r.stdout.trimStart().startsWith('{')).toBe(false);
     });
 
+    it('a misspelt ZIPNATIVE_* switch is refused in the mode argv asked for (audit V-01)', () => {
+        const r = spawnSync(process.execPath, [BIN, 'list', join(ROOT, 'package.json'), '--json'], {
+            encoding: 'utf8',
+            env: { ...process.env, NO_COLOR: '1', ZIPNATIVE_DRY_RUN: 'maybe' },
+            timeout: 15000,
+        });
+        expect(r.status).toBe(2);
+        const line = r.stderr.trim().split('\n').pop() as string;
+        expect(line.startsWith('{')).toBe(true);
+        const env = JSON.parse(line) as { ok: boolean; error: { code: string; message: string } };
+        expect(env.ok).toBe(false);
+        expect(env.error.code).toBe('E_USAGE');
+        expect(env.error.message).toContain('ZIPNATIVE_DRY_RUN');
+        expect(env.error.message).not.toContain('maybe');
+    });
+
 });

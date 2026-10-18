@@ -111,7 +111,8 @@ export function verifyRawPayload(name: string, payload: Uint8Array, meta: RawEnt
         throw new CliError(
             `Raw entry "${name}": CRC-32 ${actual.toString(16).padStart(8, '0')} does not match the declared ${meta.crc32.toString(16).padStart(8, '0')}.`,
             1, ErrorCode.DATA,
-            { entryName: name, zipCode: 'ZIP_CRC_MISMATCH', detail: { expectedCrc: meta.crc32.toString(16).padStart(8, '0'), actualCrc: actual.toString(16).padStart(8, '0') } },
+            // Numbers, as `cat` / `crc32` and the engine's ZipDataError report them.
+            { entryName: name, zipCode: 'ZIP_CRC_MISMATCH', detail: { expectedCrc: meta.crc32, actualCrc: actual } },
         );
     }
 }

@@ -141,8 +141,8 @@ Inputs:
   --stdin-name <n>    Read stdin as one entry named <n>
   --from-manifest <f> JSON manifest ({ comment|commentBase64, order, date,
                       compression, entries: [{ name, path|data|dataBase64|
-                      directory, method, level, date, comment, mode,
-                      extraFields }] }) —
+                      directory, raw, method, level, deterministic, date,
+                      comment, mode, extraFields }] }) —
                       see \`zipnative schema create-manifest\`
   --output,  -o       Output path (default: stdout)
   --overwrite         Replace an existing output file (default: refuse, E_IO)
@@ -267,7 +267,7 @@ Options:
                       a method no registered codec decodes) instead of
                       refusing (E_UNSUPPORTED)
   --overwrite         Replace an existing --output file (default: refuse, E_IO)
-  --dry-run           Plan and verify; write nothing
+  --dry-run           Plan and verify the sources; write nothing
 
 Envelope (--json): { output, inputs, entries, files, directories, order,
 layout, skipped: [{ name, input, reason }], bytes }.
@@ -297,7 +297,9 @@ Options:
                       knows: shift_jis, gbk, windows-1252, ...). nameEncoding
                       becomes "custom"; --long keeps the bytes in rawNameHex
   --summary           { entries, files, directories, compressedSize,
-                        uncompressedSize, zip64, encrypted }
+                        uncompressedSize, zip64, zip64Entries, encrypted }
+                      (zip64 = a Zip64 EOCD record; zip64Entries = entries
+                      with a Zip64 extra field, e.g. a streamed --zip64 archive)
   --fields a,b.c      Dot-path projection of the JSON report
 
 JSON shape: \`zipnative schema entries\`.
@@ -333,9 +335,11 @@ Options:
                         no-diagnostics, store-only, deflate-only,
                         max-entries=N, min-entries=N, max-uncompressed=<size>,
                         max-ratio=N, has=<name>, method=store|deflate|<id>
-  --summary           { entries, bytes, uncompressedSize, zip64, encrypted,
-                        deterministic, canonicalLayout, canonicalForm,
-                        diagnostics, checksPassed? }
+  --summary           { entries, bytes, uncompressedSize, zip64, zip64Entries,
+                        encrypted, deterministic, canonicalLayout,
+                        canonicalForm, unsafeNames, symlinks, duplicateNames,
+                        diagnostics, checksPassed? } (zip64 = a Zip64 EOCD
+                        record; zip64Entries = entries with a Zip64 extra field)
   --fields a,b.c      Dot-path projection
 
 JSON shape: \`zipnative schema inspect\`.
@@ -428,6 +432,8 @@ Options:
   --skip-unsafe       Skip unsafe names instead of failing
   --skip-unsupported  Skip encrypted / unknown-method entries, and --codec
                       methods without createDecompressor, instead of failing
+                      (a codec streams through createDecompressor(maxOutput)
+                      -> { push(chunk): Uint8Array[], end(): Uint8Array[] })
   --name-encoding <label>  Decode non-UTF-8 names (as in \`list\`)
   --summary, --fields Token-economy projection of the --format json report
   --dry-run           Iterate and plan; write nothing
@@ -613,7 +619,9 @@ Output:
   --format, -f text|json  (default text; json under --json)
   --summary           { ok, command, mode, total, succeeded, failed, skipped }
   --fields a,b.c      Dot-path projection
-  --dry-run           Validate and print the plan; execute nothing
+  --dry-run           Validate the manifest (its @ref graph and every task's
+                      flags) and print the plan; execute nothing — a task's own
+                      inputs are opened when it runs
 
 Exit 1 carries the first failing task's E_* code.
 `;
@@ -624,7 +632,8 @@ zipnative doctor — Environment / capability preflight
 Usage:
   zipnative doctor [--format json|text]
 
-Checks: CLI version, Node >= 22, zipnative package vs VERSION export, the
+Checks: CLI version, Node within engines.node (^22.17.1 || >=24.4.1),
+zipnative package vs VERSION export, the
 active deflate tier (node-zlib expected; pure under --pure-codecs), the pinned
 tier used by --deterministic, platform streaming codecs, worker-thread
 availability for \`create --parallel\`, registered codecs, the effective
@@ -765,8 +774,6 @@ function applyGlobalEnv(args: ReturnType<typeof parseArgs>): void {
 async function main(): Promise<void> {
     installEpipeGuard();
     installSignalCleanup();
-    // ZIPNATIVE_* switches take the same eight spellings as the flags.
-    normalizeEnvSwitches();
     const argv = process.argv.slice(2);
     // Agent mode must hold for a refusal raised BY the parse itself (a repeated
     // switch, a prototype name): `--json` is never a flag's value (a token
@@ -775,6 +782,9 @@ async function main(): Promise<void> {
     const endOfFlags = argv.indexOf('--');
     const flagTokens = endOfFlags === -1 ? argv : argv.slice(0, endOfFlags);
     if (flagTokens.some((t) => t === '--json' || /^--json=(?:true|1|yes|on)$/i.test(t))) process.env['ZIPNATIVE_JSON'] = '1';
+    // ZIPNATIVE_* switches take the same eight spellings as the flags. After
+    // the --json token: a misspelt switch is refused in the mode argv asked for.
+    normalizeEnvSwitches();
     // Name the command in an envelope raised by the parse itself (`list a.zip
     // --json --json`): the first bare token that is a command.
     activeCommand = flagTokens.find((t) => !t.startsWith('-') && Object.hasOwn(COMMAND_USAGE, t)) ?? null;

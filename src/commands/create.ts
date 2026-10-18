@@ -424,13 +424,13 @@ export async function create(args: ParsedArgs): Promise<void> {
     // Both --stream and --stdin-name go through writer.stream(), the only
     // path that chunks its output.
     if (!streaming && stdinName === undefined && chunkSize !== undefined) {
-        throw new CliError('--chunk-size requires --stream or --stdin-name (the chunked writer).', 2);
+        throw new CliError('--chunk-size requires --stream or --stdin-name (the chunked writer).', 2, ErrorCode.USAGE, { remedy: '--stream | --stdin-name <name>' });
     }
     // zipnative 1.1 (AddEntryOptions.zip64): the per-entry Zip64 opt-in exists
     // for addStream() only — the buffered writer sizes every entry up front
     // and is fully Zip64 already (the engine refuses the option on add()).
     if (zip64 && !streaming && stdinName === undefined) {
-        throw new CliError('--zip64 requires --stream or --stdin-name: buffered entries are already Zip64 when they need it.', 2);
+        throw new CliError('--zip64 requires --stream or --stdin-name: buffered entries are already Zip64 when they need it.', 2, ErrorCode.USAGE, { remedy: '--stream | --stdin-name <name> (or omit --zip64)' });
     }
 
     const plan = manifestPath !== undefined

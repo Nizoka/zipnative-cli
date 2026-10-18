@@ -188,7 +188,7 @@ describe('verify', () => {
         expect(text).toContain('1 diagnostics');
     });
 
-    it('--strict fails an archive with a diagnostic (E_VERIFY_FAILED, no zipCode)', async () => {
+    it('--strict fails an archive with a diagnostic (E_VERIFY_FAILED, zipCode ZIP_STRICT_DIAGNOSTIC)', async () => {
         const zip = await prependedZip();
         const { report, err } = await runJson(['--input', zip, '--strict']);
         expect(report.ok).toBe(false);
@@ -196,7 +196,8 @@ describe('verify', () => {
         expect(report.error).toBeNull();
         expect(report.failed).toBe(0);
         expect(err?.code).toBe('E_VERIFY_FAILED');
-        expect(err?.zipCode).toBeUndefined();
+        // The escalation names its cause, as `list --strict` does (release audit D-19b).
+        expect(err?.zipCode).toBe('ZIP_STRICT_DIAGNOSTIC');
         expect(err?.message).toContain('1 diagnostic(s) under --strict: ZIP_PREPENDED_DATA');
 
         process.env['ZIPNATIVE_STRICT'] = '1';
@@ -240,11 +241,13 @@ describe('verify', () => {
         expect((JSON.parse(text) as VerifyReport).ok).toBe(true);
     });
 
-    it('--max-* limits are forwarded to verifyZip', async () => {
+    it('--max-* bounds are a refusal, never a verdict (release audit D-03f)', async () => {
         const zip = await goodZip();
-        const { report, err } = await runJson(['--input', zip, '--max-entry-size', '1']);
-        expect(report.ok).toBe(false);
-        expect(err?.code).toBe('E_VERIFY_FAILED');
+        // An intact entry over --max-entry-size is E_LIMIT naming the bound — the
+        // engine's verifyZip would report it as a CRC / size mismatch.
+        await expect(verify(parseArgs(['--input', zip, '--max-entry-size', '1']))).rejects.toMatchObject({
+            code: 'E_LIMIT', zipCode: 'ZIP_LIMIT_EXCEEDED', detail: { limit: 'maxEntryUncompressedSize', configured: 1 },
+        });
         await expect(verify(parseArgs(['--input', zip, '--max-entries', 'many']))).rejects.toMatchObject({ exitCode: 2 });
     });
 

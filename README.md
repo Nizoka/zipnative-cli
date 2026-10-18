@@ -176,7 +176,7 @@ Official CLI for the [`zipnative`](https://github.com/Nizoka/zipnative) engine �
 | Other archive formats / exotic codecs | ❌ | No 7z, RAR, tar, gzip; the codec registry (`--codec`) is the extension point — a registered method is readable everywhere and, for methods 0/8, also drives the writer |
 | Multi-disk / spanned archives | ❌ | Detected and refused (`ZIP_UNSUPPORTED_MULTI_DISK`) |
 | Archive repair / salvage | ❌ | Structural problems are reported (`verify`), never guessed at |
-| Streamed entries > 4 GiB | ❌ | `create --stream` refuses them (`ZIP_UNSUPPORTED_ZIP64_STREAMING`); buffered entries are fully Zip64 |
+| Streamed entries > 4 GiB | ✅ | `create --stream --zip64` / `--stdin-name --zip64` (zipnative 1.1): every streamed entry gets a Zip64 local header; without `--zip64` such an entry is refused (`ZIP_UNSUPPORTED_ZIP64_STREAMING`); buffered entries are fully Zip64 |
 | Network access | ❌ | None, in any mode |
 
 **Note:** everything listed works today. Planned work is tracked in [ROADMAP.md](ROADMAP.md).
@@ -335,7 +335,10 @@ cat a.zip | zipnative stream --cat manifest.json
 ```
 
 `stream` parses local headers alone — every JSON output carries `trust: "local-headers-only"`.
-Prefer `list` / `extract` whenever the whole file is available.
+A refusal met mid-stream (a duplicate name, a hostile name, an unsupported entry without
+`--skip-*`) ends the run with the entries written before it left on disk — a forward reader
+cannot check the archive first, whereas `extract` validates the whole archive before writing
+anything. Prefer `list` / `extract` whenever the whole file is available.
 
 ### Verify integrity
 
@@ -631,7 +634,7 @@ zipnative list <a.zip> [options]
 | `--range` | false | Read the archive by byte ranges through one file descriptor (zipnative 1.1 `openZipRange`): only the central directory is fetched, so an archive larger than memory is listed; `--max-input-size` does not apply. A regular file only — stdin, a pipe or a device has no random access (`E_USAGE`) |
 | `--include <glob>` / `--exclude <glob>` _(repeatable)_ | — | Name filters |
 | `--name-encoding <label>` | `cp437` | Decode names **without** the UTF-8 flag with this encoding: `cp437` (the APPNOTE default), or any WHATWG label the Node runtime's `TextDecoder` knows (`shift_jis`, `gbk`, `windows-1252`, `ibm866`, …; an unknown label is exit 2). Decoded rows report `nameEncoding: "custom"`; the engine still sanitises the decoded name and `--long` keeps the bytes in `rawNameHex` |
-| `--summary` | — | `{ entries, files, directories, compressedSize, uncompressedSize, zip64, encrypted }` |
+| `--summary` | — | `{ entries, files, directories, compressedSize, uncompressedSize, zip64, zip64Entries, encrypted }` — `zip64` is the Zip64 EOCD, `zip64Entries` the entries with a Zip64 extra field (a streamed `--zip64` archive has entries and no EOCD record) |
 | `--fields a,b.c` | — | Dot-path projection of the JSON report |
 
 Nothing is decompressed. JSON shape: `zipnative schema entries`. `--long` rows carry
@@ -656,7 +659,7 @@ zipnative inspect --input <a.zip> [--format json|text] [--check <assert>]...
 | `--extra` | false | Include extra-field payloads as hex |
 | `--name-encoding <label>` | `cp437` | As in `list` |
 | `--check <assert>` _(repeatable, comma-separable)_ | — | Assertion; any failure prints the report then exits 1 with `E_CHECK_FAILED` |
-| `--summary` | — | `{ entries, bytes, uncompressedSize, zip64, encrypted, deterministic, canonicalLayout, canonicalForm, diagnostics, checksPassed? }` |
+| `--summary` | — | `{ entries, bytes, uncompressedSize, zip64, zip64Entries, encrypted, deterministic, canonicalLayout, canonicalForm, unsafeNames, symlinks, duplicateNames, diagnostics, checksPassed? }` — `zip64` is the Zip64 EOCD, `zip64Entries` the entries with a Zip64 extra field (`--check zip64` passes on either) |
 | `--fields a,b.c` | — | Dot-path projection |
 
 Assertions: `deterministic`, `canonical-form`, `epoch-timestamps`, `canonical-order`, `utf8-names`,
@@ -776,7 +779,10 @@ them), and `--list` has to inflate each such entry to find its end. Data-descrip
 engine cannot delimit without the central directory (store, encrypted or custom-codec + bit 3)
 are refused with `ZIP_UNSUPPORTED_CD_LESS_DESCRIPTOR`. A `--cat` name that never arrives is
 `E_NOT_FOUND` / `ZIP_ENTRY_NOT_FOUND`. A `--codec` method is decoded when its codec exposes
-`createDecompressor()` (zipnative 1.1); one without it is refused **before its first byte**
+`createDecompressor(maxOutput)` (zipnative 1.1), which returns the engine's `ZipDecompressor`:
+`{ push(chunk: Uint8Array): Uint8Array[]; end(): Uint8Array[] }` — `push` returns the decoded
+pieces so far (possibly none), `end` the final ones and throws on a truncated stream; a module
+whose `push` returns anything else fails as its own `E_RUNTIME`. One without it is refused **before its first byte**
 (`E_UNSUPPORTED` / `ZIP_UNSUPPORTED_CODEC_MODE` — `--skip-unsupported` skips it instead; `cat` /
 `extract --codec` read it from the complete file).
 
@@ -902,7 +908,7 @@ zipnative doctor [--format json|text]
 |------|---------|-------------|
 | `--format text\|json`, `-f` | `text` (`json` under `--json`) | Output format |
 
-Checks: `cli`, `node` (≥ 22), `zipnative` (package vs `VERSION` export), `deflate-tier`
+Checks: `cli`, `node` (within `engines.node`, `^22.17.1 || >=24.4.1`), `zipnative` (package vs `VERSION` export), `deflate-tier`
 (`node-zlib` expected; `pure` under `--pure-codecs`), `deflate-pinned` (the tier used by
 `--deterministic`), `web-streams` (`CompressionStream` / `DecompressionStream`), `workers`
 (`create --parallel`), `codecs` (registered methods), `limits` (the effective bounds, with
@@ -1024,8 +1030,10 @@ value — raise a bound for trusted input instead), and a bound cannot come from
   where the command declares the flag; **every other key** (`overwrite`, `skip-unsafe`,
   `allow-symlinks`, `max-*`, `codec`, paths, …), the prototype names and a value of the wrong type
   are `E_USAGE` naming the file (the whole file is validated, whatever the command). The file
-  that supplied defaults is announced on stderr (`info: defaults from <path>: …`, suppressed by
-  `--quiet`) and carried as `config: { path, applied }` in the `--json` envelopes. Before 1.1.0
+  that supplied defaults is announced on stderr in text mode (`info: defaults from <path>: …`,
+  suppressed by `--quiet`) and carried as `config: { path, applied }` in the `--json` status and
+  error envelopes; a read report under `--json` (`list`, `inspect`, `verify`, `stream`) names it
+  nowhere, so pass `--no-config` when the shape must not depend on a file. Before 1.1.0
   every key but `codec` was accepted — migrate the others to the command line.
 - **stderr is line-oriented.** Under `--json` the envelope is the last line that starts with
   `{`; the other lines are text (progress, NDJSON diagnostics) that `--quiet` removes.

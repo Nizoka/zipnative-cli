@@ -19,7 +19,7 @@ import { type ParsedArgs, getStringFlag, hasFlag } from '../utils/args.js';
 import { emitStatus, isDryRun, progress } from '../utils/agent.js';
 import { createDiagnosticSink } from '../utils/diagnostics.js';
 import { prepareEngine } from '../utils/engine.js';
-import { CliError } from '../utils/error.js';
+import { CliError, ErrorCode } from '../utils/error.js';
 import { writeOutput } from '../utils/io.js';
 import { guard, mapZipError } from '../utils/ziperr.js';
 import { commonOptions, openArchive, parseIsoDateUtc, readArchiveBytes, resolveInputPath } from '../utils/zipops.js';
@@ -30,7 +30,7 @@ export function parseCanonicalDate(args: ParsedArgs): Date | undefined {
     const raw = getStringFlag(args.flags, 'date');
     if (raw === undefined || raw === 'epoch') return undefined;
     if (raw === 'now') {
-        throw new CliError('--date now is not a canonical form (the bytes would change with every run): pass epoch (the default) or an ISO 8601 date.', 2);
+        throw new CliError('--date now is not a canonical form (the bytes would change with every run): pass epoch (the default) or an ISO 8601 date.', 2, ErrorCode.USAGE, { remedy: '--date epoch | --date <ISO 8601>' });
     }
     try {
         return parseIsoDateUtc(raw, '--date');

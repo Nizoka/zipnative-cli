@@ -201,7 +201,7 @@ export async function stream(args: ParsedArgs): Promise<void> {
 
     if (mode === 'cat' && remainingCat.size > 0) {
         const missing = [...remainingCat];
-        throw new CliError(`Entry not found in stream: ${missing.join(', ')} (forward mode sees local headers only; try \`zipnative stream --list\`).`, 1, ErrorCode.NOT_FOUND, { entryName: missing[0] as string, zipCode: 'ZIP_ENTRY_NOT_FOUND' });
+        throw new CliError(`Entry not found in stream: ${missing.join(', ')} (forward mode sees local headers only; try \`zipnative stream --list\`).`, 1, ErrorCode.NOT_FOUND, { entryName: missing[0] as string, zipCode: 'ZIP_ENTRY_NOT_FOUND', remedy: 'zipnative stream --list < archive (forward mode sees local headers only; names are case-sensitive)' });
     }
 
     for (const s of skipped) progress(`warning: skipped ${s.name} (${s.reason})`);

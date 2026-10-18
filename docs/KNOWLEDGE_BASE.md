@@ -100,7 +100,7 @@ scripts/
 ├── sync-engine-data.mjs      # the engine-bump step: re-derives docs/data/{errors,core-exports}.json (--check for CI)
 └── helpers/interop-tools.mjs # level-1 foreign integrity tools (bsdtar, unzip, 7z, python-zipfile, jar)
 
-tests/                                   # 74 vitest files (in-process; stdout/stderr captured via helpers/capture.ts)
+tests/                                   # 76 vitest files (in-process; stdout/stderr captured via helpers/capture.ts)
 ├── commands/, utils/, docs/, scripts/   # per-command suites, util suites, tests/docs/consistency.test.ts, vendored-validator drift
 ├── integration/                         # round trips, modify incremental, parallel identity, refusal posture, forward read,
 │                                        #   one spawn smoke test against dist/cli.cjs (exit codes, EPIPE, signals)
@@ -311,7 +311,7 @@ cat file | zipnative create --stdin-name <name> -o <out.zip>
 | `--entry-comment name=text` | string[] | — | Per-entry comments (an unknown name is `E_USAGE`) |
 | `--preserve-mode` | boolean | false | External attributes from POSIX mode bits (masked to 0o777; a warning on Windows) |
 | `--store-ext` | csv | — | Extensions stored uncompressed |
-| `--stream` | boolean | false | `addStream()` per file + `writer.stream()` — constant memory, data-descriptor layout (same content, different bytes); entries > 4 GiB are refused (`ZIP_UNSUPPORTED_ZIP64_STREAMING`) |
+| `--stream` | boolean | false | `addStream()` per file + `writer.stream()` — constant memory, data-descriptor layout (same content, different bytes); entries > 4 GiB are refused (`ZIP_UNSUPPORTED_ZIP64_STREAMING`) unless `--zip64` |
 | `--chunk-size` | size | 65536 | Output chunk size of the chunked writer; requires `--stream` or `--stdin-name`; warns outside 1 KiB … 16 MiB |
 | `--parallel` | boolean | false | `createParallelZip` from `zipnative/worker`; byte-identical to the sequential writer per tier; refused (exit 2) with a `--codec` module registering method 0/8, or a `deflateImpl` without `--deterministic` |
 | `--workers` / `--min-job-size` / `--job-timeout` | int / size / ms | cores−1 (max 8) / 32k / 60000 | Require `--parallel`; `--workers 0` = main thread; the pool is used only when ≥ 2 deflate jobs reach `--min-job-size` |
@@ -425,7 +425,7 @@ zipnative list --input <a.zip> [--format text|json|ndjson] [--long] [--validate 
 | `--validate` | `lazy`\|`eager` | `lazy` | `OpenZipOptions.validate` |
 | `--range` | boolean | false | `openZipRange()` over one descriptor of a regular file (`fileRangeSource`): only the central directory is fetched; `--max-input-size` does not apply; stdin is `E_USAGE` |
 | `--include` / `--exclude` | glob[] | — | Name filters |
-| `--summary` / `--fields` | — | — | `listSummary(report)` = `{ entries, files, directories, compressedSize, uncompressedSize, zip64, encrypted }` |
+| `--summary` / `--fields` | — | — | `listSummary(report)` = `{ entries, files, directories, compressedSize, uncompressedSize, zip64, zip64Entries, encrypted }` (`zip64` = the Zip64 EOCD, `zip64Entries` = entries with a Zip64 extra field) |
 
 **JSON shape (`schema entries`):** `{ archive: { bytes, entryCount, isZip64, comment, commentBytes, commentHex? }, entries: EntryRow[], diagnostics: DiagnosticRow[] }`. `comment` is the lossy UTF-8 decode; `commentHex` (the raw bytes) is present whenever `commentBytes > 0`. `EntryRow` = `{ name, nameEncoding, isDirectory, isSymlink, method, methodName, compressedSize, uncompressedSize, ratio, crc32, lastModified, isEncrypted, usesZip64, usesDataDescriptor, unixMode, comment? }` (+ the `--long` fields); `unixMode` is four octal digits (`"0000"`, `"0644"`, `"4755"` — setuid digit first) or `null` when the producer recorded no Unix attributes (version-made-by host ≠ Unix, e.g. a Windows `Compress-Archive` archive), whatever the invoking host. NDJSON carries no wrapper: diagnostics go to stderr as text.
 
@@ -446,7 +446,7 @@ zipnative inspect --input <a.zip> [--format json|text] [--entries | --entry <nam
 | `--entries` / `--entry` | boolean / string[] | — | Long-form rows (incl. `rawNameHex` / `commentHex`) for all / the named entries (`E_NOT_FOUND` + `ZIP_ENTRY_NOT_FOUND` if absent) |
 | `--extra` | boolean | false | Extra-field payloads as hex |
 | `--check` | string[] (comma-separable) | — | `deterministic`, `epoch-timestamps`, `canonical-order`, `utf8-names`, `canonical-layout` / `no-data-descriptor`, `no-zip64`, `zip64`, `no-encryption`, `no-symlinks`, `safe-names`, `no-duplicates`, `no-diagnostics`, `store-only`, `deflate-only`, `max-entries=N`, `min-entries=N`, `max-uncompressed=<size>`, `max-ratio=N`, `has=<name>`, `method=store\|deflate\|<id>`; unknown or malformed → `E_USAGE` |
-| `--summary` / `--fields` | — | — | `inspectSummary(report)` = `{ entries, bytes, uncompressedSize, zip64, encrypted, deterministic, canonicalLayout, diagnostics, checksPassed? }` |
+| `--summary` / `--fields` | — | — | `inspectSummary(report)` = `{ entries, bytes, uncompressedSize, zip64, zip64Entries, encrypted, deterministic, canonicalLayout, canonicalForm, unsafeNames, symlinks, duplicateNames, diagnostics, checksPassed? }` |
 
 **JSON shape (`schema inspect`):** `{ archive: { bytes, entryCount, isZip64, comment, commentBytes, commentHex?, prependedData, multipleEocd }, stats: { files, directories, compressedSize, uncompressedSize, ratio, methods: { [id]: n }, encrypted, symlinks, dataDescriptor, zip64Entries, utf8Names, cp437Names, duplicateNames, unsafeNames, earliestDate, latestDate }, determinism: { epochTimestamps, canonicalOrder, utf8Flags, noDataDescriptors, canonicalLayout, deterministic }, entries?, diagnostics, checks?: [{ check, ok, detail }] }`. `deterministic = epochTimestamps && canonicalOrder && utf8Flags` (reproducibility); `canonicalLayout = noDataDescriptors` (form) — a `create --stream` archive is reproducible but not canonical. Text: `Determinism: reproducible, layout canonical` or `… layout data-descriptor (streamed)`. `prependedData` / `multipleEocd` are derived from the `ZIP_PREPENDED_DATA` / `ZIP_MULTIPLE_EOCD` diagnostics. Any failed check exits 1 / `E_CHECK_FAILED` **after** the report is printed.
 
@@ -756,7 +756,7 @@ When no code is passed, `CliError` derives one from the exit code (`2 → E_USAG
 | `ZIP_UNSUPPORTED_ENCRYPTION` | `E_UNSUPPORTED` | An entry is encrypted — unsupported in 1.x by policy (`detail.feature`: `zipcrypto` \| `strong-encryption`); `extract` / `stream --skip-unsupported` skip it |
 | `ZIP_UNSUPPORTED_METHOD` | `E_UNSUPPORTED` | A compression method has no registered codec (`--codec` one); `extract` / `stream --skip-unsupported` skip it |
 | `ZIP_UNSUPPORTED_MULTI_DISK` | `E_UNSUPPORTED` | The archive is multi-disk / spanned |
-| `ZIP_UNSUPPORTED_ZIP64_STREAMING` | `E_UNSUPPORTED` | A `create --stream` (or `--stdin-name`) entry exceeds 4 GiB — buffer it (omit `--stream`) or split it |
+| `ZIP_UNSUPPORTED_ZIP64_STREAMING` | `E_UNSUPPORTED` | A `create --stream` (or `--stdin-name`) entry exceeds 4 GiB without `--zip64` — add `--zip64`, buffer it (omit `--stream`) or split it |
 | `ZIP_UNSUPPORTED_CD_LESS_DESCRIPTOR` | `E_UNSUPPORTED` | `stream` met a bit-3 entry it cannot delimit (store / encrypted / custom codec) — use `list` / `extract` on the complete file |
 | `ZIP_UNSUPPORTED_CODEC_MODE` | `E_UNSUPPORTED` | A registered codec supports only the other access mode (`cat` falls back to `readEntry()` for sync-only codecs; `extract --buffered` needs `decompressSync`) |
 
@@ -779,7 +779,7 @@ Row shape: `{ code, severity, message, entryName? }` (`schema diagnostics`). The
 | `ZIP_TIMESTAMP_NOT_PINNED` | info | `create --date now` (also `--parallel`, `batch --task create`), `modify --date now` | The wall clock makes the output non-reproducible |
 | `ZIP_NONDETERMINISTIC_CODEC` | info | `create` with a pinned `--date <ISO>` on a non-pure tier without `--deterministic` (also `--parallel`, `batch --task create`) | Timestamps pinned but a platform codec in use — pass `--deterministic` |
 | `ZIP_DEAD_BYTES_RATIO` | info | `modify` (append-only `save()`) | > 50 % dead bytes; removed content remains recoverable — pass `--compact` |
-| `ZIP_TIMESTAMP_CLAMPED` | info | `create` (`--date <ISO>`, a manifest `date`, `--mtime` on a pre-1980 file; also `--parallel`, `batch --task create`), `modify --date` / manifest dates | A date outside 1980-01-01 .. 2107-12-31 (or an invalid one) was clamped to the DOS range (zipnative 1.1); an error (`ZIP_STRICT_DIAGNOSTIC`) under `--strict` |
+| `ZIP_TIMESTAMP_CLAMPED` | info | `create` (`--date <ISO>`, a manifest `date`, `--mtime` on a pre-1980 file; also `--parallel`, `batch --task create`), `modify --date` / manifest dates, `canonicalize --date` | A date outside 1980-01-01 .. 2107-12-31 (or an invalid one) was clamped to the DOS range (zipnative 1.1); an error (`ZIP_STRICT_DIAGNOSTIC`) under `--strict` |
 
 ### `--dry-run`
 
@@ -799,8 +799,8 @@ Order of application (`emitJsonReport`): `--summary` first (the caller's canonic
 
 | Command | `--summary` shape |
 |---------|-------------------|
-| `list` | `{ entries, files, directories, compressedSize, uncompressedSize, zip64, encrypted }` |
-| `inspect` | `{ entries, bytes, uncompressedSize, zip64, encrypted, deterministic, canonicalLayout, diagnostics, checksPassed? }` |
+| `list` | `{ entries, files, directories, compressedSize, uncompressedSize, zip64, zip64Entries, encrypted }` |
+| `inspect` | `{ entries, bytes, uncompressedSize, zip64, zip64Entries, encrypted, deterministic, canonicalLayout, canonicalForm, unsafeNames, symlinks, duplicateNames, diagnostics, checksPassed? }` |
 | `verify` | `{ ok, entries, failed, skipped, diagnostics, selected?, error? }` |
 | `stream` | `{ entries, bytes, descriptorEntries, bytesKnown, trust: "local-headers-only" }` |
 | `batch` | `{ ok, command, mode, task?, dryRun?, total, succeeded, failed, skipped? }` (drops `results` / `tasks`) |
@@ -1099,7 +1099,7 @@ node scripts/gate.mjs --publish --require-all   # + samples, veraZIP (fail-close
 # Build (outputs dist/cli.cjs — the bin; CJS only, no ESM build, no .d.ts, no source maps)
 npm run build
 
-# Test (74 vitest files, in-process; one spawn smoke test against the built binary)
+# Test (76 vitest files, in-process; one spawn smoke test against the built binary)
 npm test
 npm run test:coverage       # thresholds: statements 95 / branches 91 / functions 97 / lines 96
                             # (measured 96.32 / 92.52 / 97.93 / 96.91 on 2026-09-05; never lower them — add tests)

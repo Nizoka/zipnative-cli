@@ -230,7 +230,7 @@ export async function modify(args: ParsedArgs): Promise<void> {
     // --canonical: the compact rewrite in zipnative's canonical deterministic
     // form (saveCompact({ canonical }), zipnative 1.1) — `canonicalize` with edits.
     const canonical = hasFlag(args.flags, 'canonical');
-    if (canonical && !compact) throw new CliError('--canonical rewrites the archive: it requires --compact (append-only keeps the original bytes).', 2);
+    if (canonical && !compact) throw new CliError('--canonical rewrites the archive: it requires --compact (append-only keeps the original bytes).', 2, ErrorCode.USAGE, { remedy: '--compact --canonical' });
     const manifestPath = getStringFlag(args.flags, 'from-manifest');
     const dryRun = hasFlag(args.flags, 'dry-run') || isDryRun();
     const compression = parseCompression(args);
