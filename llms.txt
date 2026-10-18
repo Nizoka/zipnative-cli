@@ -178,7 +178,7 @@ machine-readable JSON manifest run `zipnative schema manifest`.
   with `tasks[i].stdoutBytes`; tasks that would write an artefact to stdout
   (`create`/`modify`/`cat`/`inflate` without `output`, `stream --cat`) are
   refused at validation (exit 2).
-- `doctor` — offline preflight: CLI / Node ≥ 22 / zipnative versions,
+- `doctor` — offline preflight: CLI / Node (`^22.17.1 || >=24.4.1`) / zipnative versions,
   deflate tier (`node-zlib` expected), pinned tier, web streams, workers,
   codecs, effective limits (incl. `maxInputSize`), command count. Exit 0/1.
 - `schema` / `completion` — self-description and shell completions
@@ -236,5 +236,5 @@ On GitHub:
   posture and disclosure.
 - https://github.com/Nizoka/zipnative-cli/blob/main/samples/README.md —
   41 runnable `.sh` + `.ps1` demos.
-- Requires Node ≥ 22; the package is a CommonJS bin (`dist/cli.cjs`) with no
+- Requires Node `^22.17.1 || >=24.4.1` (a security patch floor); the package is a CommonJS bin (`dist/cli.cjs`) with no
   programmatic entry point. MIT licensed.

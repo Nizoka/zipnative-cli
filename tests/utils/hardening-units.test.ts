@@ -45,7 +45,10 @@ describe('engines.ts', () => {
     });
 
     it('the package range doctor checks is package.json engines.node, and this runtime satisfies it', () => {
-        expect(nodeRange()).toBe('>=22');
+        expect(nodeRange()).toBe('^22.17.1 || >=24.4.1');
+        expect(satisfies('22.17.0', nodeRange())).toBe(false);
+        expect(satisfies('24.4.0', nodeRange())).toBe(false);
+        expect(satisfies('22.17.1', nodeRange())).toBe(true);
         expect(satisfies(process.versions.node, nodeRange())).toBe(true);
     });
 });

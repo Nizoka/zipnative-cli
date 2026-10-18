@@ -143,8 +143,9 @@ writes them. Design decisions are recorded as ADRs in [docs/adr/](docs/adr/READM
   is per entry (explicit dates store UTC fields; `--date now` and `--mtime` store local
   wall-clock time), which one archive-wide mode cannot express
   ([ADR 0008](docs/adr/0008-dos-dates-per-entry-convention.md)).
-- **`doctor`** reads the supported Node range from `package.json` `engines.node` (still
-  `>=22`) instead of a hard-coded floor.
+- **Node security floor**: `engines.node` is `^22.17.1 || >=24.4.1` (was `>=22`) — the patch floor of the Windows path-normalisation fixes CVE-2025-23084 and CVE-2025-27210 (device names in `path.join` / `normalize`), which the sink's containment relies on. `doctor`
+  reads the range from `package.json` instead of a hard-coded floor and reports `error` below it,
+  and the gate's `node-floor` step enforces it. npm `engines` is advisory for installs.
 - **Exit after flush**: an exit that follows a stdout or stderr write waits for the stream to
   drain (asynchronous pipes on macOS and Windows could truncate the output).
 - **TypeScript and lint**: `exactOptionalPropertyTypes`, `noImplicitOverride`,

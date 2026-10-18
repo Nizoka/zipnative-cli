@@ -112,7 +112,7 @@ deviation from the plan is recorded in an ADR or in ROADMAP:
 
 - `dosTimeMode` not adopted (ADR 0008);
 - no `--max-entry-compressed-size` flag (ADR 0007);
-- the Node floor stays `>=22`;
+- the Node floor is `^22.17.1 || >=24.4.1` (Windows path CVEs; second review);
 - no `stream --codec` sample: the CLI cannot write a custom-method archive, so the case is
   covered by tests;
 - runner labels stay `-latest`, as in the sibling repositories.

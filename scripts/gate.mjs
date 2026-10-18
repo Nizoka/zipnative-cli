@@ -106,6 +106,18 @@ function reproducible() {
     return before === after ? [] : [`two builds differ: ${before} vs ${after}`];
 }
 
+/** The Node.js security floor (package.json engines.node), as the built CLI's doctor evaluates it. */
+function nodeFloor() {
+    if (!existsSync(CLI)) return ['dist/cli.cjs is missing (run build first)'];
+    const r = spawnSync(process.execPath, [CLI, 'doctor', '--format', 'json'], { encoding: 'utf8' });
+    try {
+        const node = /** @type {{ checks: { name: string; status: string; detail: string }[] }} */ (JSON.parse(r.stdout)).checks.find((c) => c.name === 'node');
+        return node?.status === 'ok' ? [] : [`Node.js ${process.versions.node} is below the security floor: ${node?.detail ?? 'no node check'}`];
+    } catch {
+        return [`doctor --format json is not JSON: ${r.stdout}${r.stderr}`];
+    }
+}
+
 function bundleCheck() {
     return existsSync(CLI) ? probeBundle(readFileSync(CLI, 'utf8')) : ['dist/cli.cjs is missing (run build first)'];
 }
@@ -126,6 +138,7 @@ export const STEPS = [
     { id: 'dist-check', inline: distCheck, profiles: ['ci', 'publish'] },
     { id: 'bundle-check', inline: bundleCheck, profiles: ['ci', 'publish'], note: () => 'engine external, no inlined engine code' },
     { id: 'smoke', inline: smoke, profiles: ['ci', 'publish'], note: () => '15 commands' },
+    { id: 'node-floor', inline: nodeFloor, profiles: ['ci', 'publish'], note: () => `Node.js ${process.versions.node}` },
     // After `build`: the built-binary suites need dist/ and self-skip without it.
     { id: 'test:coverage', npmScript: 'test:coverage', profiles: ['ci', 'publish'] },
     { id: 'engine-data', node: ['scripts/sync-engine-data.mjs', '--check'], profiles: ['ci', 'publish'], skipWhen: () => (existsSync(join(ROOT, '..', 'zipnative', 'docs', 'data', 'errors.json')) || process.env['ZIPNATIVE_ENGINE_CHECKOUT'] !== undefined ? null : 'no zipnative checkout next to this repository (ZIPNATIVE_ENGINE_CHECKOUT)') },

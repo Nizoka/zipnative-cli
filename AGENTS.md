@@ -16,7 +16,7 @@ with its frozen `ZIP_*` code intact.
 
 ## 1. The process contract
 
-**Prerequisite:** Node.js ≥ 22 (check with `zipnative doctor`).
+**Prerequisite:** Node.js `^22.17.1 || >=24.4.1` — a security patch floor (check with `zipnative doctor`).
 
 | Channel | Carries |
 |---------|---------|
@@ -477,7 +477,7 @@ enforces.
 
 ## 7. Recommended agent loop
 
-1. `zipnative doctor --format json` → confirm the CLI, Node ≥ 22 and the engine are
+1. `zipnative doctor --format json` → confirm the CLI, the Node floor and the engine are
    present, the deflate tier is `node-zlib`, workers are available if you plan
    `create --parallel`, and read the **effective limits** as numbers from the
    `limits` check's `data` (incl. `maxInputSize`).

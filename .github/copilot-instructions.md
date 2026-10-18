@@ -20,7 +20,7 @@ ZIP bytes are hand-written only in `scripts/` (corpus canaries, vendored validat
 `tests/helpers/raw-zip-builder.ts` (hostile fixtures), and both are engine-independent by
 construction. The CLI is offline, always: no command can open a socket.
 
-**Targets:** Node.js ≥ 22. The package is a CommonJS bin (`dist/cli.cjs`, the only build
+**Targets:** Node.js `^22.17.1 || >=24.4.1` (security patch floor). The package is a CommonJS bin (`dist/cli.cjs`, the only build
 artefact — no ESM build, no `.d.ts`, no programmatic entry point). Ubuntu 22/24 and Windows 22/24
 are blocking in CI (path separators, reserved device names, case-insensitive filesystems, CRLF);
 macOS 22 runs too.

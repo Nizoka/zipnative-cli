@@ -27,6 +27,18 @@ describe('probeBundle (gate step bundle-check)', () => {
         expect(probeBundle(`${GOOD}#!/usr/bin/env node\n`).join('\n')).toMatch(/second shebang/);
     });
 
+    it('refuses a network module, with or without the node: prefix ("offline, always")', () => {
+        for (const mod of ['net', 'node:http', 'https', 'node:tls', 'dgram', 'dns', 'http2']) {
+            expect(probeBundle(`${GOOD}require('${mod}');\n`).join('\n'), mod).toMatch(/network module/);
+        }
+        expect(probeBundle(`${GOOD}require('node:os');\n`)).toEqual([]);
+    });
+
+    it('runs the node-floor step in the ci and publish profiles', () => {
+        expect(selectSteps({ profile: 'ci', only: 'node-floor', from: null }).map((s) => s.id)).toEqual(['node-floor']);
+        expect(selectSteps({ profile: 'fast', only: null, from: null }).map((s) => s.id)).not.toContain('node-floor');
+    });
+
     it('refuses stdout prints, attribution trailers and embedded binary data', () => {
         expect(probeBundle(`${GOOD}console.log("x");\n`).join('\n')).toMatch(/console\.log/);
         expect(probeBundle(`${GOOD}// Co-Authored-By: someone\n`).join('\n')).toMatch(/attribution trailers/);

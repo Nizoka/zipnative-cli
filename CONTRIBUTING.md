@@ -12,7 +12,7 @@ npm ci
 
 ### Requirements
 
-- Node.js >= 22 (`.nvmrc` / `.node-version`: 22 — the line CI, the release and contributors
+- Node.js `^22.17.1 || >=24.4.1`, a security patch floor that `node scripts/gate.mjs` enforces (`node-floor`) (`.nvmrc` / `.node-version`: 22 — the line CI, the release and contributors
   share)
 - npm >= 10 for development (`npm ci`; `packageManager` names npm 10.9.2, as across the
   ecosystem). Publishing needs npm >= 11.5.1 (Trusted Publishing) and happens only in

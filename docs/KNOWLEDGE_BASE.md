@@ -28,7 +28,7 @@ The official command-line interface for [`zipnative`](https://github.com/Nizoka/
 - Never loosen a security default — opt-outs skip, they never write anything unsafe.
 - Honest envelopes — what the CLI reports (`tier`, `layout`, `verified`, `trust`) is what the engine did.
 
-**Targets:** Node.js ≥ 22. The package is bin-only: one CJS bundle, `dist/cli.cjs` (no ESM build, no type declarations). CI: Ubuntu (Node 22, 24), Windows (Node 22, 24) and macOS (Node 22); the veraZIP conformance gate runs on Linux and Windows.
+**Targets:** Node.js `^22.17.1 || >=24.4.1` (the patch floor of the Windows path-normalisation fixes CVE-2025-23084 and CVE-2025-27210 (device names in `path.join` / `normalize`), which the sink's containment relies on). The package is bin-only: one CJS bundle, `dist/cli.cjs` (no ESM build, no type declarations). CI: Ubuntu (Node 22, 24), Windows (Node 22, 24) and macOS (Node 22); the veraZIP conformance gate runs on Linux and Windows.
 
 **Repository:** https://github.com/Nizoka/zipnative-cli
 **npm:** https://www.npmjs.com/package/zipnative-cli

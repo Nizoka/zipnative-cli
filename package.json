@@ -80,7 +80,6 @@
     "batch",
     "pipeline",
     "llms-txt",
-    "mcp",
     "sbom",
     "supply-chain"
   ],
@@ -99,7 +98,7 @@
     "url": "https://plika.app"
   },
   "engines": {
-    "node": ">=22"
+    "node": "^22.17.1 || >=24.4.1"
   },
   "packageManager": "npm@10.9.2",
   "publishConfig": {

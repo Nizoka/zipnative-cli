@@ -45,6 +45,12 @@ export function externalSpecifiers(/** @type {string} */ code) {
 }
 
 /**
+ * Built-ins that open sockets or resolve names. "Offline, always" (CLAUDE.md):
+ * the bundle must never load one, with or without the `node:` prefix.
+ */
+export const DENIED_BUILTINS = new Set(['net', 'http', 'https', 'http2', 'tls', 'dgram', 'dns', 'dns/promises']);
+
+/**
  * The failure lines for `code`; empty when the bundle is what it should be.
  * @param {string} code
  * @returns {string[]}
@@ -66,7 +72,8 @@ export function probeBundle(code) {
     if (code.includes('\u0000')) failures.push('a NUL byte found in the bundle');
     const externals = externalSpecifiers(code);
     for (const spec of externals) {
-        if (!ALLOWED_EXTERNALS.has(spec) && !isBuiltin(spec)) failures.push(`external "${spec}" is not a Node built-in and not on the allow list`);
+        if (DENIED_BUILTINS.has(spec.replace(/^node:/, ''))) failures.push(`require("${spec}") found — a network module; no command may open a socket`);
+        else if (!ALLOWED_EXTERNALS.has(spec) && !isBuiltin(spec)) failures.push(`external "${spec}" is not a Node built-in and not on the allow list`);
     }
     for (const required of REQUIRED_EXTERNALS) {
         if (!externals.includes(required)) failures.push(`require("${required}") is missing — the engine must stay external`);

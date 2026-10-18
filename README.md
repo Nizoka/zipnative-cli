@@ -217,7 +217,7 @@ Or run without installing:
 npx zipnative-cli create src/ --output src.zip
 ```
 
-**Requirements:** Node.js ≥ 22 (CI runs 22 and 24 on Ubuntu and Windows, 22 on macOS). The
+**Requirements:** Node.js ^22.17.1 or >=24.4.1 — the patch floor of the Windows path-normalisation fixes CVE-2025-23084 and CVE-2025-27210 (device names in `path.join` / `normalize`), which the sink's containment relies on (CI runs 22 and 24 on Ubuntu and Windows, 22 on macOS). The
 package ships one CommonJS bin (`dist/cli.cjs`) plus `README.md`, `AGENTS.md`, `llms.txt` and
 `docs/data/errors.json` — it is a command-line tool, not a library.
 
