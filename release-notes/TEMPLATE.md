@@ -6,7 +6,9 @@ This directory contains release notes for each published version of `zipnative-c
 
 - One file per version: `release-notes/vMAJOR.MINOR.PATCH.md`
 - Examples: `v1.0.0.md`, `v1.1.0.md`, `v2.0.0.md`
-- Release PR drafts live in `release-notes/draft/PR-vX.Y.Z.md` (written by an agent, submitted by a human).
+- Release PR drafts live in `release-notes/draft/PR-vX.Y.Z.md` (written by an agent, submitted by a human). They are committed: the body of a release pull request is the auditable record of what that release claimed.
+- Review and audit reports live under `.audit/<version>/` (git-ignored, written by `/release-audit`); the PR draft's *Independent audit* section is their committed summary.
+- Triage drafts of open pull requests and alerts live under `.github/drafts/` (git-ignored, HITL); the PR draft's *Human follow-ups* section carries the verdict table.
 
 ## Template
 

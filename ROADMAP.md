@@ -145,7 +145,8 @@ CLI stays a thin dispatch layer and never re-implements engine logic).
 ### 1.2 targets from the second 1.1.0 review (verified, deferred)
 
 Legitimate findings that the verifier deferred because they cost more churn than a minor release
-should carry (`release-notes/draft/review-v1.1.0.md`):
+should carry (recorded in the release PR's *Independent audit* section —
+`release-notes/draft/PR-v1.1.0.md`; the full report is local, `.audit/1.1.0/review-v1.1.0.md`):
 
 - **Token budget for the AI-facing text** — AGENTS.md (49 KB), llms.txt (15 KB), CLAUDE.md and
   copilot-instructions total about 94 KB (≈ 23k tokens). Targets: `llms.txt` as an
@@ -154,8 +155,9 @@ should carry (`release-notes/draft/review-v1.1.0.md`):
   or less, deferring to copilot-instructions.
 - **Contract and contributor guide split** (family parity) — move the consumer contract to
   `docs/AGENT_CONTRACT.md` (shipped) and make AGENTS.md the coding-agent contributor guide, as in
-  pkinative-cli and pdfnative-cli, with a pointer stub so no link breaks. Tracking a shared
-  `.claude/` guard hook and rules is the maintainer's call.
+  pkinative-cli and pdfnative-cli, with a pointer stub so no link breaks. The release-audit skill
+  and the shared `.claude/settings.json` are tracked since 1.1.0; the PreToolUse guard hook and
+  `.claude/rules/` stay the maintainer's call.
 - **Family hygiene** — a `docs.yml` workflow (docs verification + npm drift), a Deno / Bun
   runtime smoke job, `release-notes/PR_TEMPLATE.md`, a standalone `docs/THREAT_MODEL.md` with the
   trust boundaries (argv vs data paths vs archive bytes vs codec modules), an ADR "one runtime

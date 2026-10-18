@@ -17,9 +17,10 @@ with a migration (CHANGELOG `### Security`). Everything else is additive: the en
 `E_*` codes, the exit codes and the `ZIP_*` mapping are unchanged, and the 37 archives of the
 1.0.0 veraZIP corpus are byte-identical.
 
-Release notes: [release-notes/v1.1.0.md](../v1.1.0.md). Second review (two independent reviewers + a verifier, every finding with its verdict): [release-notes/draft/review-v1.1.0.md](review-v1.1.0.md). Decisions:
-[docs/adr/](../../docs/adr/README.md) (ADRs 0001–0010). Triage of the open PRs and alerts:
-[release-notes/draft/triage-v1.1.0.md](triage-v1.1.0.md).
+Release notes: [release-notes/v1.1.0.md](../v1.1.0.md). Decisions:
+[docs/adr/](../../docs/adr/README.md) (ADRs 0001–0012). The independent reviews and the audit
+are summarised below (§Independent audit); the triage of the open PRs and alerts is the table
+under §Human follow-ups.
 
 ## Related Issues
 
@@ -62,7 +63,46 @@ Upstream: closes the CLI's engine asks answered by zipnative 1.1.0
 No security default was loosened. `dosTimeMode` is deliberately not adopted (ADR 0008).
 `maxEntryCompressedSize` is behind `--max-entry-compressed-size` (ADR 0011, superseding 0007).
 
-## Test plan
+## Independent audit
+
+Agent-run, on the local branch, before the maintainer's own pass. Round 1: two independent
+pre-PR reviews (correctness, security) of the branch diff. Round 2: two independent reviewers
+over seven criteria — A (conformance and product: standards against pkinative-cli and
+pdfnative-cli, coverage of the core, the AI instructions, every documented figure, measured
+token cost) and B (adversarial: the surface diff from the published 1.0.0, a hardening matrix
+against pkinative-cli, attacks on the binary and the workflows) — and a third, separate
+verifier that reproduced every finding and ruled it CONFIRMED, REJECTED or DEFER. Round 2b: a
+fourth agent re-ran the original scenario of every confirmed finding on the built binary.
+Round 3: `/release-audit` (the family's audit skill, ported in this release: two auditors, an
+adversarial verifier, an autonomy pass, a second verifier, a GO/NO-GO ledger) at HEAD.
+
+| Round | Verdict | Confirmed | Resolution |
+|---|---|---|---|
+| 1 | — | every finding reproduced on the built binary (the `stream --timeout` hang, a decompressor timeout, config `false`, batch create flags, one deadline per process, FIFO reads, per-field escaping, the consumer job, manifest `comment-file`) | fixed in `e2e820e`, one regression test per finding (`tests/integration/review-fixes-1-1.test.ts`, `built-binary-smoke.test.ts`) |
+| 2 | **Met** on all seven criteria | 31 findings: 23 confirmed (3 in part), 5 deferred to 1.2 (ROADMAP), 1 rejected, 2 rejected in part; 3 majors — `--overwrite=flase` was ON, the published schemas rejected real output, `--timeout` did not fire on a stalled pipe — plus a bounded `batch --task verify` | fixed in `aba500a` → `0536020`, one regression test per finding (`tests/integration/review2-1-1.test.ts`, `tests/commands/schema-conformance.test.ts`); the 11 last engine exports exposed (`canonicalize`, `merge`, `--range`, manifest `raw`) |
+| 2b | every finding **closed**, no regression | 3 minors: `canonicalize` carried hostile names silently, a `raw` DEFLATE payload could hide trailing bytes, docs gaps; nits: `ZIPNATIVE_*` values strict | fixed in `887254f` |
+| 3 | PENDING | `/release-audit release-notes/v1.1.0.md` at HEAD | — |
+
+The seven criteria after round 2b:
+
+| # | Criterion | Verdict | Evidence |
+|---|---|---|---|
+| 1 | 2026 state of the art, native philosophy | met; family hygiene deferred | attested five-job release, SBOMs, harden-runner, CodeQL, zizmor, actionlint, reuse, OSV, rulesets as code, SECURITY-INSIGHTS, security.txt, a Node security floor, an offline gate step; `docs.yml`, a Deno/Bun job, `THREAT_MODEL.md` are 1.2 |
+| 2 | No breaking change unless justified | met | no undocumented break in the surface diff; every narrowing under CHANGELOG `### Security` with its migration |
+| 3 | Full core coverage | met | 106 / 106 exports reachable; `docs/data/core-exports.json` grades none `bridged` |
+| 4 | AI instructions current and economical | met; size budget deferred | CLAUDE.md, copilot-instructions, AGENTS.md corrected; the 94 KB budget is a 1.2 target |
+| 5 | Hardening at pkinative-cli level | met | strict switch values, every read bounded, the deadline on stalled inputs, per-field escaping, no registry code next to the signing identity |
+| 6 | Documentation factual and complete | met | every count pinned by a test; schemas checked against real output |
+| 7 | Autonomous agent driving, token savings | met | `schema manifest` publishes arity, repeatability, path flags and operands; errors and summaries carry the facts a second call used to fetch; bytes measured per task |
+
+Ledger: `.audit/1.1.0/` (local, git-ignored) — `review-v1.1.0.md` (round 2, every finding with
+its verdict and commit), `corpus-1.0.0.sha256`, then the round-3 files `brief.md`,
+`auditor-a.md`, `auditor-b.md`, `verifier-1.md`, `auditor-d.md`, `verifier-2.md`, `ledger.md`,
+`verdict.md`.
+
+`/release-audit release-notes/v1.1.0.md` — PENDING.
+
+## Validation (what actually ran, on Windows 11, Node 22.23.2)
 
 - [x] `npm run typecheck:all` clean; `npm run lint` 0 errors
 - [x] `npm run test:coverage` — 1368 passed, 9 skipped, 74 files; 95.92 / 91.77 / 97.78 / 96.83
@@ -71,7 +111,7 @@ No security default was loosened. `dosTimeMode` is deliberately not adopted (ADR
       to the 1.0.0 build (SHA-256 compared)
 - [x] `node scripts/gate.mjs --publish --require-all` — every step green (reproducible build,
       bundle probe, 10-file tarball, install smoke test)
-- [x] `node samples/run-all.js --clean` — 83 / 83
+- [x] `node samples/run-all.js --clean` — 96 / 96
 - [x] Built-binary smoke tests:
   - `create --parallel`, `doctor` (deflate tier `node-zlib`, `maxEntryCompressedSize` in the
     limits), `schema diagnostics` (12 codes), `create --stdin-name --zip64`,
@@ -88,8 +128,23 @@ No security default was loosened. `dosTimeMode` is deliberately not adopted (ADR
 - Import `.github/rulesets/main.json` and `tags.json`.
 - Create the `npm-publish` environment with a required reviewer, and bind npm Trusted
   Publishing to `publish.yml` with that environment.
-- After the merge: close the superseded PRs and dismiss / confirm the alerts as listed in the
-  triage draft. Register at bestpractices.dev.
+- After the merge, the open PRs and alerts (read on 2026-10-18 with read-only `gh api` calls;
+  nothing was posted, closed or dismissed):
+
+  | Item | Verdict | Action after merge |
+  |---|---|---|
+  | PRs #1, #3, #4, #5, #7 (`codeql-action` ×4, `scorecard-action`) | integrated in `5c09933`, same SHAs | close as superseded |
+  | PR #10 (`@types/node` 26) | rejected: the floor is Node 22, majors ignored in `dependabot.yml` | close |
+  | PR #11 (dev group, `zipnative` included) | redone by hand (`a01d7c4` + the release commit); `zipnative` is bumped on its own | close |
+  | Dependabot #1 `ip-address`, #3 `http-cache-semantics` (dev-only) | gone from the lockfile; `npm audit` 0 | auto-close |
+  | Scorecard #1 Branch-Protection | rulesets as code | import `main.json` + `tags.json` |
+  | Scorecard #2 Token-Permissions `publish.yml` | needed: `contents: write` scoped to `attest` (ADR 0009) | dismiss "won't fix" |
+  | Scorecard #3 Token-Permissions `codeql.yml`, #8 Vulnerabilities | fixed on the branch | auto-close |
+  | Scorecard #4 Code-Review, #5 Maintained | solo maintainer; repository under 90 days | dismiss or leave; #5 re-scores after 2026-12-01 |
+  | Scorecard #6 CII-Best-Practices | human registration | register at bestpractices.dev |
+  | Scorecard #7 Fuzzing | seeded fuzzing (ADR 0010); no `fast-check` by decision | dismiss "won't fix" |
+
+  Comment texts: `.github/drafts/triage-v1.1.0.md` (local).
 - Confirm the 1.0.x security-fix window (SECURITY.md: until 2027-04-18) and the release date in
   CHANGELOG / CITATION / release notes before tagging `v1.1.0`.
 - Engine-side drafts in `.github/drafts/` (local, git-ignored) for the zipnative maintainer.
@@ -103,11 +158,13 @@ No security default was loosened. `dosTimeMode` is deliberately not adopted (ADR
 - [x] CHANGELOG.md updated
 - [x] No breaking changes to the agent contract; the three narrowed inputs are documented with
       their migration
-- [x] Binary smoke test passes (`node dist/cli.cjs --help` outputs all 15 commands)
+- [x] Binary smoke test passes (`node dist/cli.cjs --help` outputs all 17 commands)
 - [x] veraZIP gate passes (`npm run validate:zip` locally; CI on Linux + Windows)
 - [x] No ZIP parsing logic in the CLI
 - [x] No security default loosened silently
 - [x] Docs counts updated (`tests/docs/consistency.test.ts` green)
+- [ ] The audit ledger is summarised above with a fix commit for every confirmed blocker and
+      major — or §Independent audit says PENDING and this PR is not ready to merge
 
 ## AI assistance
 

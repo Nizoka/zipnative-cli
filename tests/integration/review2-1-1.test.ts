@@ -1,5 +1,6 @@
 // Regression tests for the second 1.1.0 review (two independent reviewers +
-// a verifier, release-notes/draft/review-v1.1.0.md). Group 1 — strict switch
+// a verifier; the report is local, .audit/1.1.0/review-v1.1.0.md, summarised
+// in release-notes/draft/PR-v1.1.0.md §Independent audit). Group 1 — strict switch
 // values and bounded batch reads:
 //   M-01  a switch with an unrecognised value (`--overwrite=flase`) is E_USAGE,
 //         never ON — on argv and in a manifest task;
