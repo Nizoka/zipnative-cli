@@ -12,7 +12,7 @@
 // `ZipReader.verifyEntry()` — same per-entry outcome shape, `selected` lists
 // the names, and an unknown name is E_NOT_FOUND before any output.
 
-import { type ParsedArgs, getStringFlagAll, hasFlag } from '../utils/args.js';
+import { type ParsedArgs, getStringFlag, getStringFlagAll, hasFlag } from '../utils/args.js';
 import { isJsonMode, isStrict } from '../utils/agent.js';
 import {
     verifyZip,
@@ -23,7 +23,7 @@ import { createDiagnosticSink, diagnosticRows, type DiagnosticRow } from '../uti
 import { prepareEngine } from '../utils/engine.js';
 import { CliError, ErrorCode } from '../utils/error.js';
 import { parseLimitFlags } from '../utils/limits.js';
-import { emitJsonReport } from '../utils/projection.js';
+import { emitJsonReport, warnTextProjection } from '../utils/projection.js';
 import { escapeTerminal, escapeLine } from '../utils/sanitize.js';
 import { guard, mapZipError } from '../utils/ziperr.js';
 import { commonOptions, entryPasses, openArchive, parseFormat, readArchiveBytes, resolveInputPath } from '../utils/zipops.js';
@@ -153,6 +153,11 @@ export async function verify(args: ParsedArgs): Promise<void> {
     const format = parseFormat(args, ['text', 'json'] as const, isJsonMode() ? 'json' : 'text');
     const strict = isStrict() || hasFlag(args.flags, 'strict');
     const selected = getStringFlagAll(args.flags, 'entry', 'e');
+    // The whole-archive verifyZip takes no name decoder: --name-encoding only
+    // decodes the names --entry looks up (a flag never accepted for nothing).
+    if (selected.length === 0 && getStringFlag(args.flags, 'name-encoding') !== undefined) {
+        throw new CliError('--name-encoding applies to --entry lookups (the whole-archive verification reports names as stored): add --entry <decoded name>.', 2);
+    }
 
     const inputPath = resolveInputPath(args);
     const bytes = await readArchiveBytes(inputPath, args);
@@ -179,6 +184,7 @@ export async function verify(args: ParsedArgs): Promise<void> {
     if (format === 'json') {
         emitJsonReport(args, report, () => verifySummary(report));
     } else {
+        warnTextProjection(args);
         process.stdout.write(escapeTerminal(renderText(report, inputPath ?? '-')));
     }
 
@@ -189,11 +195,13 @@ export async function verify(args: ParsedArgs): Promise<void> {
             : strictFail && core.ok
                 ? `${diagnostics.length} diagnostic(s) under --strict: ${diagnostics.map((d) => d.code).join(', ')}`
                 : `${failed} of ${total} entries failed verification`;
-        throw new CliError(
-            format === 'json' ? reason : '',
-            1,
-            ErrorCode.VERIFY_FAILED,
-            core.error !== null ? { zipCode: core.error.code } : undefined,
-        );
+        // The failing names travel with the error, so an agent on --summary
+        // learns WHICH entries failed without re-running (capped at 16).
+        const failedNames = core.entries.filter((e) => !entryPasses(e)).map((e) => e.name);
+        throw new CliError(reason, 1, ErrorCode.VERIFY_FAILED, {
+            ...(core.error !== null ? { zipCode: core.error.code } : {}),
+            ...(failedNames.length === 1 ? { entryName: failedNames[0] as string } : {}),
+            ...(failedNames.length > 0 ? { detail: { failedEntries: failedNames.slice(0, 16).join(', '), failedCount: failedNames.length } } : {}),
+        });
     }
 }

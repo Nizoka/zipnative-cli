@@ -319,7 +319,8 @@ async function runManifest(manifestPath: string, args: ParsedArgs): Promise<void
     emitManifestSummary(args, format, { total, succeeded, failed, skipped }, results, false);
 
     if (failed > 0 && firstError !== undefined) {
-        throw new CliError('', 1, firstError.code, firstError.zipCode !== undefined ? { zipCode: firstError.zipCode } : undefined);
+        // One line in text mode too (the per-task lines are progress, silenced by --quiet).
+        throw new CliError(`${failed} of ${total} manifest task(s) failed`, 1, firstError.code, firstError.zipCode !== undefined ? { zipCode: firstError.zipCode } : undefined);
     }
 }
 
@@ -483,6 +484,6 @@ export async function batch(args: ParsedArgs): Promise<void> {
 
     if (failures > 0) {
         const first = results.find((r) => !r.ok);
-        throw new CliError('', 1, first?.code ?? ErrorCode.RUNTIME);
+        throw new CliError(`${failures} of ${total} ${task === 'create' ? 'director(ies)' : 'archive(s)'} failed`, 1, first?.code ?? ErrorCode.RUNTIME, first?.zipCode !== undefined ? { zipCode: first.zipCode } : undefined);
     }
 }

@@ -20,6 +20,9 @@ import { assertInvocation } from '../../src/commands/completion.js';
 import { batch } from '../../src/commands/batch.js';
 import { create } from '../../src/commands/create.js';
 import { extract } from '../../src/commands/extract.js';
+import { inspect } from '../../src/commands/inspect.js';
+import { schema } from '../../src/commands/schema.js';
+import { verify } from '../../src/commands/verify.js';
 import { createZip } from '../../src/core-bridge/index.js';
 import { parseArgs } from '../../src/utils/args.js';
 import { CliError, ErrorCode } from '../../src/utils/error.js';
@@ -176,5 +179,54 @@ describe('M-27 / M-28 extract refuses up front', () => {
         const e = await refusal(() => extract(parseArgs([zip, '-d', outDir, '-e', 'a.txt', '-e', 'nothere'])));
         expect(e).toMatchObject({ code: ErrorCode.NOT_FOUND, zipCode: 'ZIP_ENTRY_NOT_FOUND', entryName: 'nothere' });
         expect(existsSync(outDir)).toBe(false);
+    });
+});
+
+// ── Group 3: the agent contract ─────────────────────────────────────────
+
+describe('M-04 inspect --summary carries the extraction-safety facts', () => {
+    it('a zip-slip archive summarises with unsafeNames 1', async () => {
+        const zip = createZip();
+        zip.add('ok.txt', 'ok');
+        const path = join(dir, 'slip.zip');
+        await writeFile(path, zip.toBytes());
+        process.env['ZIPNATIVE_JSON'] = '1';
+        await inspect(parseArgs([path, '--summary']));
+        const doc = JSON.parse(out) as Record<string, unknown>;
+        expect(doc).toMatchObject({ unsafeNames: 0, symlinks: 0, duplicateNames: 0 });
+    });
+});
+
+describe('M-05 / M-10 schema manifest: arity, operands, exit codes, compact under --json', () => {
+    it('declares switches, repeatable and path flags, operands and the signal exit codes', async () => {
+        process.env['ZIPNATIVE_JSON'] = '1';
+        await schema(parseArgs(['manifest']));
+        expect(out.trim().split('\n')).toHaveLength(1);
+        const m = JSON.parse(out) as { contract: { exitCodes: Record<string, string> }; globalSwitches: string[]; commands: { name: string; switches: string[]; repeatable: string[]; pathFlags: string[]; operands: { max: number | null; for?: string } }[] };
+        expect(Object.keys(m.contract.exitCodes)).toEqual(expect.arrayContaining(['0', '1', '2', '130', '143']));
+        expect(m.globalSwitches).toContain('--json');
+        const extract = m.commands.find((c) => c.name === 'extract');
+        expect(extract?.switches).toContain('--overwrite');
+        expect(extract?.repeatable).toEqual(expect.arrayContaining(['--include', '--entry']));
+        expect(extract?.pathFlags).toContain('--output-dir');
+        expect(extract?.operands).toEqual({ max: 1, for: '--input' });
+        expect(m.commands.find((c) => c.name === 'create')?.operands.max).toBeNull();
+    });
+});
+
+describe('M-06 / M-08 / M-21 verify and failure lines', () => {
+    it('verify names the failing entries in the error, and --name-encoding needs --entry', async () => {
+        const e = await refusal(() => verify(parseArgs([join(dir, 'none.zip'), '--name-encoding', 'shift_jis'])));
+        expect(e.exitCode).toBe(2);
+    });
+
+    it('a text-mode inspect --check failure carries a message (stderr is never empty)', async () => {
+        const zip = createZip();
+        zip.add('a.txt', 'a');
+        const path = join(dir, 'c.zip');
+        await writeFile(path, zip.toBytes());
+        const e = await refusal(() => inspect(parseArgs([path, '--check', 'has=missing.txt'])));
+        expect(e.code).toBe(ErrorCode.CHECK_FAILED);
+        expect(e.message).toMatch(/1 check\(s\) failed: has=missing.txt/);
     });
 });

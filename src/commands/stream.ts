@@ -29,7 +29,7 @@ import { rowFromHeader, renderTable, type EntryRow } from '../utils/entryfmt.js'
 import { escapeTerminal } from '../utils/sanitize.js';
 import { CliError, ErrorCode } from '../utils/error.js';
 import { openInputStream, overwriteRefused, pathExists, readableToByteSource, safeJoin, writeStreamingOutput } from '../utils/io.js';
-import { emitJsonReport, serializeJson } from '../utils/projection.js';
+import { emitJsonReport, serializeJson, warnTextProjection } from '../utils/projection.js';
 import { duplicatePolicy, ensureSinkDir, ensureSinkParent, resolveSinkTarget, writeSinkFile } from '../utils/sink.js';
 import { mapZipError } from '../utils/ziperr.js';
 import { commonOptions, parseFormat, parseNameFilter, parseOnDuplicate } from '../utils/zipops.js';
@@ -208,6 +208,7 @@ export async function stream(args: ParsedArgs): Promise<void> {
 
     if (mode === 'list') {
         if (format === 'text') {
+            warnTextProjection(args);
             process.stdout.write(escapeTerminal(renderTable(rows, long)));
         } else if (format === 'json') {
             const report: StreamReport = { mode: 'list', trust: TRUST, entries: rows, diagnostics: sink.diagnostics };

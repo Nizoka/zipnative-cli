@@ -727,6 +727,7 @@ zipnative verify --input <a.zip> [--format json|text] [--strict]
 | `--input <file>`, `-i` | stdin | Archive path |
 | `--entry <name>`, `-e` _(repeatable)_ | — | Verify only the named entries (CRC-32, sizes, local header of each) after the eager structural check; the report lists them under `selected`, `entries` holds only those, `entryCount` stays the archive total. An unknown name is `E_NOT_FOUND` / `ZIP_ENTRY_NOT_FOUND` before any output |
 | `--format text\|json`, `-f` | `text` (`json` under `--json`) | Output format |
+| `--name-encoding <label>` | `cp437` | Decode non-UTF-8 names for the `--entry` lookups (as in `list`); refused without `--entry` (the whole-archive `verifyZip` takes no decoder) |
 | `--strict` | false | Also fail when any diagnostic was emitted |
 | `--summary` | — | `{ ok, entries, failed, skipped, diagnostics, selected?, error? }` |
 | `--fields a,b.c` | — | Dot-path projection |

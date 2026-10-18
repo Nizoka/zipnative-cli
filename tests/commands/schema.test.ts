@@ -104,7 +104,7 @@ describe('schema', () => {
         expect(doc.version).toBe(cliVersion());
         expect(doc.zipnative).toBe(engineVersion());
         expect(doc.contract.network).toContain('none');
-        expect(doc.contract.exitCodes).toEqual({ '0': 'success', '1': 'runtime/check failure', '2': 'usage error' });
+        expect(Object.keys(doc.contract.exitCodes).sort()).toEqual(['0', '1', '130', '143', '2']);
         expect(doc.commands).toHaveLength(15);
         expect(doc.commands.map((c) => c.name)).toEqual([
             'create', 'modify', 'list', 'inspect', 'cat', 'extract', 'stream', 'verify', 'crc32', 'inflate',

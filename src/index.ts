@@ -417,6 +417,8 @@ Options:
                       and local header of each, after the eager structural
                       check; the report lists them under "selected". An unknown
                       name is E_NOT_FOUND before any output.
+  --name-encoding <label>  Decode non-UTF-8 names for --entry lookups (as in
+                      \`list\`), with --entry only
   --format, -f text|json  (default text; json under --json)
   --strict            Also fail when any diagnostic was emitted
   --summary           { ok, entries, failed, skipped, diagnostics, selected?,
@@ -674,6 +676,9 @@ async function main(): Promise<void> {
     const endOfFlags = argv.indexOf('--');
     const flagTokens = endOfFlags === -1 ? argv : argv.slice(0, endOfFlags);
     if (flagTokens.some((t) => t === '--json' || /^--json=(?:true|1|yes|on)$/i.test(t))) process.env['ZIPNATIVE_JSON'] = '1';
+    // Name the command in an envelope raised by the parse itself (`list a.zip
+    // --json --json`): the first bare token that is a command.
+    activeCommand = flagTokens.find((t) => !t.startsWith('-') && Object.hasOwn(COMMAND_USAGE, t)) ?? null;
     const args = parseArgs(argv);
 
     // Global output flags (recognised anywhere in argv).

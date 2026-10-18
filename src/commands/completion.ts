@@ -104,7 +104,7 @@ export const COMMANDS: readonly CommandSpec[] = [
         name: 'verify',
         group: 'Integrity & codecs',
         summary: 'Deep integrity verification (CRC, sizes, local headers, diagnostics)',
-        flags: ['--input', '--entry', '--format', ...PROJECTION_FLAGS],
+        flags: ['--input', '--entry', '--name-encoding', '--format', ...PROJECTION_FLAGS],
     },
     {
         name: 'crc32',

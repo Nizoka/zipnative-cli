@@ -30,7 +30,7 @@ import { createDiagnosticSink, type DiagnosticRow } from '../utils/diagnostics.j
 import { prepareEngine } from '../utils/engine.js';
 import { CliError, ErrorCode } from '../utils/error.js';
 import { methodName, rowFromEntry, type EntryRow } from '../utils/entryfmt.js';
-import { emitJsonReport } from '../utils/projection.js';
+import { emitJsonReport, warnTextProjection } from '../utils/projection.js';
 import { escapeTerminal, escapeLine } from '../utils/sanitize.js';
 import { formatBytes, parseByteSize, parseCount } from '../utils/sizes.js';
 import { guard } from '../utils/ziperr.js';
@@ -371,6 +371,11 @@ export function inspectSummary(report: InspectReport): Record<string, unknown> {
         deterministic: report.determinism.deterministic,
         canonicalLayout: report.determinism.canonicalLayout,
         canonicalForm: report.determinism.canonicalForm,
+        // The extraction-safety facts, so the one-line probe answers "is it
+        // safe to extract?" (gate with --check safe-names,no-symlinks,no-duplicates).
+        unsafeNames: report.stats.unsafeNames,
+        symlinks: report.stats.symlinks,
+        duplicateNames: report.stats.duplicateNames,
         diagnostics: report.diagnostics.length,
         ...(report.checks !== undefined ? { checksPassed: report.checks.every((c) => c.ok) } : {}),
     };
@@ -436,6 +441,7 @@ export async function inspect(args: ParsedArgs): Promise<void> {
     if (format === 'json') {
         emitJsonReport(args, report, () => inspectSummary(report));
     } else {
+        warnTextProjection(args);
         process.stdout.write(escapeTerminal(renderText(report, inputPath ?? '-')));
     }
 
@@ -443,7 +449,7 @@ export async function inspect(args: ParsedArgs): Promise<void> {
         const failed = checkResults.filter((c) => !c.ok);
         if (failed.length > 0) {
             const detail = failed.map((c) => `${c.check} (${c.detail})`).join('; ');
-            throw new CliError(format === 'json' ? `${failed.length} check(s) failed: ${detail}` : '', 1, ErrorCode.CHECK_FAILED);
+            throw new CliError(`${failed.length} check(s) failed: ${detail}`, 1, ErrorCode.CHECK_FAILED);
         }
     }
 }

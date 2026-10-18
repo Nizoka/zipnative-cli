@@ -158,7 +158,7 @@ describe('verify', () => {
         expect(text).toContain('FAILED: 1 failed of 2 entries');
         expect(err?.code).toBe('E_VERIFY_FAILED');
         // text mode: the verdict is already on stdout, the error carries no message
-        expect(err?.message).toBe('');
+        expect(err?.message).toMatch(/entries failed verification/);
     });
 
     it('a non-zip file lands in report.error and throws with zipCode ZIP_EOCD_NOT_FOUND', async () => {

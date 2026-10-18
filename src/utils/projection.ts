@@ -13,7 +13,8 @@
 // Everything here is pure data manipulation: no I/O, no globals, no deps.
 
 import { type ParsedArgs, getStringFlag, hasFlag } from './args.js';
-import { isJsonMode } from './agent.js';
+import { isJsonMode, progress } from './agent.js';
+import { activeConfig } from './config.js';
 
 /** Commands whose stdout JSON honours `--summary` / `--fields` / `--pretty`. */
 export const PROJECTED_COMMANDS: readonly string[] = ['list', 'inspect', 'verify', 'stream', 'batch'];
@@ -109,6 +110,20 @@ export function selectFields(value: unknown, paths: readonly string[]): unknown 
  * (applied to whichever document is being emitted), then compact-vs-pretty.
  * Shared by every JSON-on-stdout command.
  */
+/**
+ * `--summary` / `--fields` shape the JSON report only. Given on the command
+ * line to a TEXT run they would change nothing, so say so on stderr (ADR 0007:
+ * no flag without an effect) — unless a .zipnativerc.json supplied them, where
+ * they are legitimate presentation defaults for the JSON runs.
+ */
+export function warnTextProjection(args: ParsedArgs): void {
+    const fromConfig = new Set(activeConfig()?.applied ?? []);
+    const given = ['summary', 'fields'].filter((f) => args.flags[f] !== undefined && args.flags[f] !== false && !fromConfig.has(f));
+    if (given.length > 0) {
+        progress(`warning: ${given.map((f) => `--${f}`).join(' and ')} shape the JSON report only; add --json (or --format json).`);
+    }
+}
+
 export function emitJsonReport(
     args: ParsedArgs,
     full: unknown,

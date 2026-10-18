@@ -363,6 +363,9 @@ describe('inspect', () => {
                 deterministic: true,
                 canonicalLayout: true,
                 canonicalForm: true,
+                unsafeNames: 0,
+                symlinks: 0,
+                duplicateNames: 0,
                 diagnostics: 0,
             });
             const withCheck = await run(['--input', zip, '--format', 'json', '--summary', '--check', 'deterministic']);
@@ -599,7 +602,8 @@ describe('inspect', () => {
             expect(text).toContain('PASS  deterministic');
             expect(err).toBeInstanceOf(CliError);
             expect((err as CliError).code).toBe('E_CHECK_FAILED');
-            expect((err as CliError).message).toBe('');
+            // Text mode too carries the one-line reason (second 1.1.0 review, M-21).
+            expect((err as CliError).message).toMatch(/check\(s\) failed/);
         });
 
         it('a fully passing check set exits cleanly with checks in the report', async () => {

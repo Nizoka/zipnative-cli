@@ -9,7 +9,7 @@
 // Philosophy: zero runtime deps, pure data. No validation engine is bundled —
 // the CLI only PRODUCES schemas; callers validate with their own tooling.
 
-import type { ParsedArgs } from '../utils/args.js';
+import { type ParsedArgs, hasFlag } from '../utils/args.js';
 import { CliError, ErrorCode } from '../utils/error.js';
 import { cliVersion, engineVersion } from '../utils/version.js';
 import { ENGINE_ONLY_LIMITS, LIMIT_FLAGS, LIMIT_KEYS } from '../utils/limits.js';
@@ -18,7 +18,9 @@ import { ZIP_DIAGNOSTIC_CODES, ZIP_TO_CLI } from '../utils/ziperr.js';
 import { MANIFEST_COMMANDS } from '../utils/manifest.js';
 import { PROJECTED_COMMANDS } from '../utils/projection.js';
 import { DEFAULT_ZIP_LIMITS } from '../core-bridge/index.js';
-import { COMMANDS, DRY_RUN_COMMANDS, GLOBAL_FLAGS } from './completion.js';
+import { BOOLEAN_FLAGS } from '../utils/flags.js';
+import { isJsonMode } from '../utils/agent.js';
+import { COMMANDS, DRY_RUN_COMMANDS, GLOBAL_FLAGS, GLOBAL_REPEATABLE_FLAGS, OPERANDS, PATH_FLAGS, REPEATABLE_FLAGS } from './completion.js';
 
 type JsonSchema = Readonly<Record<string, unknown>>;
 
@@ -389,12 +391,14 @@ function inspectSummarySchema(): JsonSchema {
         $id: id('inspect-summary'),
         title: 'zipnative-cli inspect --summary output',
         type: 'object',
-        required: ['entries', 'bytes', 'uncompressedSize', 'zip64', 'encrypted', 'deterministic', 'canonicalLayout', 'diagnostics'],
+        required: ['entries', 'bytes', 'uncompressedSize', 'zip64', 'encrypted', 'deterministic', 'canonicalLayout', 'canonicalForm', 'unsafeNames', 'symlinks', 'duplicateNames', 'diagnostics'],
         additionalProperties: false,
         properties: {
             entries: { type: 'integer' }, bytes: { type: 'integer' }, uncompressedSize: { type: 'integer' },
             zip64: { type: 'boolean' }, encrypted: { type: 'integer' }, deterministic: { type: 'boolean' },
-            canonicalLayout: { type: 'boolean' },
+            canonicalLayout: { type: 'boolean' }, canonicalForm: { type: 'boolean' },
+            unsafeNames: { type: 'integer', description: 'Entry names sanitizeEntryPath() refuses (traversal, absolute, drive/UNC, NUL, ADS, device names).' },
+            symlinks: { type: 'integer' }, duplicateNames: { type: 'integer' },
             diagnostics: { type: 'integer' }, checksPassed: { type: 'boolean' },
         },
     };
@@ -611,6 +615,24 @@ function statusSchema(): JsonSchema {
             ok: { const: true },
             command: { enum: ['create', 'modify', 'extract', 'stream', 'cat', 'inflate', 'crc32'] },
             dryRun: { type: 'boolean' },
+            config: configFieldSchema,
+            method: { type: ['string', 'integer'] },
+            methodName: { type: 'string' },
+            level: { type: 'integer' },
+            deterministic: { type: 'boolean' },
+            order: { enum: ['canonical', 'insertion'] },
+            stream: { type: 'boolean' },
+            zip64: { type: 'boolean', description: 'create: --zip64 (streamed entries carry a Zip64 local header).' },
+            parallel: { anyOf: [{ const: false }, { type: 'object' }] },
+            mode: { type: 'string' },
+            raw: { type: 'boolean' },
+            sync: { type: 'boolean' },
+            leftover: { type: 'integer' },
+            maxOutput: { type: 'integer' },
+            verifyCrc: { type: 'boolean' },
+            symlinksAsData: { type: 'integer' },
+            stoppedAt: { enum: ['central-directory', 'eof'] },
+            edits: { type: 'array' },
             output: { type: 'string' },
             outputDir: { type: 'string' },
             bytes: { type: 'integer' },
@@ -644,6 +666,7 @@ function errorSchema(): JsonSchema {
         properties: {
             ok: { const: false },
             command: { type: ['string', 'null'] },
+            config: configFieldSchema,
             error: {
                 type: 'object',
                 required: ['code', 'message'],
@@ -667,6 +690,14 @@ function errorSchema(): JsonSchema {
         },
     };
 }
+
+/** `config: { path, applied }` — the .zipnativerc.json that shaped the run (envelopes, ADR 0001). */
+const configFieldSchema: JsonSchema = {
+    type: 'object',
+    required: ['path', 'applied'],
+    additionalProperties: false,
+    properties: { path: { type: 'string' }, applied: { type: 'array', items: { type: 'string' } } },
+};
 
 function errorsDocument(): JsonSchema {
     const zip: Record<string, { code: string; exitCode: number; remedy?: string }> = {};
@@ -736,10 +767,13 @@ function manifestDocument(): JsonSchema {
         contract: {
             stdout: 'primary artifact (archive bytes, entry bytes, JSON report, text, schema, script)',
             stderr: 'diagnostics and, under --json, the status/error envelope',
-            exitCodes: { '0': 'success', '1': 'runtime/check failure', '2': 'usage error' },
+            exitCodes: { '0': 'success (also a closed downstream pipe)', '1': 'runtime/check failure', '2': 'usage error', '130': 'interrupted (SIGINT); in-flight output removed', '143': 'terminated (SIGTERM); in-flight output removed' },
             network: 'none — no command can open a socket',
         },
         globalFlags: GLOBAL_FLAGS,
+        // Arity without scraping --help: a switch takes no value (or =true|false).
+        globalSwitches: GLOBAL_FLAGS.filter((f) => BOOLEAN_FLAGS.has(f.replace(/^--/, ''))),
+        globalRepeatable: GLOBAL_REPEATABLE_FLAGS.map((f) => `--${f}`),
         dryRunCommands: DRY_RUN_COMMANDS,
         projectedCommands: PROJECTED_COMMANDS,
         manifestCommands: [...MANIFEST_COMMANDS],
@@ -748,7 +782,22 @@ function manifestDocument(): JsonSchema {
         diagnosticCodes: [...ZIP_DIAGNOSTIC_CODES],
         limits: LIMIT_FLAGS.map((l) => ({ flag: `--${l.flag}`, key: l.key, default: DEFAULT_ZIP_LIMITS[l.key], cwe: l.cwe })),
         schemas: SUBJECTS,
-        commands: COMMANDS.map((c) => ({ name: c.name, group: c.group, summary: c.summary, flags: c.flags })),
+        commands: COMMANDS.map((c) => {
+            const operands = OPERANDS[c.name];
+            return {
+                name: c.name,
+                group: c.group,
+                summary: c.summary,
+                flags: c.flags,
+                switches: c.flags.filter((f) => BOOLEAN_FLAGS.has(f.replace(/^--/, ''))),
+                repeatable: (REPEATABLE_FLAGS[c.name] ?? []).map((f) => `--${f}`),
+                pathFlags: c.flags.filter((f) => PATH_FLAGS.includes(f)),
+                operands: {
+                    max: operands === undefined || operands.max === Infinity ? null : operands.max,
+                    ...(operands?.for !== undefined ? { for: `--${operands.for}` } : {}),
+                },
+            };
+        }),
     };
 }
 
@@ -788,15 +837,20 @@ export function buildSchema(subject: Subject): JsonSchema {
 
 export async function schema(args: ParsedArgs): Promise<void> {
     const subject = args.positionals[0];
+    // Compact under --json like every JSON-on-stdout command (--pretty opts out).
+    const pretty = !isJsonMode() || hasFlag(args.flags, 'pretty');
+    const emit = (doc: unknown): void => {
+        process.stdout.write((pretty ? JSON.stringify(doc, null, 2) : JSON.stringify(doc)) + '\n');
+    };
 
     if (subject === undefined) {
         // No subject → the most common need: the create manifest input schema.
-        process.stdout.write(JSON.stringify(BUILDERS['create-manifest'](), null, 2) + '\n');
+        emit(BUILDERS['create-manifest']());
         return Promise.resolve();
     }
 
     if (subject === 'list') {
-        process.stdout.write(JSON.stringify({ subjects: SUBJECTS }, null, 2) + '\n');
+        emit({ subjects: SUBJECTS });
         return Promise.resolve();
     }
 
@@ -808,6 +862,6 @@ export async function schema(args: ParsedArgs): Promise<void> {
         );
     }
 
-    process.stdout.write(JSON.stringify(BUILDERS[subject](), null, 2) + '\n');
+    emit(BUILDERS[subject]());
     return Promise.resolve();
 }
