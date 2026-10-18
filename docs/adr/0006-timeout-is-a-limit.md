@@ -33,6 +33,12 @@ not grow for a condition that already has a class.
   0 with a truncated file (found by the 1.1.0 review). The CLI's input loop
   (`readableToByteSource`) and write loop enforce the deadline there. As a backstop, the
   dispatcher fails any run whose event loop drains with the command still pending.
+- Waiting for input is asynchronous, so the deadline also ends it: the input streams carry the
+  signal (`addAbortSignal`), the buffered stdin reader listens for the abort, and a read the CLI
+  cannot cancel (a FileHandle read on a stalled FIFO) is covered by the dispatcher, which fails
+  the run with the deadline 500 ms after the abort if it has not settled. A stalled pipe ends in
+  `E_LIMIT` within about a second (found by the second 1.1.0 review; before, `list -` with a
+  silent peer waited forever).
 - `mapZipError` returns the deadline error whenever the signal has fired: the engine wraps an
   abort that reaches a decompressor as `ZIP_DECOMPRESSION_FAILED`.
 - One deadline per process: a `batch` manifest task cannot carry `timeout`.

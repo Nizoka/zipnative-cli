@@ -681,6 +681,20 @@ async function main(): Promise<void> {
     // The --timeout deadline starts with the process, not with the first
     // engine call (utils/control.ts; idempotent for in-process re-arming).
     armTimeout(args);
+    // Backstop: a read the CLI cannot cancel (a FileHandle read on a stalled
+    // FIFO) or an engine promise that never settles must not outlive the
+    // deadline. After a short grace period for the cooperative paths, the
+    // run fails with the deadline and removes the files being written.
+    const deadline = runSignal();
+    deadline?.addEventListener('abort', () => {
+        const grace = setTimeout(() => {
+            if (settled) return;
+            settled = true;
+            removeInFlight();
+            fail(deadline.reason);
+        }, DEADLINE_GRACE_MS);
+        grace.unref();
+    }, { once: true });
 
     // Help / version: write and RETURN (exit code 0 by default) — never
     // process.exit() right after a stdout write: on macOS and Windows a pipe
@@ -785,7 +799,14 @@ function exitAfterFlush(code: number): void {
     process.stderr.write('', done);
 }
 
-function fail(e: unknown): void {
+/** Grace period between the --timeout abort and the dispatcher's backstop. */
+const DEADLINE_GRACE_MS = 500;
+
+function fail(error: unknown): void {
+    // Past the deadline, an error that is not the CLI's own (an AbortError
+    // from a destroyed stream) IS the deadline.
+    const signal = runSignal();
+    const e = !(error instanceof CliError) && signal?.aborted === true && signal.reason instanceof CliError ? signal.reason : error;
     // Agent mode: a single JSON error envelope on stderr, with a stable code.
     if (isJsonMode()) {
         emitJsonError(activeCommand, e);

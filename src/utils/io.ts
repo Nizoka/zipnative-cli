@@ -2,9 +2,9 @@ import { randomBytes } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { lstat, open, rename, rm, type FileHandle } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from 'node:path';
-import type { Readable } from 'node:stream';
+import { addAbortSignal, type Readable } from 'node:stream';
 import { streamIsTty } from './colors.js';
-import { checkAborted } from './control.js';
+import { checkAborted, runSignal } from './control.js';
 import { CliError, ErrorCode } from './error.js';
 import { clearInFlight, markInFlight } from './inflight.js';
 
@@ -77,8 +77,18 @@ export function readStdin(explicit = false, maxBytes: number = DEFAULT_MAX_INPUT
             }
             chunks.push(chunk);
         };
+        // --timeout must fire on a STALLED pipe too: waiting for the next
+        // chunk is asynchronous, so the deadline ends the wait (ADR 0006).
+        const signal = runSignal();
+        const onAbort = (): void => {
+            process.stdin.off('data', onData);
+            process.stdin.destroy();
+            reject(signal?.reason instanceof Error ? signal.reason : new CliError('Timed out (--timeout).', 1, ErrorCode.LIMIT));
+        };
+        if (signal?.aborted === true) { onAbort(); return; }
+        signal?.addEventListener('abort', onAbort, { once: true });
         process.stdin.on('data', onData);
-        process.stdin.on('end', () => resolve(Buffer.concat(chunks)));
+        process.stdin.on('end', () => { signal?.removeEventListener('abort', onAbort); resolve(Buffer.concat(chunks)); });
         process.stdin.on('error', reject);
     });
 }
@@ -191,11 +201,18 @@ function writeStdout(data: Uint8Array): Promise<void> {
  * --stream`, `inflate`, `crc32`) so a large input never materialises in memory.
  */
 export function openInputStream(filePath: string | undefined): Readable {
+    let stream: Readable;
     if (filePath === undefined || filePath === '-') {
         if (filePath === undefined) assertStdinNotTty();
-        return process.stdin;
+        stream = process.stdin;
+    } else {
+        stream = createReadStream(filePath);
     }
-    return createReadStream(filePath);
+    // The deadline destroys the stream: a consumer blocked on a stalled pipe
+    // or FIFO rejects instead of waiting forever (ADR 0006).
+    const signal = runSignal();
+    if (signal !== undefined) addAbortSignal(signal, stream);
+    return stream;
 }
 
 /**
@@ -490,10 +507,17 @@ export async function readJsonInput(filePath: string, what: string): Promise<unk
  * static type and guarantees the chunks are byte chunks.
  */
 export async function* readableToByteSource(stream: Readable): AsyncGenerator<Uint8Array, void, undefined> {
-    for await (const chunk of stream) {
-        // The --timeout deadline also bounds the CLI's own input loop.
+    try {
+        for await (const chunk of stream) {
+            // The --timeout deadline also bounds the CLI's own input loop.
+            checkAborted();
+            yield typeof chunk === 'string' ? new TextEncoder().encode(chunk) : (chunk as Uint8Array);
+        }
+    } catch (e) {
+        // A stream destroyed by the deadline rejects with an AbortError:
+        // surface the deadline itself (E_LIMIT, detail.limit "timeout").
         checkAborted();
-        yield typeof chunk === 'string' ? new TextEncoder().encode(chunk) : (chunk as Uint8Array);
+        throw e;
     }
 }
 

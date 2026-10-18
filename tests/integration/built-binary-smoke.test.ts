@@ -5,7 +5,7 @@
 // Skipped when the bundle is absent (run `npm run build` first).
 
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -291,6 +291,25 @@ describe.skipIf(!existsSync(BIN))('integration: built binary smoke (dist/cli.cjs
         }
         expect(existsSync(join(dir, 'sx', 'big.bin'))).toBe(false);
         expect(existsSync(join(dir, 'ex', 'big.bin'))).toBe(false);
+    });
+
+    it('--timeout fires while stdin is stalled: list, crc32 and stream end E_LIMIT instead of waiting forever (1.1.0 review M-03)', async () => {
+        for (const args of [['list', '-'], ['crc32'], ['stream', '--list']]) {
+            const child = spawn(process.execPath, [BIN, ...args, '--timeout', '300ms', '--json'], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, NO_COLOR: '1' } });
+            let stderr = '';
+            child.stderr.on('data', (d: Buffer) => { stderr += d.toString('utf8'); });
+            child.stdout.resume();
+            child.stdin.write(Buffer.from('PK\u0003\u0004'));
+            // stdin stays open: the peer stalls.
+            const code = await new Promise<number | null>((done) => {
+                const kill = setTimeout(() => { child.kill(); done(null); }, 5000);
+                child.on('exit', (c) => { clearTimeout(kill); done(c); });
+            });
+            child.stdin.destroy();
+            expect(code, args.join(' ')).toBe(1);
+            const env = JSON.parse(stderr.trim().split('\n').pop() as string) as { error: { code: string; detail?: { limit: string } } };
+            expect(env.error, args.join(' ')).toMatchObject({ code: 'E_LIMIT', detail: { limit: 'timeout' } });
+        }
     });
 
     it('--json after -- is an operand, not agent mode (1.1.0 review)', () => {
