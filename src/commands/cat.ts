@@ -47,7 +47,7 @@ export async function cat(args: ParsedArgs): Promise<void> {
 
     const bytes = await readArchiveBytes(inputPath, args);
     const sink = createDiagnosticSink();
-    const reader = openArchive(bytes, commonOptions(args, sink));
+    const reader = openArchive(bytes, commonOptions(args, sink, 'cat'));
 
     const entries: ZipEntry[] = [];
     for (const name of names) {

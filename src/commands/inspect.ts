@@ -5,15 +5,25 @@
 // determinism verdict and every diagnostic the parse emitted. `--check`
 // turns the report into a gate: any failed assertion exits 1 with
 // `E_CHECK_FAILED` after the report has been printed.
+//
+// Determinism is measured by the engine's `analyzeDeterminism()` (zipnative
+// 1.1 — before it the CLI re-derived the same facts from the entry fields).
+// `deterministic` keeps its 1.0 definition (epoch timestamps + canonical
+// order + UTF-8 flags: reproducibility); the engine's stricter verdict, which
+// also requires Zip64-only extras and the constant version-made-by, is
+// reported as `canonicalForm` with every `offender`, and gated by
+// `--check canonical-form`.
 
 import { type ParsedArgs, getStringFlagAll, hasFlag } from '../utils/args.js';
 import { isJsonMode } from '../utils/agent.js';
 import {
-    FLAG_UTF8,
     METHOD_DEFLATE,
     METHOD_STORE,
+    analyzeDeterminism,
     isSymlinkEntry,
     sanitizeEntryPath,
+    type DeterminismOffender,
+    type DeterminismReport,
     type ZipEntry,
 } from '../core-bridge/index.js';
 import { createDiagnosticSink, type DiagnosticRow } from '../utils/diagnostics.js';
@@ -23,6 +33,8 @@ import { methodName, rowFromEntry, type EntryRow } from '../utils/entryfmt.js';
 import { emitJsonReport } from '../utils/projection.js';
 import { formatBytes, parseByteSize, parseCount } from '../utils/sizes.js';
 import { guard } from '../utils/ziperr.js';
+import { runSignal } from '../utils/control.js';
+import { parseLimitFlags } from '../utils/limits.js';
 import {
     commonOptions,
     bytesToHex,
@@ -32,9 +44,6 @@ import {
     readArchiveBytes,
     resolveInputPath,
 } from '../utils/zipops.js';
-
-const DOS_EPOCH_DATE = 0x0021; // 1980-01-01
-const DOS_EPOCH_TIME = 0x0000;
 
 export interface InspectReport {
     readonly archive: {
@@ -82,6 +91,14 @@ export interface InspectReport {
         readonly canonicalLayout: boolean;
         /** Reproducible: epoch timestamps + canonical order + UTF-8 flags. */
         readonly deterministic: boolean;
+        /** No extra field other than Zip64 (0x0001) on any entry (engine, 1.1). */
+        readonly canonicalExtras: boolean;
+        /** Every entry carries zipnative's version-made-by 0x032D (engine, 1.1). */
+        readonly canonicalVersionMadeBy: boolean;
+        /** The engine's verdict: the canonical form zipnative itself writes (data descriptors excluded). */
+        readonly canonicalForm: boolean;
+        /** Every canonical-form rule an entry breaks, in central-directory order. */
+        readonly offenders: readonly DeterminismOffender[];
     };
     readonly entries?: readonly EntryRow[];
     readonly diagnostics: readonly DiagnosticRow[];
@@ -94,21 +111,12 @@ export interface CheckResult {
     readonly detail: string;
 }
 
-function compareBytes(a: Uint8Array, b: Uint8Array): number {
-    const n = Math.min(a.length, b.length);
-    for (let i = 0; i < n; i++) {
-        const d = (a[i] as number) - (b[i] as number);
-        if (d !== 0) return d;
-    }
-    return a.length - b.length;
-}
-
-function isAscii(bytes: Uint8Array): boolean {
-    for (const b of bytes) if (b > 0x7f) return false;
-    return true;
-}
-
-function buildReport(entries: readonly ZipEntry[], archive: InspectReport['archive'], diagnostics: readonly DiagnosticRow[]): Omit<InspectReport, 'entries' | 'checks'> {
+function buildReport(
+    entries: readonly ZipEntry[],
+    archive: InspectReport['archive'],
+    diagnostics: readonly DiagnosticRow[],
+    det: DeterminismReport,
+): Omit<InspectReport, 'entries' | 'checks'> {
     let files = 0;
     let directories = 0;
     let compressedSize = 0;
@@ -125,10 +133,6 @@ function buildReport(entries: readonly ZipEntry[], archive: InspectReport['archi
     let unsafeNames = 0;
     let earliest: Date | null = null;
     let latest: Date | null = null;
-    let epochTimestamps = true;
-    let canonicalOrder = true;
-    let utf8Flags = true;
-    let prev: ZipEntry | null = null;
 
     for (const e of entries) {
         if (e.isDirectory) directories++;
@@ -150,12 +154,7 @@ function buildReport(entries: readonly ZipEntry[], archive: InspectReport['archi
         if (sanitizeEntryPath(e.isDirectory && e.name.endsWith('/') ? e.name.slice(0, -1) : e.name) === null) unsafeNames++;
         if (earliest === null || e.lastModified < earliest) earliest = e.lastModified;
         if (latest === null || e.lastModified > latest) latest = e.lastModified;
-        if (e.dosDate !== DOS_EPOCH_DATE || e.dosTime !== DOS_EPOCH_TIME) epochTimestamps = false;
-        if (prev !== null && compareBytes(prev.rawName, e.rawName) > 0) canonicalOrder = false;
-        if ((e.flags & FLAG_UTF8) === 0 && !isAscii(e.rawName)) utf8Flags = false;
-        prev = e;
     }
-    const noDataDescriptors = dataDescriptor === 0;
     return {
         archive,
         stats: {
@@ -177,15 +176,21 @@ function buildReport(entries: readonly ZipEntry[], archive: InspectReport['archi
             latestDate: latest === null ? null : latest.toISOString(),
         },
         determinism: {
-            epochTimestamps,
-            canonicalOrder,
-            utf8Flags,
-            noDataDescriptors,
-            canonicalLayout: noDataDescriptors,
-            // Reproducibility only: the data-descriptor layout produced by
-            // streamed writers is byte-stable for identical inputs, so it must
-            // not falsify the verdict (see determinism.md in the engine).
-            deterministic: epochTimestamps && canonicalOrder && utf8Flags,
+            epochTimestamps: det.epochTimestamps,
+            canonicalOrder: det.canonicalOrder,
+            utf8Flags: det.utf8Flags,
+            noDataDescriptors: det.noDataDescriptors,
+            canonicalLayout: det.noDataDescriptors,
+            // Reproducibility only (the 1.0 verdict, unchanged): the data-
+            // descriptor layout produced by streamed writers is byte-stable for
+            // identical inputs, so it must not falsify the verdict, and neither
+            // a foreign version-made-by nor a preserved extra field makes an
+            // archive irreproducible.
+            deterministic: det.epochTimestamps && det.canonicalOrder && det.utf8Flags,
+            canonicalExtras: det.canonicalExtras,
+            canonicalVersionMadeBy: det.canonicalVersionMadeBy,
+            canonicalForm: det.deterministic,
+            offenders: det.offenders,
         },
         diagnostics,
     };
@@ -194,7 +199,7 @@ function buildReport(entries: readonly ZipEntry[], archive: InspectReport['archi
 // ── --check assertions ────────────────────────────────────────────────
 
 const SIMPLE_CHECKS: readonly string[] = [
-    'deterministic', 'epoch-timestamps', 'canonical-order', 'utf8-names', 'no-data-descriptor',
+    'deterministic', 'canonical-form', 'epoch-timestamps', 'canonical-order', 'utf8-names', 'no-data-descriptor',
     'canonical-layout', 'no-zip64', 'zip64', 'no-encryption', 'no-symlinks', 'safe-names', 'no-duplicates',
     'no-diagnostics', 'store-only', 'deflate-only',
 ];
@@ -236,7 +241,20 @@ function evaluateChecks(checks: readonly string[], report: Omit<InspectReport, '
         let ok = false;
         let detail = '';
         switch (key) {
-            case 'deterministic': ok = d.deterministic; detail = JSON.stringify(d); break;
+            case 'deterministic': {
+                ok = d.deterministic;
+                // The verdict flags only: the offender list has its own check.
+                detail = JSON.stringify(d, (k, v: unknown) => (k === 'offenders' ? undefined : v));
+                break;
+            }
+            case 'canonical-form': {
+                ok = d.canonicalForm;
+                const breaking = d.offenders.filter((o) => o.concern !== 'data-descriptor');
+                detail = ok
+                    ? 'every entry is in the canonical form zipnative writes'
+                    : `${breaking.length} offence(s): ${breaking.slice(0, 5).map((o) => `${o.name} (${o.concern})`).join(', ')}${breaking.length > 5 ? ', …' : ''}`;
+                break;
+            }
             case 'epoch-timestamps': ok = d.epochTimestamps; detail = ok ? 'all entries at the DOS epoch' : 'non-epoch timestamps present'; break;
             case 'canonical-order': ok = d.canonicalOrder; detail = ok ? 'central directory in canonical raw-name order' : 'not in canonical order'; break;
             case 'utf8-names': ok = d.utf8Flags; detail = ok ? 'non-ASCII names carry the UTF-8 flag' : 'non-ASCII name without the UTF-8 flag'; break;
@@ -305,6 +323,14 @@ function renderText(report: InspectReport, source: string): string {
     lines.push(`  canonical order     ${d.canonicalOrder}`);
     lines.push(`  utf-8 flags         ${d.utf8Flags}`);
     lines.push(`  no data descriptors ${d.noDataDescriptors}`);
+    lines.push(`  canonical extras    ${d.canonicalExtras}`);
+    lines.push(`  version-made-by     ${d.canonicalVersionMadeBy}`);
+    lines.push(`  canonical form      ${d.canonicalForm}`);
+    const breaking = d.offenders.filter((o) => o.concern !== 'data-descriptor');
+    if (breaking.length > 0) {
+        const shown = breaking.slice(0, 10).map((o) => `${o.name} (${o.concern})`).join(', ');
+        lines.push(`  offenders           ${shown}${breaking.length > 10 ? `, … (${breaking.length} in all)` : ''}`);
+    }
     if (report.diagnostics.length > 0) {
         lines.push('');
         lines.push(`Diagnostics (${report.diagnostics.length}):`);
@@ -343,6 +369,7 @@ export function inspectSummary(report: InspectReport): Record<string, unknown> {
         encrypted: report.stats.encrypted,
         deterministic: report.determinism.deterministic,
         canonicalLayout: report.determinism.canonicalLayout,
+        canonicalForm: report.determinism.canonicalForm,
         diagnostics: report.diagnostics.length,
         ...(report.checks !== undefined ? { checksPassed: report.checks.every((c) => c.ok) } : {}),
     };
@@ -359,7 +386,8 @@ export async function inspect(args: ParsedArgs): Promise<void> {
     const inputPath = resolveInputPath(args);
     const bytes = await readArchiveBytes(inputPath, args);
     const sink = createDiagnosticSink(true);
-    const reader = openArchive(bytes, { ...commonOptions(args, sink), validate: 'eager' });
+    const common = commonOptions(args, sink, 'inspect');
+    const reader = openArchive(bytes, { ...common, validate: 'eager' });
     const entries: ZipEntry[] = guard('Failed to read the central directory', () => [...reader.entries()]);
 
     const archive: InspectReport['archive'] = {
@@ -372,7 +400,16 @@ export async function inspect(args: ParsedArgs): Promise<void> {
         prependedData: sink.diagnostics.some((d) => d.code === 'ZIP_PREPENDED_DATA'),
         multipleEocd: sink.diagnostics.some((d) => d.code === 'ZIP_MULTIPLE_EOCD'),
     };
-    const base = buildReport(entries, archive, sink.diagnostics);
+    // The engine owns the determinism definition (1.1); same bounds and name
+    // decoder as the open above, so it measures exactly the archive reported.
+    const limits = parseLimitFlags(args);
+    const signal = runSignal();
+    const det = guard('Failed to analyse determinism', () => analyzeDeterminism(bytes, {
+        ...(limits !== undefined ? { limits } : {}),
+        ...(common.nameDecoder !== undefined ? { nameDecoder: common.nameDecoder } : {}),
+        ...(signal !== undefined ? { signal } : {}),
+    }));
+    const base = buildReport(entries, archive, sink.diagnostics, det);
 
     let rows: EntryRow[] | undefined;
     if (wantNames.length > 0) {

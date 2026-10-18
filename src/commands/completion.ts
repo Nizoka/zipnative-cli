@@ -29,7 +29,7 @@ export interface CommandSpec {
 
 export const GLOBAL_FLAGS: readonly string[] = [
     '--help', '--version', '--json', '--dry-run', '--quiet', '--no-color', '--config', '--no-config', '--pretty',
-    '--strict', '--pure-codecs', '--codec', '--max-input-size',
+    '--strict', '--pure-codecs', '--codec', '--max-input-size', '--timeout', '--progress',
     ...LIMIT_FLAG_NAMES,
 ];
 
@@ -48,7 +48,7 @@ export const COMMANDS: readonly CommandSpec[] = [
         flags: [
             '--input', '--output', '--stdin-name', '--from-manifest', '--base', '--prefix', '--dir-entries',
             ...FILTER_FLAGS, '--follow-symlinks', ...COMPRESSION_FLAGS, '--order', '--date', '--mtime',
-            '--comment', '--comment-file', '--entry-comment', '--preserve-mode', '--store-ext', '--stream', '--chunk-size',
+            '--comment', '--comment-file', '--entry-comment', '--preserve-mode', '--store-ext', '--stream', '--zip64', '--chunk-size',
             '--parallel', '--workers', '--min-job-size', '--job-timeout', '--overwrite',
         ],
     },
@@ -65,19 +65,19 @@ export const COMMANDS: readonly CommandSpec[] = [
         name: 'list',
         group: 'Read & extract',
         summary: 'List archive entries (text | json | ndjson)',
-        flags: ['--input', '--format', '--long', '--validate', ...FILTER_FLAGS, ...PROJECTION_FLAGS],
+        flags: ['--input', '--format', '--long', '--validate', ...FILTER_FLAGS, '--name-encoding', ...PROJECTION_FLAGS],
     },
     {
         name: 'inspect',
         group: 'Read & extract',
         summary: 'Forensic archive report with determinism/security assertions',
-        flags: ['--input', '--format', '--entries', '--entry', '--extra', '--check', ...PROJECTION_FLAGS],
+        flags: ['--input', '--format', '--entries', '--entry', '--extra', '--name-encoding', '--check', ...PROJECTION_FLAGS],
     },
     {
         name: 'cat',
         group: 'Read & extract',
         summary: 'Stream one or more entries to stdout',
-        flags: ['--input', '--entry', '--output', '--raw', '--no-verify-crc', '--overwrite'],
+        flags: ['--input', '--entry', '--output', '--raw', '--no-verify-crc', '--name-encoding', '--overwrite'],
     },
     {
         name: 'extract',
@@ -86,7 +86,7 @@ export const COMMANDS: readonly CommandSpec[] = [
         flags: [
             '--input', '--output-dir', ...FILTER_FLAGS, '--entry', '--overwrite', '--on-duplicate',
             '--skip-unsafe', '--skip-unsupported', '--allow-symlinks', '--skip-symlinks', '--flat', '--buffered',
-            '--preserve-mode', '--preserve-mtime',
+            '--preserve-mode', '--preserve-mtime', '--name-encoding',
         ],
     },
     {
@@ -96,7 +96,7 @@ export const COMMANDS: readonly CommandSpec[] = [
         flags: [
             '--input', '--list', '--output-dir', '--cat', '--format', '--long', ...FILTER_FLAGS,
             '--overwrite', '--on-duplicate', '--skip-unsafe', '--skip-unsupported', '--flat',
-            '--preserve-mtime', ...PROJECTION_FLAGS,
+            '--preserve-mtime', '--name-encoding', ...PROJECTION_FLAGS,
         ],
     },
     {

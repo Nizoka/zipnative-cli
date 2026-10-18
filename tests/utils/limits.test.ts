@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
+    ENGINE_ONLY_LIMITS,
     LIMIT_FLAGS,
     LIMIT_FLAG_NAMES,
+    LIMIT_KEYS,
     parseLimitFlags,
     effectiveLimits,
     formatLimitValue,
@@ -19,6 +21,7 @@ import { captureStderr } from '../helpers/capture.js';
 const ZIP_LIMITS_ORDER: readonly (keyof ZipLimits)[] = [
     'maxEntries',
     'maxEntryUncompressedSize',
+    'maxEntryCompressedSize',
     'maxTotalUncompressedSize',
     'maxCompressionRatio',
     'maxNameBytes',
@@ -50,10 +53,23 @@ afterEach(() => {
 });
 
 describe('LIMIT_FLAGS', () => {
-    it('has 8 entries in ZipLimits declaration order', () => {
+    it('has 8 flagged entries in ZipLimits declaration order (the engine-only key skipped)', () => {
         expect(LIMIT_FLAGS).toHaveLength(8);
-        expect(LIMIT_FLAGS.map((l) => l.key)).toEqual(ZIP_LIMITS_ORDER);
+        expect(LIMIT_FLAGS.map((l) => l.key)).toEqual(ZIP_LIMITS_ORDER.filter((k) => k !== 'maxEntryCompressedSize'));
         expect(Object.keys(DEFAULT_ZIP_LIMITS)).toEqual(ZIP_LIMITS_ORDER);
+        expect(LIMIT_KEYS).toEqual(ZIP_LIMITS_ORDER);
+    });
+
+    it('every ZipLimits key is either flagged or engine-only, never both', () => {
+        const flagged = new Set(LIMIT_FLAGS.map((l) => l.key));
+        const engineOnly = ENGINE_ONLY_LIMITS.map((l) => l.key);
+        expect(engineOnly).toEqual(['maxEntryCompressedSize']);
+        for (const k of engineOnly) expect(flagged.has(k)).toBe(false);
+        expect(flagged.size + engineOnly.length).toBe(LIMIT_KEYS.length);
+        for (const l of ENGINE_ONLY_LIMITS) {
+            expect(l.cwe).toMatch(/^CWE-\d+$/);
+            expect(l.reason).toContain('openZipRange');
+        }
     });
 
     it('uses distinct --max-* flag names with a kind, a CWE and a description', () => {

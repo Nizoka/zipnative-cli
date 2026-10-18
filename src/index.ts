@@ -2,6 +2,7 @@ import { parseArgs, hasFlag, getStringFlag } from './utils/args.js';
 import { CliError, ErrorCode } from './utils/error.js';
 import { isJsonMode, emitJsonError, remedyFor } from './utils/agent.js';
 import { loadConfig, applyConfigDefaults } from './utils/config.js';
+import { armTimeout } from './utils/control.js';
 import { installSignalCleanup } from './utils/inflight.js';
 import { installEpipeGuard } from './utils/io.js';
 import { cliVersion, engineVersion } from './utils/version.js';
@@ -25,6 +26,16 @@ Global options (any command):
   --strict          Escalate the first engine diagnostic into E_CHECK_FAILED
                     before any output byte (verify: the report is printed and
                     the verdict becomes E_VERIFY_FAILED)
+  --timeout <duration>  Deadline for the run: 500, 500ms, 30s, 5m, 1h. Past
+                    it the run stops at the next chunk or entry boundary with
+                    E_LIMIT (detail.limit "timeout"); the file being written is
+                    removed. A synchronous step already running (opening or
+                    verifying a buffered archive) always completes.
+  --progress        Progress snapshots on stderr where the engine measures
+                    them (create --stream / --stdin-name / --parallel,
+                    extract without --buffered, stream, cat): one throttled
+                    line per update, or NDJSON {"type":"progress",...}
+                    under --json; off under --quiet
   --max-entries <n>            Security bounds (zipnative ZipLimits); "none"
   --max-entry-size <size>      disables a bound. Defaults: 100000 entries,
   --max-total-size <size>      1 GiB per entry, 8 GiB total, ratio 1024:1,
@@ -57,6 +68,7 @@ Environment:
   ZIPNATIVE_JSON=1         same as --json         ZIPNATIVE_DRY_RUN=1  --dry-run
   ZIPNATIVE_QUIET=1        same as --quiet        ZIPNATIVE_STRICT=1   --strict
   ZIPNATIVE_PURE_CODECS=1  same as --pure-codecs  ZIPNATIVE_DEBUG=1    traces
+  ZIPNATIVE_PROGRESS=1     same as --progress
   NO_COLOR / FORCE_COLOR / TERM=dumb              colour of the stderr lines
 `;
 
@@ -161,7 +173,10 @@ Output modes:
                            (data-descriptor layout, so the bytes differ from
                            the buffered layout — the content is identical);
                            entries > 4 GiB are refused
-                           (ZIP_UNSUPPORTED_ZIP64_STREAMING)
+                           (ZIP_UNSUPPORTED_ZIP64_STREAMING) unless --zip64
+  --zip64                  With --stream / --stdin-name: write every streamed
+                           entry with a Zip64 local header and the 24-byte
+                           descriptor, so it may exceed 4 GiB
   --chunk-size <size>      Output chunk size for the chunked writer (--stream
                            or --stdin-name; default 65536)
   --parallel               Deflate across a worker pool (zipnative/worker);
@@ -179,7 +194,7 @@ Output modes:
 
 Status envelope (--json): { ok, command, dryRun, output, entries, files,
 directories, bytes, bytesIn, method, level, deterministic, tier, order, stream,
-layout, parallel, skipped, diagnostics }.
+zip64, layout, parallel, skipped, diagnostics }.
 `;
 
 const LIST_USAGE = `\
@@ -196,6 +211,10 @@ Options:
   --validate lazy|eager       Cross-check every local header up front (eager)
   --include <glob>    Keep only matching names (repeatable)
   --exclude <glob>    Drop matching names (repeatable)
+  --name-encoding <label>  Decode names WITHOUT the UTF-8 flag with this
+                      encoding (default cp437; any WHATWG label the runtime
+                      knows: shift_jis, gbk, windows-1252, ...). nameEncoding
+                      becomes "custom"; --long keeps the bytes in rawNameHex
   --summary           { entries, files, directories, compressedSize,
                         uncompressedSize, zip64, encrypted }
   --fields a,b.c      Dot-path projection of the JSON report
@@ -217,11 +236,14 @@ Options:
   --entries           Include every entry (long form) in the report
   --entry <name>      Include only the named entries (repeatable)
   --extra             Include extra-field payloads as hex
+  --name-encoding <label>  As in \`list\`
   --check <assert>    Assertion (repeatable, comma-separable). Any failure
                       prints
                       the report then exits 1 with E_CHECK_FAILED:
                         deterministic (reproducible: epoch timestamps +
-                        canonical order + UTF-8 flags), epoch-timestamps,
+                        canonical order + UTF-8 flags), canonical-form (the
+                        engine's verdict: also Zip64-only extras and
+                        version-made-by 0x032D), epoch-timestamps,
                         canonical-order, utf8-names, canonical-layout /
                         no-data-descriptor (buffered layout — a --stream
                         archive is reproducible but not canonical), no-zip64,
@@ -231,8 +253,8 @@ Options:
                         max-entries=N, min-entries=N, max-uncompressed=<size>,
                         max-ratio=N, has=<name>, method=store|deflate|<id>
   --summary           { entries, bytes, uncompressedSize, zip64, encrypted,
-                        deterministic, canonicalLayout, diagnostics,
-                        checksPassed? }
+                        deterministic, canonicalLayout, canonicalForm,
+                        diagnostics, checksPassed? }
   --fields a,b.c      Dot-path projection
 
 JSON shape: \`zipnative schema inspect\`.
@@ -252,6 +274,8 @@ Options:
   --overwrite         Replace an existing --output file (default: refuse, E_IO)
   --raw               Output the COMPRESSED payload (zero-copy), no decoding
   --no-verify-crc     Skip the CRC-32 check at the end of the stream
+  --name-encoding <label>  Decode non-UTF-8 names (as in \`list\`) — --entry
+                      then matches the decoded name
   --dry-run           Resolve the entries and report their sizes; output nothing
 
 Note: the CRC is verified at the END of the stream (like \`unzip -p\`), so
@@ -287,6 +311,8 @@ Options:
   --buffered          Use the in-memory extractor (many tiny entries)
   --preserve-mode     Apply POSIX mode bits (never setuid/setgid/sticky)
   --preserve-mtime    Apply the entry timestamp to each file
+  --name-encoding <label>  Decode non-UTF-8 names (as in \`list\`) BEFORE the
+                      path is sanitised and contained
   --dry-run           Plan and validate; write nothing
 
 Refusals (E_SECURITY + zipCode): ZIP_PATH_TRAVERSAL, ZIP_SYMLINK_REJECTED,
@@ -313,7 +339,9 @@ Options:
   --include/--exclude <glob>, --overwrite, --on-duplicate, --flat,
   --preserve-mtime    As in \`extract\`
   --skip-unsafe       Skip unsafe names instead of failing
-  --skip-unsupported  Skip encrypted / unknown-method entries instead of failing
+  --skip-unsupported  Skip encrypted / unknown-method entries, and --codec
+                      methods without createDecompressor, instead of failing
+  --name-encoding <label>  Decode non-UTF-8 names (as in \`list\`)
   --summary, --fields Token-economy projection of the --format json report
   --dry-run           Iterate and plan; write nothing
 
@@ -622,6 +650,12 @@ async function main(): Promise<void> {
     if (hasFlag(args.flags, 'pure-codecs')) {
         process.env['ZIPNATIVE_PURE_CODECS'] = '1';
     }
+    if (hasFlag(args.flags, 'progress')) {
+        process.env['ZIPNATIVE_PROGRESS'] = '1';
+    }
+    // The --timeout deadline starts with the process, not with the first
+    // engine call (utils/control.ts; idempotent for in-process re-arming).
+    armTimeout(args);
 
     if (hasFlag(args.flags, 'help', 'h') && args.positionals.length === 0) {
         process.stdout.write(USAGE);

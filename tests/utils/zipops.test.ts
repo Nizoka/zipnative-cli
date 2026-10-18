@@ -53,29 +53,29 @@ afterEach(async () => {
 describe('commonOptions', () => {
     it('wires the sink and leaves strict off / limits absent by default', () => {
         const sink = createDiagnosticSink(true);
-        const opts = commonOptions(parseArgs([]), sink);
+        const opts = commonOptions(parseArgs([]), sink, 'list');
         expect(opts.strict).toBe(false);
         expect(opts.onDiagnostic).toBe(sink.onDiagnostic);
         expect('limits' in opts).toBe(false);
     });
 
     it('enables strict from the --strict flag', () => {
-        expect(commonOptions(parseArgs(['--strict']), createDiagnosticSink(true)).strict).toBe(true);
+        expect(commonOptions(parseArgs(['--strict']), createDiagnosticSink(true), 'list').strict).toBe(true);
     });
 
     it('enables strict from ZIPNATIVE_STRICT=1', () => {
         process.env['ZIPNATIVE_STRICT'] = '1';
-        expect(commonOptions(parseArgs([]), createDiagnosticSink(true)).strict).toBe(true);
+        expect(commonOptions(parseArgs([]), createDiagnosticSink(true), 'list').strict).toBe(true);
     });
 
     it('carries parsed --max-* limits', () => {
         process.env['ZIPNATIVE_QUIET'] = '1';
-        const opts = commonOptions(parseArgs(['--max-entries', '5', '--max-total-size', '1m']), createDiagnosticSink(true));
+        const opts = commonOptions(parseArgs(['--max-entries', '5', '--max-total-size', '1m']), createDiagnosticSink(true), 'list');
         expect(opts.limits).toEqual({ maxEntries: 5, maxTotalUncompressedSize: 1024 ** 2 });
     });
 
     it('rejects a bad limit with exit 2', () => {
-        expectUsage(() => commonOptions(parseArgs(['--max-entries', '0']), createDiagnosticSink(true)));
+        expectUsage(() => commonOptions(parseArgs(['--max-entries', '0']), createDiagnosticSink(true), 'list'));
     });
 });
 

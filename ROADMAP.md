@@ -100,55 +100,83 @@ This document outlines the planned development direction for zipnative-cli. Prio
 Feasibility is called out honestly: some ideas need zipnative to expose a primitive first (the
 CLI stays a thin dispatch layer and never re-implements engine logic).
 
-- **`zipnative-mcp`** — a Model Context Protocol server exposing the same capabilities to AI
-  clients, in its own repository pinning `zipnative ^1.0.0` (the ecosystem pattern); the CLI's
-  `schema manifest` and `docs/data/errors.json` are its contract inputs. Planned upstream.
-- **Read-only AES decryption** (`extract --password`, `cat --password`) — **Blocked**: the engine
-  ships no encryption in 1.x by policy — see the engine's
-  [What zipnative will NOT do](https://github.com/Nizoka/zipnative#what-zipnative-will-not-do)
-  (ZipCrypto is broken and will never be written; AES AE-2 may come in a later major behind an
-  injected crypto provider). The CLI can only surface it once a core crypto-provider seam
-  exists; it will never implement decryption itself.
-- **Streamed entries > 4 GiB** (`create --stream` / `--stdin-name` beyond 4 GiB) — **Blocked**
-  on the core's per-entry `zip64` opt-in for `addStream` (designed in zipnative's 0.9 ADR,
-  post-1.0). Today the engine refuses with `ZIP_UNSUPPORTED_ZIP64_STREAMING`; buffered entries
-  are fully Zip64.
-- **Custom-method entries in `stream`** — the engine's forward pump decodes store and deflate
-  only, so `stream --cat` / `--output-dir` on a `--codec` method fails with `E_DATA` after the
-  header (listing and skipping work). Waits on the engine using `codec.decompressStream` or
-  refusing before the first byte (engine issue, human-filed); until then use `cat` /
-  `extract --codec` on the complete file.
+### 1.2 candidates — engine 1.1 capabilities bridged but not yet exposed
+
+zipnative 1.1 added 29 exports; 1.1.0 of the CLI surfaces the ones that complete existing
+commands (see the v1.1.0 section) and bridges the rest so the ledger
+(`docs/data/core-exports.json`, `reach: "bridged"`) stays complete. Each is a command-surface
+decision, not an engine wait:
+
+- **Range reading of large local archives** — `openZipRange` / `ZipRangeReader` over a
+  `ByteRangeSource` built from a local file handle (`rangeSourceFromBytes` is the in-memory
+  form) would let `list` / `inspect` / `cat` / `verify` read an archive larger than
+  `--max-input-size` without loading it, bounded by the engine's `maxEntryCompressedSize`
+  (which then gets its `--max-*` flag). A network source (`--url`) is **not** a candidate:
+  offline, always.
+- **`canonicalize` command / `modify --compact --canonical`** — `canonicalizeZip` /
+  `saveCompact({ canonical })` with `CanonicalizeOptions` / `CanonicalOptions` /
+  `CompactOptions`: the "fix" half of `inspect`'s `canonicalForm` verdict (rewrite an archive
+  from any producer into zipnative's canonical deterministic form, no recompression).
+- **Verbatim entry copy between archives** (a `merge` / `split` command) — `addFromReader` with
+  `AddFromReaderOptions` / `RawEntryReader`, and `addRaw` with `RawEntryMeta` for
+  pre-compressed payloads (`verify: true` by default, so a lying source is refused).
+
+### Ideas feasible now
+
 - **`--explain <ZIP_CODE>`** — print `raisedWhen` / `remedy` / class / CLI mapping for one
   error or diagnostic code from `docs/data/errors.json`, so an agent can resolve a `zipCode`
   without leaving the terminal — fed by the same `ZIP_REMEDY` table that already emits
-  `error.remedy` in the envelope. Feasible now (pure data).
+  `error.remedy` in the envelope (pure data).
 - **`deflate` command** — the twin of `inflate`: raw DEFLATE of a file or stdin through the
   engine's deflate facade with the same tier / determinism vocabulary (`--level`,
-  `--deterministic`). Feasible now.
+  `--deterministic`).
 - **`inspect --diff <b.zip>`** — compare two archives by entry inventory, CRCs, sizes and
-  determinism facts with CI-friendly exit codes (no content diff). Feasible now, read-only.
+  determinism facts (`analyzeDeterminism` on both sides) with CI-friendly exit codes (no
+  content diff), read-only.
 - **`create --from-list <file>`** — one path per line (or NUL-separated) as an input list for
-  very large trees, complementing `--from-manifest`. Feasible now.
-- **`--store-symlinks`** on `create` — write symlink entries (Unix mode `S_IFLNK`, target text
-  as payload) for callers that need them; kept out of 1.0 deliberately because extraction
-  refuses symlink entries by default and the CLI never materialises one — needs a documented
-  posture on both sides first.
-- **Manifest `externalAttributes` (raw u32)** — folded into the `--store-symlinks` decision above: a raw external-attribute word would let a manifest write `S_IFLNK` entries and bypass the deliberate symlink deferral, so it waits for the same documented posture; `mode` (0o7777 permission bits) remains the supported field on both manifests. (audit B-21)
-- **`list --extra` / `stream --extra`** — extra-field hex under `--long` for parity with `inspect --extra` (today ids, names and lengths only). (audit B-39)
-- **Inflate-tier visibility in `doctor`** — needs an engine getter (the 1.0 surface exposes `setInflateImpl` but no `activeInflateTier`); until then `doctor` can only say whether a `--codec` module injected `inflateImpl`, and the paths that bypass it (`createInflator`, the forward pump) stay documented in KB §8. (audit B-42)
-- **User-level config** — `$XDG_CONFIG_HOME/zipnative/config.json` (or `~/.zipnativerc.json`) as the last fallback after the upward `.zipnativerc.json` discovery; today only the nearest project file is consulted. (audit A-39)
+  very large trees, complementing `--from-manifest`.
+- **`list --extra` / `stream --extra`** — extra-field hex under `--long` for parity with
+  `inspect --extra` (today ids, names and lengths only). (audit B-39)
 - **Positional arguments in manifest tasks** — `batch --manifest` tasks carry only a flat flag
   map today; every whitelisted command accepts its inputs as flags (`input`, `entry`, …), so no
   command is excluded, but a `positionals` array would make manifests read like the shell.
-- **Engine API asks (human-filed upstream, HITL)** — four compensations the CLI carries until the engine changes: the node-zlib inflate tier should raise `ZIP_DEFLATE_CORRUPT` / `ZIP_DEFLATE_TRUNCATED` like the pure tier (the CLI maps raw zlib codes in `ziperr.ts`); `verifyEntry()` should report the `skipped` reason `verifyZip()` already knows (the CLI re-derives it in `verify --entry` and `modify`); DOS time should not be encoded from local getters (the CLI passes UTC wall-clock components); the forward pump should refuse a custom-method entry before the first byte. Two further asks, no compensation needed: an `analyzeDeterminism()` getter and a write-side `unixMode` helper, the remaining places where the CLI projects what the engine could expose. Drafts live in `.github/drafts/` (git-ignored, see its README).
-- **Lazy engine require** — `dist/cli.cjs` requires `zipnative` at bundle top level (≈10 ms of the ≈40 ms `--version` start-up over bare Node); moving the require into the first core call (tsup `splitting` or a lazy getter in the bridge) would make `--help` / `--version` / `schema` engine-free. Measured, not yet worth the bundling risk. (audit A-11)
-- **Fuzz / property tests for the CLI-owned parsers** — a seeded generator (or `fast-check` as a devDependency) over `parseArgs`, `compileGlob`, `parseByteSize` / `parseCount`, `parseManifest` and `selectFields`, run in CI; today the suites are example-based only. (audit A-25)
-- **One ecosystem governance schema** — the engine's `.github/ai-governance.json` (`version: 1`, `issue_drafting`, `compliance_report_fields`) and the CLI's (`1.0.0`, `policy`, `compliance_report`) differ in shape; agreeing one schema upstream and generating the CLI constant from it is an ecosystem decision, not a CLI change. (audit A-36)
 - **man pages** — generated from the USAGE strings; deferred (ongoing maintenance cost vs
   `--help` / completions already covering usage).
-- **`scripts/verify-docs.mjs`** — port the engine's docs-verification rules (API-JSON sync,
-  error parity, count consistency) as a script; today `tests/docs/consistency.test.ts` covers
-  the counts, mappings and flag tables inside the test suite.
-- **veraZIP sync automation** — a check that fails when `zipnative/scripts/validate-zip.ts`
-  changes upstream without the vendored copy (and its recorded commit / blob hashes) being
-  re-ported.
+- **Lazy engine require** — `dist/cli.cjs` requires `zipnative` at bundle top level (≈10 ms of
+  the ≈40 ms `--version` start-up over bare Node); moving the require into the first core call
+  (tsup `splitting` or a lazy getter in the bridge) would make `--help` / `--version` / `schema`
+  engine-free. Measured, not yet worth the bundling risk. (audit A-11)
+
+### Needs a documented posture first
+
+- **`--store-symlinks`** on `create` — write symlink entries (Unix mode `S_IFLNK`, target text
+  as payload) for callers that need them; kept out deliberately because extraction refuses
+  symlink entries by default and the CLI never materialises one — needs a documented posture on
+  both sides first.
+- **Manifest `externalAttributes` (raw u32)** — folded into the `--store-symlinks` decision
+  above: a raw external-attribute word would let a manifest write `S_IFLNK` entries and bypass
+  the deliberate symlink deferral; `mode` (0o7777 permission bits) remains the supported field
+  on both manifests. (audit B-21)
+- **User-level config** — `$XDG_CONFIG_HOME/zipnative/config.json` (or `~/.zipnativerc.json`) as
+  the last fallback after the upward `.zipnativerc.json` discovery; today only the nearest
+  project file is consulted. (audit A-39)
+
+### Blocked on the engine or the ecosystem
+
+- **Read-only AES decryption** (`extract --password`, `cat --password`) — **Blocked**: the engine
+  ships no encryption in 1.x by policy — see the engine's
+  [What zipnative will NOT do](https://github.com/Nizoka/zipnative#what-zipnative-will-not-do)
+  (ZipCrypto is broken and will never be written; AES AE-2 is a zipnative 2.0 candidate behind
+  an injected crypto provider). Since zipnative 1.1 an AES entry is at least *named*
+  (`detail.feature: "aes"`). The CLI can only surface decryption once a core crypto-provider
+  seam exists; it will never implement it itself.
+- **Inflate-tier visibility in `doctor`** — needs an engine getter (zipnative 1.1 still exposes
+  `setInflateImpl` but no `activeInflateTier`); until then `doctor` can only say whether a
+  `--codec` module injected `inflateImpl`, and the paths that bypass it (`createInflator`, the
+  forward pump) stay documented in KB §8. (audit B-42)
+- **One ecosystem governance schema** — the engine moved its `.github/ai-governance.json` to the
+  pdfnative schema in 1.1; agreeing one schema across the family and generating the CLI
+  constant from it is an ecosystem decision, not a CLI change. (audit A-36)
+- **`zipnative-mcp`** — shipped upstream as its own package (zipnative-mcp 1.0.0, 2026-09-07)
+  pinning the engine; the CLI's `schema manifest` and `docs/data/errors.json` remain its
+  contract inputs, kept in step by the engine's `cli-surface` documentation rules.

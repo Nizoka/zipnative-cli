@@ -469,7 +469,8 @@ cat file | zipnative create --stdin-name <name> -o <out.zip>
 | `--entry-comment <name>=<text>` _(repeatable)_ | — | Per-entry comment |
 | `--preserve-mode` | false | Store POSIX mode bits (never setuid/setgid/sticky; no effect on Windows) |
 | `--store-ext png,jpg,zip` | — | Store (no deflate) entries with these extensions |
-| `--stream` | false | Constant-memory writer: file inputs are streamed (data-descriptor layout — same content as the buffered layout, not the same bytes); entries > 4 GiB are refused (`ZIP_UNSUPPORTED_ZIP64_STREAMING`) |
+| `--stream` | false | Constant-memory writer: file inputs are streamed (data-descriptor layout — same content as the buffered layout, not the same bytes); entries > 4 GiB are refused (`ZIP_UNSUPPORTED_ZIP64_STREAMING`) unless `--zip64` |
+| `--zip64` | false | With `--stream` / `--stdin-name`: write every streamed entry with a Zip64 local header and the 24-byte data descriptor, so it may exceed 4 GiB (zipnative 1.1 `AddEntryOptions.zip64`; refused without a streamed input — buffered entries are already Zip64 when they need it) |
 | `--chunk-size <size>` | `65536` | Output chunk size for the chunked writer (`--stream` or `--stdin-name`; refused otherwise; a warning outside 1 KiB–16 MiB) |
 | `--parallel` | false | Deflate across a worker pool (`zipnative/worker`); byte-identical to the sequential writer per tier. Refused (exit 2) with a `--codec` module that registers method 0/8, or a `deflateImpl` without `--deterministic` — the workers never see the module |
 | `--workers <n>` | cores − 1, max 8 | Worker count (`0` = main thread); requires `--parallel` |
@@ -487,8 +488,10 @@ entry at a time (the pinned encoder is whole-buffer). Argv paths (`../src`, `-o 
 are ordinary shell paths; only `path` values inside a manifest are refused on `..`.
 
 Status envelope (`--json`): `{ ok, command, output, entries, files, directories, bytes, bytesIn,
-method, level, deterministic, tier, order, stream, layout: "buffered" | "data-descriptor",
-parallel, skipped, diagnostics }`.
+method, level, deterministic, tier, order, stream, zip64, layout: "buffered" | "data-descriptor",
+parallel, skipped, diagnostics }`. A date outside 1980–2107 (an ISO `--date`, a manifest `date`,
+or `--mtime` on an older file) is clamped by the engine and reported as the
+`ZIP_TIMESTAMP_CLAMPED` diagnostic (an error under `--strict`).
 
 ### `zipnative modify`
 
@@ -533,8 +536,10 @@ decompress pass over the untouched entries, never a recompress. A lying record i
 instead of laundered: local-header disagreement → `E_SECURITY` / `ZIP_CD_LFH_MISMATCH`, a CRC
 lie → `E_DATA` / `ZIP_CRC_MISMATCH`, a size lie → `E_DATA` / `ZIP_SIZE_MISMATCH`, each with
 `entryName`. Encrypted entries and entries whose registered codec has no `decompressSync` cannot
-be verified: they are copied as-is and counted in `verifySkipped`. An entry with no registered
-codec is `E_UNSUPPORTED` (load `--codec`). There is no opt-out.
+have their content verified: their **local header** is still cross-checked (zipnative 1.1) — a
+mismatch is `E_SECURITY` / `ZIP_CD_LFH_MISMATCH` — and they are counted in `verifySkipped`. An
+entry with no registered codec is `E_UNSUPPORTED` / `ZIP_UNSUPPORTED_METHOD` (load `--codec`).
+There is no opt-out.
 
 Status envelope: `{ ok, command, output, bytes, edits: [{ op, name, to? }], layout:
 "append-only" | "compact", changed, verified, verifySkipped, tier, diagnostics }` (a binary
@@ -554,12 +559,15 @@ zipnative list <a.zip> [options]
 | `--long` | false | Add mode, flags, versions, offsets and extra fields (no `-l` short form) |
 | `--validate lazy\|eager` | `lazy` | Cross-check every local header up front (`eager`) |
 | `--include <glob>` / `--exclude <glob>` _(repeatable)_ | — | Name filters |
+| `--name-encoding <label>` | `cp437` | Decode names **without** the UTF-8 flag with this encoding: `cp437` (the APPNOTE default), or any WHATWG label the Node runtime's `TextDecoder` knows (`shift_jis`, `gbk`, `windows-1252`, `ibm866`, …; an unknown label is exit 2). Decoded rows report `nameEncoding: "custom"`; the engine still sanitises the decoded name and `--long` keeps the bytes in `rawNameHex` |
 | `--summary` | — | `{ entries, files, directories, compressedSize, uncompressedSize, zip64, encrypted }` |
 | `--fields a,b.c` | — | Dot-path projection of the JSON report |
 
 Nothing is decompressed. JSON shape: `zipnative schema entries`. `--long` rows carry
 `rawNameHex` (the name bytes, always) and `commentHex` (when the entry has a comment);
-`unixMode` is four octal digits (`"0644"`, `"4755"`). The `--format json` `archive` object
+`unixMode` is four octal digits (`"0644"`, `"4755"`), plus (zipnative 1.1) `timestamps: { mtime,
+atime, ctime, source: "ut" | "ntfs" | "dos" }` — the best timestamps the extra fields offer —
+and `unixIds: { uid, gid } | null` (the Info-ZIP 0x7875 extra). The `--format json` `archive` object
 carries `commentHex` whenever `commentBytes > 0` (`comment` stays the lossy UTF-8 decode).
 
 ### `zipnative inspect`
@@ -575,20 +583,26 @@ zipnative inspect --input <a.zip> [--format json|text] [--check <assert>]...
 | `--entries` | false | Include every entry (long form, with `rawNameHex` / `commentHex`) in the report |
 | `--entry <name>` _(repeatable)_ | — | Include only the named entries (`E_NOT_FOUND` / `ZIP_ENTRY_NOT_FOUND` if absent) |
 | `--extra` | false | Include extra-field payloads as hex |
+| `--name-encoding <label>` | `cp437` | As in `list` |
 | `--check <assert>` _(repeatable, comma-separable)_ | — | Assertion; any failure prints the report then exits 1 with `E_CHECK_FAILED` |
-| `--summary` | — | `{ entries, bytes, uncompressedSize, zip64, encrypted, deterministic, canonicalLayout, diagnostics, checksPassed? }` |
+| `--summary` | — | `{ entries, bytes, uncompressedSize, zip64, encrypted, deterministic, canonicalLayout, canonicalForm, diagnostics, checksPassed? }` |
 | `--fields a,b.c` | — | Dot-path projection |
 
-Assertions: `deterministic`, `epoch-timestamps`, `canonical-order`, `utf8-names`,
+Assertions: `deterministic`, `canonical-form`, `epoch-timestamps`, `canonical-order`, `utf8-names`,
 `no-data-descriptor` / `canonical-layout`, `no-zip64`, `zip64`, `no-encryption`, `no-symlinks`, `safe-names`
 (every name passes the engine's `sanitizeEntryPath()` — the pre-extraction gate `verify` does not give), `no-duplicates`,
 `no-diagnostics`, `store-only`, `deflate-only`, `max-entries=N`, `min-entries=N`,
 `max-uncompressed=<size>`, `max-ratio=N`, `has=<name>`, `method=store|deflate|<id>`.
-The `determinism` verdict is `{ epochTimestamps, canonicalOrder, utf8Flags, noDataDescriptors,
-canonicalLayout, deterministic }` — `deterministic` (reproducibility) = epoch timestamps +
-canonical order + UTF-8 flags; `canonicalLayout` (form) = no data descriptors. The text report
-prints `Determinism: reproducible, layout canonical` or `… layout data-descriptor (streamed)`. JSON shape:
-`zipnative schema inspect`.
+The `determinism` block is measured by the engine's `analyzeDeterminism()` (zipnative 1.1): `{
+epochTimestamps, canonicalOrder, utf8Flags, noDataDescriptors, canonicalLayout, deterministic,
+canonicalExtras, canonicalVersionMadeBy, canonicalForm, offenders }`. `deterministic`
+(reproducibility, unchanged since 1.0) = epoch timestamps + canonical order + UTF-8 flags;
+`canonicalLayout` (form) = no data descriptors; `canonicalForm` is the engine's stricter verdict —
+also Zip64-only extra fields and the constant version-made-by `0x032D`, the form zipnative itself
+writes — gated by `--check canonical-form`; `offenders` lists every `{ name, concern }` (`timestamp |
+order | utf8-flag | extra-field | version-made-by | data-descriptor`, the last informational). The
+text report prints `Determinism: reproducible, layout canonical` or `… layout data-descriptor
+(streamed)`. JSON shape: `zipnative schema inspect`.
 
 ### `zipnative cat`
 
@@ -605,6 +619,7 @@ zipnative cat <a.zip> <name> [<name>...]
 | `--overwrite` | false | Replace an existing `--output` file (default: refuse, `E_IO`) |
 | `--raw` | false | Output the **compressed** payload (zero-copy), no decoding |
 | `--no-verify-crc` | false | Skip the CRC-32 check at the end of the stream |
+| `--name-encoding <label>` | `cp437` | Decode non-UTF-8 names (as in `list`); `--entry` then matches the decoded name |
 | `--dry-run` | false | Resolve the entries and report their sizes; output nothing |
 
 The CRC is verified at the **end** of the stream (like `unzip -p`), so stdout may already carry
@@ -635,6 +650,7 @@ zipnative extract --input <a.zip> --output-dir <dir> [options]
 | `--buffered` | false | Use the in-memory extractor (many tiny entries) |
 | `--preserve-mode` | false | Apply POSIX mode bits (never setuid/setgid/sticky; no effect on Windows) |
 | `--preserve-mtime` | false | Apply the entry timestamp to each file |
+| `--name-encoding <label>` | `cp437` | Decode non-UTF-8 names (as in `list`) — **before** the path is sanitised and contained, so a decoded name passes the same guards |
 | `--dry-run` | false | Plan and validate; write nothing |
 
 Refusals (`E_SECURITY` + `zipCode`): `ZIP_PATH_TRAVERSAL`, `ZIP_SYMLINK_REJECTED`,
@@ -672,7 +688,8 @@ cat a.zip | zipnative stream --cat <name>
 | `--long` | false | Add flags, versions and extra fields to the rows (`rawNameHex` included; entry comments live only in the central directory, so there is no `commentHex` here; no `-l` short form) |
 | `--include` / `--exclude`, `--overwrite`, `--on-duplicate`, `--flat`, `--preserve-mtime` | as in `extract` | Extraction controls (the same sink: realpath containment, exclusive open) |
 | `--skip-unsafe` | false | Skip unsafe names instead of failing |
-| `--skip-unsupported` | false | Skip encrypted / unknown-method entries instead of failing |
+| `--skip-unsupported` | false | Skip encrypted / unknown-method entries, and `--codec` methods without `createDecompressor`, instead of failing |
+| `--name-encoding <label>` | `cp437` | Decode non-UTF-8 names (as in `list`) |
 | `--summary` / `--fields` | — | Projection of the `--format json` report; `--summary` = `{ entries, bytes, descriptorEntries, bytesKnown, trust }` |
 | `--dry-run` | false | Iterate and plan; write nothing |
 
@@ -686,7 +703,10 @@ sizes in their local header (a `create --stream` archive, for one): the rows sho
 them), and `--list` has to inflate each such entry to find its end. Data-descriptor entries the
 engine cannot delimit without the central directory (store, encrypted or custom-codec + bit 3)
 are refused with `ZIP_UNSUPPORTED_CD_LESS_DESCRIPTOR`. A `--cat` name that never arrives is
-`E_NOT_FOUND` / `ZIP_ENTRY_NOT_FOUND`.
+`E_NOT_FOUND` / `ZIP_ENTRY_NOT_FOUND`. A `--codec` method is decoded when its codec exposes
+`createDecompressor()` (zipnative 1.1); one without it is refused **before its first byte**
+(`E_UNSUPPORTED` / `ZIP_UNSUPPORTED_CODEC_MODE` — `--skip-unsupported` skips it instead; `cat` /
+`extract --codec` read it from the complete file).
 
 ### `zipnative verify`
 
@@ -705,8 +725,11 @@ zipnative verify --input <a.zip> [--format json|text] [--strict]
 
 The report is zipnative's `ZipVerificationReport` (`{ ok, error, entryCount, entries: [{ name,
 ok, crcMatch, sizeMatch, localHeaderMatch, skipped? }], diagnostics }`) plus `{ failed, skipped,
-strict, selected? }`. Encrypted entries are honestly `skipped: "encrypted"` (a stream-only codec:
-`"stream-only-codec"`), never faked as verified. Exit 1 / `E_VERIFY_FAILED` when `ok` is false;
+strict, selected? }`. An entry whose content cannot be checked carries the engine's `skipped`
+reason (zipnative 1.1) and is never `ok`: `"encrypted"` and `"stream-only-codec"` pass when their
+local header agrees with the central directory (counted in `skipped`), while `"unsupported-method"`
+(no codec registered — load `--codec`) and any design-time skip with a mismatching local header
+fail (counted in `failed`). Exit 1 / `E_VERIFY_FAILED` when `ok` is false;
 the error envelope carries `zipCode = report.error.code` for structural refusals. The `--max-*`
 bounds apply.
 
@@ -895,6 +918,8 @@ passing check is **necessary but not sufficient** — the human review gate alwa
 | `--pretty` | — | Indent JSON output under `--json` |
 | `--dry-run` | — | Validate inputs and plan without writing output (`create`, `extract`, `modify`, `stream`, `cat`, `inflate`, `batch`) |
 | `--strict` | — | Escalate the first engine diagnostic into `E_CHECK_FAILED` before any output byte (`verify`: fail on any diagnostic, `E_VERIFY_FAILED`) |
+| `--timeout <duration>` | — | Deadline for the run (`500`, `500ms`, `30s`, `5m`, `1h`; at most 2³¹−1 ms). Past it the run stops at the next chunk or entry boundary with `E_LIMIT` / `detail { limit: "timeout", configured, observed }` (ms) and the file being written is removed. The engine checks the deadline (zipnative 1.1 `signal`) before the first byte and between chunks and entries, the CLI in its own byte loops; a synchronous step already running — opening or verifying a buffered archive — always completes, so it bounds progress, it is not a kill |
+| `--progress` | — | Progress snapshots on stderr where the engine measures them (zipnative 1.1 `onProgress`: `create --stream` / `--stdin-name` / `--parallel`, `extract` without `--buffered`, `stream`, `cat`; the buffered writer and extractor report none): one throttled `progress: <done>/<total> entries, <in> in, <out> out` line per update, or one NDJSON `{ "type": "progress", "command", "entriesDone", "entriesTotal", "bytesIn", "bytesOut" }` object per update under `--json`. Off under `--quiet`; stdout is never touched |
 | `--max-entries <n>` | `100000` | Maximum central-directory entry count (CWE-400) |
 | `--max-entry-size <size>` | `1073741824` (1 GiB) | Maximum decompressed size of a single entry (CWE-400) |
 | `--max-total-size <size>` | `8589934592` (8 GiB) | Maximum total decompressed size across an extraction (CWE-400) |
@@ -962,6 +987,7 @@ is printed — not recommended for untrusted input). Limits are also flat keys i
 | `ZIPNATIVE_QUIET` | `--quiet` |
 | `ZIPNATIVE_STRICT` | `--strict` |
 | `ZIPNATIVE_PURE_CODECS` | `--pure-codecs` |
+| `ZIPNATIVE_PROGRESS` | `--progress` |
 | `NO_COLOR` | Any value disables colour on stderr (`--no-color` sets it) |
 | `FORCE_COLOR` | Any value but `0` / `false` forces colour on stderr |
 | `TERM` | `dumb` disables colour |

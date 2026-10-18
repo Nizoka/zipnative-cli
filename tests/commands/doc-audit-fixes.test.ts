@@ -77,14 +77,14 @@ describe('govern verify-issue honours --max-input-size (D-03)', () => {
     });
 });
 
-describe('unwrapped node:zlib errors map to the deflate classes (D-04)', () => {
-    it('mapZipError: Z_DATA_ERROR → E_PARSE ZIP_DEFLATE_CORRUPT, Z_BUF_ERROR → E_PARSE ZIP_DEFLATE_TRUNCATED', () => {
+describe('corrupt deflate is one class on every tier (D-04, engine 1.1 issue #10)', () => {
+    it('mapZipError no longer special-cases raw zlib errors: the engine normalises them before they reach the CLI', () => {
+        // zipnative 1.1 raises ZipFormatError ZIP_DEFLATE_CORRUPT / _TRUNCATED on
+        // the node-zlib and DecompressionStream tiers too, so the 1.0 ZLIB_TO_ZIP
+        // compensation is gone: a bare zlib Error is now an unexpected runtime error.
         const data = Object.assign(new Error('invalid distance too far back'), { code: 'Z_DATA_ERROR' });
-        expect(mapZipError(data, 'Inflate failed', 'x.bin')).toMatchObject({ code: ErrorCode.PARSE, exitCode: 1, zipCode: 'ZIP_DEFLATE_CORRUPT', entryName: 'x.bin' });
-        const buf = Object.assign(new Error('unexpected end of file'), { code: 'Z_BUF_ERROR' });
-        expect(mapZipError(buf, 'Inflate failed')).toMatchObject({ code: ErrorCode.PARSE, zipCode: 'ZIP_DEFLATE_TRUNCATED' });
-        const other = Object.assign(new Error('nope'), { code: 'Z_STREAM_ERROR' });
-        expect(mapZipError(other, 'ctx').code).toBe(ErrorCode.RUNTIME);
+        expect(mapZipError(data, 'Inflate failed').code).toBe(ErrorCode.RUNTIME);
+        expect(mapZipError(data, 'Inflate failed').zipCode).toBeUndefined();
     });
 
     it('inflate --sync on the node-zlib tier: corrupt → E_PARSE / ZIP_DEFLATE_CORRUPT, truncated → ZIP_DEFLATE_TRUNCATED', async () => {

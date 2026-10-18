@@ -19,6 +19,11 @@
 //
 // Module contract:
 //   export const codecs: ZipCodec[]            (or `export default ZipCodec[]`)
+//     each { method, name, compressSync?, decompressSync?, decompressStream?,
+//            createDecompressor? } — the last (zipnative 1.1) is what lets
+//     `stream` decode the method; without it `stream` refuses the entry
+//     before its first byte (ZIP_UNSUPPORTED_CODEC_MODE; --skip-unsupported
+//     skips it instead)
 //   export const inflateImpl?: (data, maxOutput) => Uint8Array
 //   export const deflateImpl?: (data, level) => Uint8Array
 
@@ -56,7 +61,9 @@ function isCodec(value: unknown): value is ZipCodec {
     const c = value as Record<string, unknown>;
     if (!Number.isInteger(c['method']) || (c['method'] as number) < 0 || (c['method'] as number) > 0xffff) return false;
     if (typeof c['name'] !== 'string' || c['name'].length === 0) return false;
-    const fns = ['compressSync', 'decompressSync', 'decompressStream'];
+    // createDecompressor (zipnative 1.1) is the incremental decoder the forward
+    // reader (`stream`) drives for a method other than store / deflate.
+    const fns = ['compressSync', 'decompressSync', 'decompressStream', 'createDecompressor'];
     const present = fns.filter((f) => typeof c[f] === 'function');
     const invalid = fns.filter((f) => c[f] !== undefined && typeof c[f] !== 'function');
     return present.length > 0 && invalid.length === 0;
@@ -83,7 +90,7 @@ export async function loadCodecModule(modulePath: string): Promise<LoadedCodecMo
         if (!isCodec(item)) {
             throw new CliError(
                 `Codec module "${modulePath}" exports an invalid codec: expected { method: 0-65535, name, `
-                + 'and at least one of compressSync/decompressSync/decompressStream }.',
+                + 'and at least one of compressSync/decompressSync/decompressStream/createDecompressor }.',
                 1,
                 ErrorCode.INPUT,
             );

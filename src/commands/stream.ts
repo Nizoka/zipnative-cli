@@ -89,7 +89,7 @@ export async function stream(args: ParsedArgs): Promise<void> {
 
     const sink = createDiagnosticSink(format === 'ndjson' && isJsonMode());
     const source = readableToByteSource(openInputStream(inputPath)) as ByteSource;
-    const iterator = iterateZipEntries(source, commonOptions(args, sink));
+    const iterator = iterateZipEntries(source, commonOptions(args, sink, 'stream'));
 
     const rows: EntryRow[] = [];
     const skipped: { name: string; reason: string }[] = [];

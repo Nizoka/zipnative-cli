@@ -6,13 +6,16 @@ import { basename } from 'node:path';
 import { type ParsedArgs, getStringFlag, getStringFlagAll, hasFlag } from './args.js';
 import { isStrict, progress } from './agent.js';
 import type {
+    EntryVerification,
     OpenZipOptions,
     ZipCommonOptions,
     ZipCompressionOptions,
     ZipExtraField,
+    ZipNameDecoder,
     ZipReader,
 } from '../core-bridge/index.js';
-import { openZip } from '../core-bridge/index.js';
+import { externalAttributesFromUnixMode, openZip } from '../core-bridge/index.js';
+import { armTimeout, progressHandler, runSignal } from './control.js';
 import type { DiagnosticSink } from './diagnostics.js';
 import { CliError, ErrorCode } from './error.js';
 import { buildFilter, isPassThrough, type NameFilter } from './glob.js';
@@ -21,14 +24,59 @@ import { parseInputSizeFlag, parseLimitFlags } from './limits.js';
 import { parseByteSize, parsePositiveInt } from './sizes.js';
 import { guard } from './ziperr.js';
 
-/** `{ strict, onDiagnostic, limits }` for any core entry point. */
-export function commonOptions(args: ParsedArgs, sink: DiagnosticSink): ZipCommonOptions {
+/**
+ * The options every core entry point takes (`ZipCommonOptions`):
+ *
+ *   • `strict`, `onDiagnostic`, `limits` — the 1.0 contract;
+ *   • no `dosTimeMode`: the engine default `'local'` is kept on purpose (see
+ *     {@link parseIsoDateUtc} — the CLI's date convention is per entry);
+ *   • `signal` — the `--timeout` deadline (utils/control.ts);
+ *   • `onProgress` — `--progress` snapshots on stderr;
+ *   • `nameDecoder` — `--name-encoding <label>` (read commands only: the
+ *     engine applies it to names without the UTF-8 flag, before sanitising).
+ */
+export function commonOptions(args: ParsedArgs, sink: DiagnosticSink, command: string): ZipCommonOptions {
     const limits = parseLimitFlags(args);
+    armTimeout(args);
+    const signal = runSignal();
+    const onProgress = progressHandler(command, args);
+    const nameDecoder = parseNameEncoding(args);
     return {
         strict: isStrict() || hasFlag(args.flags, 'strict'),
         onDiagnostic: sink.onDiagnostic,
         ...(limits !== undefined ? { limits } : {}),
+        ...(signal !== undefined ? { signal } : {}),
+        ...(onProgress !== undefined ? { onProgress } : {}),
+        ...(nameDecoder !== undefined ? { nameDecoder } : {}),
     };
+}
+
+/**
+ * `--name-encoding <label>` → the engine's `nameDecoder`, or undefined.
+ *
+ * `cp437` (and an absent flag) keeps the engine default: names without the
+ * UTF-8 flag are CP437 per APPNOTE. Any other value is a WHATWG encoding
+ * label (`shift_jis`, `gbk`, `windows-1252`, `ibm866`, `utf-8`…) decoded by
+ * the runtime's own `TextDecoder` — no table ships with the CLI. A label the
+ * runtime does not know is a usage error (a Node built with small-icu knows
+ * fewer than a full-icu build). Decoding is lossy (U+FFFD), never fatal:
+ * the engine still sanitises the decoded name and `rawNameHex` keeps the bytes.
+ */
+export function parseNameEncoding(args: ParsedArgs): ZipNameDecoder | undefined {
+    const raw = getStringFlag(args.flags, 'name-encoding');
+    if (raw === undefined) return undefined;
+    const label = raw.trim().toLowerCase();
+    if (label === 'cp437' || label === 'ibm437') return undefined;
+    let decoder: TextDecoder;
+    try {
+        decoder = new TextDecoder(label, { fatal: false });
+    } catch {
+        throw new CliError(
+            `--name-encoding "${raw}" is not an encoding this Node.js runtime can decode (use cp437, utf-8, or a WHATWG label such as shift_jis, gbk, windows-1252).`,
+            2,
+        );
+    }
+    return (bytes: Uint8Array): string => decoder.decode(bytes);
 }
 
 /** `--method`, `--level`, `--deterministic` → `ZipCompressionOptions` (or undefined). */
@@ -52,26 +100,28 @@ export function parseCompression(args: ParsedArgs): ZipCompressionOptions | unde
     return Object.keys(out).length > 0 ? out : undefined;
 }
 
-const DOS_YEAR_MIN = 1980;
-const DOS_YEAR_MAX = 2107;
 const ZONE_RE = /(?:Z|[+-]\d{2}:?\d{2})$/i;
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
  * Parse an ISO 8601 date as **UTC wall-clock time**.
  *
- * ZIP stores DOS timestamps: local wall-clock fields, no zone. The engine
- * encodes a `Date` through its LOCAL getters, so handing it an instant would
- * make the stored fields depend on the invoking host's TZ — and a
- * `--deterministic` build would hash differently in CI and on a laptop.
- * The CLI therefore normalises every explicit date to its UTC components and
- * builds a local `Date` carrying exactly those fields: the archive stores the
- * UTC wall-clock on every machine. A string without a zone designator is
- * read as UTC too (`2020-06-01T12:00:00` ≡ `2020-06-01T12:00:00Z`).
+ * ZIP stores DOS timestamps: wall-clock fields, no zone. The CLI's
+ * convention (unchanged since 1.0) is per ENTRY: an explicit date (`--date
+ * <ISO>`, a manifest `date`) stores its UTC fields, so a pinned build hashes
+ * the same in CI and on a laptop; a host-derived time (`--date now`,
+ * `--mtime`) stores the LOCAL wall-clock like every other archiver, so
+ * `extract --preserve-mtime` restores it on the same host. The engine's
+ * `dosTimeMode` (zipnative 1.1, issue #9) is one mode per archive and cannot
+ * express that mix — an archive may hold both kinds — so the CLI keeps the
+ * engine's default `'local'` encoding and hands it a local `Date` carrying
+ * exactly the UTC fields (docs/adr/0008). A string without a zone
+ * designator is read as UTC too (`2020-06-01T12:00:00` ≡ `…T12:00:00Z`).
  *
- * Warns (stderr, suppressed by --quiet) when the year falls outside the DOS
- * range 1980–2107 (the engine clamps) or the seconds are odd (2-second
- * resolution: floored).
+ * A date outside 1980-01-01 .. 2107-12-31 is clamped by the engine, which
+ * reports it as the `ZIP_TIMESTAMP_CLAMPED` diagnostic (zipnative 1.1; an
+ * error under `--strict`). Warns (stderr, suppressed by --quiet) when the
+ * seconds are odd (2-second resolution: floored).
  *
  * @throws CliError exit 2 (`usage` = true) or E_INPUT (manifest values)
  */
@@ -85,15 +135,11 @@ export function parseIsoDateUtc(raw: string, where: string, usage = true): Date 
             ? new CliError(`${where} expects "epoch", "now" or an ISO 8601 date, got "${raw}".`, 2)
             : new CliError(`${where}: "date" must be "epoch", "now" or an ISO 8601 string.`, 1, ErrorCode.INPUT);
     }
-    const year = instant.getUTCFullYear();
-    if (year < DOS_YEAR_MIN || year > DOS_YEAR_MAX) {
-        progress(`warning: ${where} ${raw} is outside the DOS timestamp range ${DOS_YEAR_MIN}-01-01 .. ${DOS_YEAR_MAX}-12-31 and will be clamped by the engine.`);
-    }
     if (instant.getUTCSeconds() % 2 === 1) {
         progress(`warning: ${where} ${raw}: DOS timestamps have 2-second resolution; the odd second is floored.`);
     }
     return new Date(
-        year,
+        instant.getUTCFullYear(),
         instant.getUTCMonth(),
         instant.getUTCDate(),
         instant.getUTCHours(),
@@ -224,6 +270,25 @@ export async function readArchiveBytes(path: string | undefined, args?: ParsedAr
     return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
 }
 
+/**
+ * A design-time skip (zipnative 1.1, issue #12): the content cannot be
+ * verified by construction — an encrypted entry, or a registered codec with
+ * no sync decompressor — but the local header WAS cross-checked.
+ */
+export function isDesignSkip(v: EntryVerification): boolean {
+    return v.skipped === 'encrypted' || v.skipped === 'stream-only-codec';
+}
+
+/**
+ * The engine's own archive rule (verifyZip, 1.1): an entry passes when
+ * every check ran and passed, or when it is a design-time skip whose local
+ * header agrees with the central directory. `'unsupported-method'` (no
+ * codec registered) never passes.
+ */
+export function entryPasses(v: EntryVerification): boolean {
+    return v.ok || (isDesignSkip(v) && v.localHeaderMatch);
+}
+
 /** `openZip` wrapped with the error mapper. */
 export function openArchive(bytes: Uint8Array, options: OpenZipOptions): ZipReader {
     return guard('Failed to open archive', () => openZip(bytes, options));
@@ -237,15 +302,15 @@ export function decodeComment(raw: Uint8Array): string {
 
 // ── Entry attributes, extra fields and comments shared by create / modify ──
 
-const S_IFREG = 0o100000;
-const S_IFDIR = 0o040000;
-const DOS_ATTR_DIRECTORY = 0x10;
-
-/** External-attributes word for a POSIX mode (setuid/setgid/sticky never propagate). */
+/**
+ * External-attributes word for a POSIX mode, through the engine's
+ * `externalAttributesFromUnixMode()` (S_IFREG / S_IFDIR + the DOS directory
+ * bit). The CLI masks the mode to the nine permission bits FIRST: setuid,
+ * setgid and sticky never propagate into an archive the CLI writes (the
+ * engine helper would keep them — this mask is the CLI's own policy).
+ */
 export function externalAttributesFor(mode: number, isDirectory: boolean): number {
-    const perm = mode & 0o777;
-    if (isDirectory) return (((S_IFDIR | perm) << 16) >>> 0) | DOS_ATTR_DIRECTORY;
-    return ((S_IFREG | perm) << 16) >>> 0;
+    return externalAttributesFromUnixMode(mode & 0o777, { directory: isDirectory });
 }
 
 /** Manifest `mode`: an octal string ("0644") or an integer ≤ 0o7777. */

@@ -96,7 +96,7 @@
     "provenance": true
   },
   "dependencies": {
-    "zipnative": "^1.0.0"
+    "zipnative": "^1.1.0"
   },
   "devDependencies": {
     "@cyclonedx/cyclonedx-npm": "6.0.1",

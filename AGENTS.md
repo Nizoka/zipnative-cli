@@ -254,7 +254,7 @@ The mapping is `ZIP_TO_CLI` in `src/utils/ziperr.ts`, also printed by
 | `ZIP_UNSUPPORTED_CD_LESS_DESCRIPTOR` | `E_UNSUPPORTED` | `stream` cannot delimit this bit-3 entry — use `list` / `extract` on the whole file |
 | `ZIP_UNSUPPORTED_CODEC_MODE` | `E_UNSUPPORTED` | The codec supports only the other access mode (`cat` already falls back to a buffered read for sync-only codecs; `extract --buffered` needs `decompressSync`) |
 
-### Diagnostics (informational, 11 codes)
+### Diagnostics (informational, 12 codes)
 
 Non-fatal conformance concerns never throw by default. They reach you as
 `warning:` / `info:` lines on stderr (text mode, suppressed by `--quiet`), or as
@@ -282,6 +282,7 @@ entry read twice yields one row. `--strict` escalates the **first** one into
 | `ZIP_TIMESTAMP_NOT_PINNED` | info | `create --date now` (also `--parallel`, `batch --task create`), `modify --date now` | The wall clock makes the output non-reproducible |
 | `ZIP_NONDETERMINISTIC_CODEC` | info | `create` with a pinned `--date <ISO>` on the `node-zlib` tier without `--deterministic` (also `--parallel`, `batch --task create`) | Timestamps pinned but a platform codec in use — pass `--deterministic` |
 | `ZIP_DEAD_BYTES_RATIO` | info | `modify` (append-only, not `--compact`) | An append-only `modify` left > 50 % dead bytes — pass `--compact` |
+| `ZIP_TIMESTAMP_CLAMPED` | info | `create` (`--date <ISO>`, a manifest `date`, `--mtime` on a pre-1980 file; also `--parallel`, `batch --task create`), `modify --date` / manifest dates | A date outside 1980-01-01 .. 2107-12-31 (or an invalid one) was clamped to the DOS range (zipnative 1.1); an error (`ZIP_STRICT_DIAGNOSTIC`) under `--strict` |
 
 ---
 
@@ -369,7 +370,7 @@ zipnative schema status            # the --json success envelope (layout, verifi
 zipnative schema error             # the --json error envelope (code, zipCode, entryName, detail)
 zipnative schema errors            # E_* codes + the 39 ZIP_* → E_* mapping + diagnostics (DATA, not a schema)
 zipnative schema limits            # ZipLimits: eight bounds, defaults, CWEs, flags
-zipnative schema diagnostics       # the diagnostic row shape (11 codes)
+zipnative schema diagnostics       # the diagnostic row shape (12 codes)
 zipnative schema manifest          # capability manifest: commands, flags, codes, schemas (DATA, not a schema)
 ```
 

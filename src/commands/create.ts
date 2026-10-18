@@ -356,6 +356,7 @@ export async function create(args: ParsedArgs): Promise<void> {
     const stdinName = getStringFlag(args.flags, 'stdin-name');
     const inputs = [...args.positionals, ...getStringFlagAll(args.flags, 'input', 'i')];
     const streaming = hasFlag(args.flags, 'stream');
+    const zip64 = hasFlag(args.flags, 'zip64');
     const parallel = hasFlag(args.flags, 'parallel');
     const dryRun = hasFlag(args.flags, 'dry-run') || isDryRun();
 
@@ -396,6 +397,12 @@ export async function create(args: ParsedArgs): Promise<void> {
     if (!streaming && stdinName === undefined && chunkSize !== undefined) {
         throw new CliError('--chunk-size requires --stream or --stdin-name (the chunked writer).', 2);
     }
+    // zipnative 1.1 (AddEntryOptions.zip64): the per-entry Zip64 opt-in exists
+    // for addStream() only — the buffered writer sizes every entry up front
+    // and is fully Zip64 already (the engine refuses the option on add()).
+    if (zip64 && !streaming && stdinName === undefined) {
+        throw new CliError('--zip64 requires --stream or --stdin-name: buffered entries are already Zip64 when they need it.', 2);
+    }
 
     const plan = manifestPath !== undefined
         ? await planFromManifest(manifestPath, storeExt)
@@ -416,7 +423,7 @@ export async function create(args: ParsedArgs): Promise<void> {
     const effectiveDate = defaultDate ?? plan.archive.defaultDate;
     const effectiveComment = comment ?? plan.archive.comment;
     const createOptions: CreateZipOptions = {
-        ...commonOptions(args, sink),
+        ...commonOptions(args, sink, 'create'),
         ...(effectiveOrder !== undefined ? { order: effectiveOrder } : {}),
         ...(effectiveDate !== undefined ? { defaultDate: effectiveDate } : {}),
         ...(effectiveCompression !== undefined ? { compression: effectiveCompression } : {}),
@@ -445,6 +452,7 @@ export async function create(args: ParsedArgs): Promise<void> {
         deterministic,
         order: effectiveOrder ?? 'canonical',
         stream: streaming,
+        zip64,
         layout,
         parallel: parallel ? { workers: workers ?? 'auto' } : false,
         skipped,
@@ -499,6 +507,9 @@ export async function create(args: ParsedArgs): Promise<void> {
         }
     }
 
+    // --zip64: every streamed entry gets the Zip64 local header and the
+    // 24-byte descriptor, so it may cross 4 GiB (ZIP_UNSUPPORTED_ZIP64_STREAMING otherwise).
+    const streamOptions = (o: AddEntryOptions): AddEntryOptions => (zip64 ? { ...o, zip64: true } : o);
     try {
         for (const e of plan.entries) {
             if (e.isDirectory) {
@@ -511,14 +522,14 @@ export async function create(args: ParsedArgs): Promise<void> {
                     break;
                 case 'file':
                     if (streaming) {
-                        writer.addStream(e.name, readableToByteSource(createReadStream(e.source.path)) as ByteSource, e.options);
+                        writer.addStream(e.name, readableToByteSource(createReadStream(e.source.path)) as ByteSource, streamOptions(e.options));
                     } else {
                         const buf = await readFile(e.source.path);
                         writer.add(e.name, new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength), e.options);
                     }
                     break;
                 case 'stdin':
-                    writer.addStream(e.name, readableToByteSource(process.stdin) as ByteSource, e.options);
+                    writer.addStream(e.name, readableToByteSource(process.stdin) as ByteSource, streamOptions(e.options));
                     break;
             }
         }

@@ -6,10 +6,11 @@
 //   COMMANDS (completion.ts)      — the 15-command surface and its groups
 //   ErrorCode (error.ts)          — the 13 stable E_* classes
 //   ZIP_TO_CLI (ziperr.ts)        — the 39 ZIP_* → E_* / exit mapping
-//   ZIP_DIAGNOSTIC_CODES          — the 11 diagnostic codes
+//   ZIP_DIAGNOSTIC_CODES          — the 12 diagnostic codes
 //   SUBJECTS (schema.ts)          — the schema subjects
 //   LIMIT_FLAGS + DEFAULT_ZIP_LIMITS — the eight --max-* bounds and their defaults
 //   VERSION (core-bridge)         — the engine version the data files were derived from
+//   docs/data/core-exports.json   — the 106 exports of zipnative 1.1 and their CLI reach
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -111,19 +112,30 @@ describe('docs/data/core-exports.json ↔ KNOWLEDGE_BASE §8 ↔ the bridge', ()
     const data = JSON.parse(read('docs/data/core-exports.json')) as {
         zipnativeVersion: string;
         exportCount: number;
-        exports: { name: string; kind: string; subpath: string }[];
+        exports: { name: string; kind: string; subpath: string; reach: string; via: string }[];
     };
     const mapping = section(kb, '## 8. zipnative API Mapping');
     const bridge = read('src/core-bridge/index.ts');
 
-    it('lists the 77 frozen exports of zipnative 1.0.0', () => {
-        expect(data.exportCount).toBe(77);
-        expect(data.exports).toHaveLength(77);
+    it('lists the 106 exports of zipnative 1.1 (101 + 5 worker)', () => {
+        expect(data.exportCount).toBe(106);
+        expect(data.exports).toHaveLength(106);
         expect(data.zipnativeVersion).toBe(VERSION);
-        expect(data.exports.filter((e) => e.subpath === '.')).toHaveLength(72);
+        expect(data.exports.filter((e) => e.subpath === '.')).toHaveLength(101);
         expect(data.exports.filter((e) => e.subpath === './worker')).toHaveLength(5);
         for (const e of data.exports) {
             expect(['function', 'const', 'class', 'interface', 'type'], e.name).toContain(e.kind);
+        }
+    });
+
+    it('grades every export capability | type | bridged; a bridged one points to ROADMAP', () => {
+        const roadmap = read('ROADMAP.md');
+        for (const e of data.exports) {
+            expect(['capability', 'type', 'bridged'], e.name).toContain(e.reach);
+            expect(e.via.trim().length, `${e.name} via`).toBeGreaterThan(0);
+            if (e.reach !== 'bridged') continue;
+            expect(e.via, e.name).toContain('ROADMAP');
+            expect(roadmap, `ROADMAP lacks ${e.name}`).toContain(`\`${e.name}`);
         }
     });
 
@@ -147,12 +159,12 @@ describe('docs/data/errors.json ↔ ZIP_TO_CLI ↔ AGENTS.md', () => {
         diagnostics: { code: string }[];
     };
 
-    it('carries the 39 error codes and 11 diagnostics of zipnative 1.0.0', () => {
+    it('carries the 39 error codes and 12 diagnostics of zipnative 1.1', () => {
         expect(data.zipnativeVersion).toBe(VERSION);
         expect(data.errors).toHaveLength(39);
-        expect(data.diagnostics).toHaveLength(11);
+        expect(data.diagnostics).toHaveLength(12);
         expect(ZIP_ERROR_CODES).toHaveLength(39);
-        expect(ZIP_DIAGNOSTIC_CODES).toHaveLength(11);
+        expect(ZIP_DIAGNOSTIC_CODES).toHaveLength(12);
         expect(data.errors.map((e) => e.code).sort()).toEqual([...ZIP_ERROR_CODES].sort());
         expect(data.diagnostics.map((d) => d.code).sort()).toEqual([...ZIP_DIAGNOSTIC_CODES].sort());
     });

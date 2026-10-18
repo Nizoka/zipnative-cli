@@ -222,7 +222,7 @@ The CLI owns stderr, so the core never gets to use its deduplicated `console.war
 - **`--json`** — nothing per diagnostic; the collected `DiagnosticRow[]` travels in the success envelope (`emitStatus({ …, ...sink.field() })`) or in the stdout report's `diagnostics` field (`list` / `inspect` / `verify` / `stream --format json`); NDJSON outputs print them as text on stderr (`progress()` lines, so `--quiet` suppresses them); `verify` renders the engine report's own list (`diagnosticRows`) unchanged;
 - **`--strict`** — handled by the core (`strict: true`): the first diagnostic throws `ZIP_STRICT_DIAGNOSTIC` → `E_CHECK_FAILED` before any output byte. `verify --strict` is the exception: the report is printed, then the verdict is `E_VERIFY_FAILED` when any diagnostic was emitted.
 
-Which command can raise which of the 11 codes is tabulated in §5.
+Which command can raise which of the 12 codes is tabulated in §5.
 
 ### Limits (`src/utils/limits.ts`)
 
@@ -698,7 +698,7 @@ When no code is passed, `CliError` derives one from the exit code (`2 → E_USAG
 
 Only two causes exit 2 (`ZIP_INVALID_OPTION`, `ZIP_LIMIT_INVALID`); every other cause exits 1. Three are unreachable from the CLI by design (`ZIP_API_MISUSE`, `ZIP_INTERNAL`, `ZIP_LIMIT_INVALID`) and two need inputs above 2 GiB / 4 GiB (`ZIP_INPUT_TOO_LARGE`, `ZIP_UNSUPPORTED_ZIP64_STREAMING`).
 
-### Diagnostics (11 codes, never thrown unless `--strict`)
+### Diagnostics (12 codes, never thrown unless `--strict`)
 
 Row shape: `{ code, severity, message, entryName? }` (`schema diagnostics`). The sink deduplicates by `(code, entryName)` per run. "Raised by" is derived from the engine's emission sites (`zip-eocd.ts`, `zip-cd.ts`, `zip-reader.ts`, `zip-iterate.ts`, `zip-builder.ts`, `zip-modifier.ts`) and the CLI paths that reach them; `batch` surfaces whatever its tasks raise.
 
@@ -715,6 +715,7 @@ Row shape: `{ code, severity, message, entryName? }` (`schema diagnostics`). The
 | `ZIP_TIMESTAMP_NOT_PINNED` | info | `create --date now` (also `--parallel`, `batch --task create`), `modify --date now` | The wall clock makes the output non-reproducible |
 | `ZIP_NONDETERMINISTIC_CODEC` | info | `create` with a pinned `--date <ISO>` on a non-pure tier without `--deterministic` (also `--parallel`, `batch --task create`) | Timestamps pinned but a platform codec in use — pass `--deterministic` |
 | `ZIP_DEAD_BYTES_RATIO` | info | `modify` (append-only `save()`) | > 50 % dead bytes; removed content remains recoverable — pass `--compact` |
+| `ZIP_TIMESTAMP_CLAMPED` | info | `create` (`--date <ISO>`, a manifest `date`, `--mtime` on a pre-1980 file; also `--parallel`, `batch --task create`), `modify --date` / manifest dates | A date outside 1980-01-01 .. 2107-12-31 (or an invalid one) was clamped to the DOS range (zipnative 1.1); an error (`ZIP_STRICT_DIAGNOSTIC`) under `--strict` |
 
 ### `--dry-run`
 
@@ -875,7 +876,7 @@ A **data-supplied** path — a batch-manifest path flag or a create/modify-manif
 
 ## 8. zipnative API Mapping
 
-Every one of the 77 exports of zipnative 1.0.0 (72 from `zipnative`, 5 from `zipnative/worker` — [`docs/data/core-exports.json`](data/core-exports.json)) mapped to its CLI touchpoint. "Bridge" means the export is re-exported by [`src/core-bridge/index.ts`](../src/core-bridge/index.ts); `tests/docs/consistency.test.ts` checks that every name below stays present. The **Reach** column grades each row honestly (per the 1.0.0 coverage audit): **capability** — the behaviour behind the export is exercisable from a command; **type** — re-exported (or aliased) for typing only, nothing user-visible depends on it beyond `tsc`.
+Every one of the 106 exports of zipnative 1.1.0 (101 from `zipnative`, 5 from `zipnative/worker` — [`docs/data/core-exports.json`](data/core-exports.json)) mapped to its CLI touchpoint; 1.1 added 29 and removed none. "Bridge" means the export is re-exported by [`src/core-bridge/index.ts`](../src/core-bridge/index.ts); `tests/docs/consistency.test.ts` checks that every name below stays present. The **Reach** column grades each row honestly (per the 1.1.0 coverage audit): **capability** — the behaviour behind the export is exercisable from a command; **type** — re-exported (or aliased) for typing only, nothing user-visible depends on it beyond `tsc`; **bridged** — re-exported so the ledger is complete, but no 1.1.0 command reaches it (the row says why; ROADMAP lists it as a 1.2 candidate). `node scripts/sync-engine-data.mjs --engine <zipnative checkout>` re-derives the engine half of both data files on a bump and names every row a human must complete.
 
 ### Reading, random access, streams
 
@@ -886,10 +887,14 @@ Every one of the 77 exports of zipnative 1.0.0 (72 from `zipnative`, 5 from `zip
 | `ReadEntryOptions` | interface | capability | `cat --no-verify-crc` → `{ verifyCrc: false }` on `readEntryStream` / `readEntry` |
 | `ZipReader` | interface | capability | `entries()` (`list`, `inspect`, `extract`, `modify`), `getEntry()` (`cat`, `inspect --entry`, `verify --entry`), `readEntryStream()` / `readEntryRaw()` (`cat`), `readEntry()` (`cat` sync-only codec fallback; `extract --buffered` through `extractZip`), `verifyEntry()` (`modify` survivor verification, `verify --entry`), `entryCount` / `isZip64` / `comment` (raw bytes → `commentHex`) / `bytes` (`modify` `changed`) |
 | `iterateZipEntries` | function | capability | `stream` — the forward reader over stdin / pipes |
-| `IterateZipOptions` | type | capability | `commonOptions(args, sink)` passed to `iterateZipEntries` (`--strict`, `--max-*`, the diagnostics sink) |
-| `StreamedZipEntry` | interface | capability | `stream`: `header` / `data()` / `skip()` per local entry (`pumpEntry`); custom-method entries cannot be pumped (engine limitation, §7) |
+| `IterateZipOptions` | type | capability | `commonOptions(args, sink, command)` passed to `iterateZipEntries` (`--strict`, `--max-*`, the diagnostics sink, `--timeout` signal, `--progress` handler, `--name-encoding` decoder) |
+| `StreamedZipEntry` | interface | capability | `stream`: `header` / `data()` / `skip()` per local entry (`pumpEntry`); a `--codec` method is pumped through its `createDecompressor()` (zipnative 1.1) and refused before the first byte without one (`ZIP_UNSUPPORTED_CODEC_MODE`, `--skip-unsupported` skips it) |
 | `StreamedZipHeader` | interface | capability | `rowFromHeader()` in `utils/entryfmt.ts` — the forward `EntryRow` (no CD-only fields); `rawName` → `rawNameHex` under `--long`; descriptor headers carry zero sizes (`descriptorEntries` in the summary) |
 | `ByteSource` | type | capability | `readableToByteSource()` in `utils/io.ts` — `stream` input, `create --stream` file sources, `create --stdin-name` (the Node `Readable` adapter; a Web `ReadableStream` source is not applicable to a CLI) |
+| `openZipRange` | function | bridged | not exposed in 1.1.0 — ROADMAP "1.2 candidates": a byte-range reader over a local file handle would lift --max-input-size without loading the archive (no network source: offline, always) |
+| `rangeSourceFromBytes` | function | bridged | not exposed in 1.1.0 — ROADMAP "1.2 candidates": the in-memory ByteRangeSource adapter (tests / the range-reader path) |
+| `ByteRangeSource` | interface | bridged | not exposed in 1.1.0 — ROADMAP "1.2 candidates": the { size, read(offset, length) } source openZipRange takes |
+| `ZipRangeReader` | interface | bridged | not exposed in 1.1.0 — ROADMAP "1.2 candidates": the async random-access reader openZipRange returns |
 
 ### Extraction
 
@@ -909,9 +914,12 @@ Every one of the 77 exports of zipnative 1.0.0 (72 from `zipnative`, 5 from `zip
 | `createZip` | function | capability | `create` (buffered and `--stream`), `batch --task create` |
 | `ZipWriter` | interface | capability | `add()` / `addDirectory()` / `addStream()` / `toBytes()` / `stream()` in `create`; `setComment(string)` is expressed as `CreateZipOptions.comment`, `setComment(Uint8Array)` by `--comment-file` / manifest `commentBase64` |
 | `CreateZipOptions` | interface | capability | `create`: `order` (`insertion` = argv order / manifest order), `defaultDate` (UTC wall-clock), `compression`, `comment` (string), `strict`, `onDiagnostic`, `limits` |
-| `AddEntryOptions` | interface | capability | Per-entry `compression`, `date`, `comment`, `externalAttributes` (mode bits from `--preserve-mode` / manifest `mode` on both manifests; a raw u32 word is deliberately not exposed — ROADMAP), `extraFields` (manifest `extraFields: [{ id, hex \| base64 }]` on `create` entries and `modify` add / replace / add-dir edits) |
+| `AddEntryOptions` | interface | capability | Per-entry `compression`, `date`, `comment`, `externalAttributes` (mode bits from `--preserve-mode` / manifest `mode` on both manifests, encoded by `externalAttributesFromUnixMode`; a raw u32 word is deliberately not exposed — ROADMAP), `extraFields` (manifest `extraFields: [{ id, hex \| base64 }]` on `create` entries and `modify` add / replace / add-dir edits), `zip64` (zipnative 1.1: `create --stream --zip64` / `--stdin-name --zip64`, `addStream()` entries only) |
 | `ZipCompressionOptions` | interface | capability | `--method` / `--level` / `--deterministic` (`parseCompression` in `utils/zipops.ts`) and manifest `compression` |
 | `StreamOptions` | interface | capability | `--chunk-size` → `writer.stream({ chunkSize })` under `--stream` or `--stdin-name` (warned outside the engine's 1 KiB … 16 MiB clamp) |
+| `AddFromReaderOptions` | interface | bridged | not exposed in 1.1.0 — ROADMAP "1.2 candidates": addFromReader() (verbatim entry copy between archives, e.g. a merge command) |
+| `RawEntryMeta` | interface | bridged | not exposed in 1.1.0 — ROADMAP "1.2 candidates": addRaw() metadata (pre-compressed payloads) |
+| `RawEntryReader` | interface | bridged | not exposed in 1.1.0 — ROADMAP "1.2 candidates": the reader shape addFromReader() copies from |
 | `createParallelZip` (`./worker`) | function | capability | `create --parallel` via `loadParallelZip()` (lazy, with an explicit `workerUrl`) |
 | `ParallelZipOptions` (`./worker`) | interface | capability | `create --parallel --workers / --min-job-size / --job-timeout` (+ every `CreateZipOptions` field); `workerUrl` is bridge-owned by decision (an argv flag would point the worker at arbitrary code); a loaded `--codec` module is refused rather than silently ignored |
 | `ParallelZipWriter` (`./worker`) | interface | capability | The `create` writer under `--parallel` (`toBytes()` is awaited; `stream()` under `--parallel --stream`) |
@@ -925,11 +933,21 @@ Every one of the 77 exports of zipnative 1.0.0 (72 from `zipnative`, 5 from `zip
 | `verifyZip` | function | capability | `verify` (whole archive), `batch --task verify` |
 | `VerifyZipOptions` | interface | capability | `verify` / `batch --task verify` pass `{ limits }` from the `--max-*` flags |
 | `ZipVerificationReport` | interface | capability | The `verify` report body (`ok`, `error: { code, message }` — no `detail`, `entryCount`, `entries`, `diagnostics`) |
-| `VerifiedEntry` | interface | capability | `verify` rows (`name`, `ok`, `crcMatch`, `sizeMatch`, `localHeaderMatch`, `skipped?: 'encrypted' \| 'stream-only-codec'`) |
-| `EntryVerification` | interface | capability | The per-entry `crcMatch` / `sizeMatch` / `localHeaderMatch` triple: base of `VerifiedEntry`, the `verify --entry` rows, and `modify`'s survivor verification (`verified` / `verifySkipped`) |
+| `VerifiedEntry` | interface | capability | `verify` rows (`name`, `ok`, `crcMatch`, `sizeMatch`, `localHeaderMatch`, `skipped?: 'encrypted' \| 'stream-only-codec' \| 'unsupported-method'` — a skipped entry is never `ok`; `entryPasses()` applies the engine's archive rule) |
+| `EntryVerification` | interface | capability | The per-entry `crcMatch` / `sizeMatch` / `localHeaderMatch` triple plus `skipped` (1.1): base of `VerifiedEntry`, the `verify --entry` rows, and `modify`'s survivor verification (`verified` / `verifySkipped`; a design-time skip still has its local header checked) |
 | `createZipModifier` | function | capability | `modify` — over an eagerly opened reader, every survivor verified before `save()` / `saveCompact()` |
 | `ZipModifier` | interface | capability | `addEntry` / `replaceEntry` / `removeEntry` / `renameEntry` / `setComment(string \| Uint8Array)` (`--comment`, `--comment-file`, `commentBase64`) / `save` / `saveCompact` (drops an SFX prefix, clears descriptor bits) in `modify` |
 | `ZipModifierOptions` | interface | capability | `modify --method / --level / --deterministic / --date` + common options |
+| `analyzeDeterminism` | function | capability | inspect determinism report (epochTimestamps, canonicalOrder, utf8Flags, noDataDescriptors, canonicalExtras, canonicalVersionMadeBy, canonicalForm, offenders) and --check deterministic / canonical-form |
+| `AnalyzeDeterminismOptions` | interface | type | inspect passes limits, nameDecoder (--name-encoding) and signal (--timeout) to analyzeDeterminism |
+| `DeterminismReport` | interface | type | inspect: the report the determinism block is projected from |
+| `DeterminismOffender` | interface | type | inspect determinism.offenders[] rows { name, concern } |
+| `DeterminismConcern` | type | type | inspect determinism.offenders[].concern; schema inspect enumerates the six values |
+| `EntrySkipReason` | type | type | verify (whole archive and --entry) and modify survivor verification read verifyEntry().skipped: encrypted / stream-only-codec pass when the local header agrees, unsupported-method never does (entryPasses in zipops.ts) |
+| `canonicalizeZip` | function | bridged | not exposed in 1.1.0 — ROADMAP "1.2 candidates": a canonicalize command / modify --compact --canonical (the "fix" half of inspect canonicalForm) |
+| `CanonicalizeOptions` | interface | bridged | not exposed in 1.1.0 — ROADMAP "1.2 candidates": options of canonicalizeZip |
+| `CanonicalOptions` | interface | bridged | not exposed in 1.1.0 — ROADMAP "1.2 candidates": { date, keepComments, keepExternalAttributes } of saveCompact({ canonical }) |
+| `CompactOptions` | interface | bridged | not exposed in 1.1.0 — ROADMAP "1.2 candidates": saveCompact({ canonical }); modify --compact calls saveCompact() without it |
 
 ### Entry attributes, entries and shared types
 
@@ -937,13 +955,24 @@ Every one of the 77 exports of zipnative 1.0.0 (72 from `zipnative`, 5 from `zip
 |--------|------|-------|----------------|
 | `getUnixMode` | function | capability | `unixMode` column (`list`, `inspect`; four octal digits), `extract --preserve-mode` (files only) |
 | `isSymlinkEntry` | function | capability | `isSymlink` column, `inspect` symlink count and `--check no-symlinks`, `extract --skip-symlinks` / `symlinksAsData` |
+| `externalAttributesFromUnixMode` | function | capability | create --preserve-mode and manifest mode (create entries, modify add/replace/add-dir): externalAttributesFor() masks to the 9 permission bits first (setuid/setgid/sticky never written), then the engine encodes the type and DOS directory bits |
+| `UnixModeOptions` | interface | type | { directory } handed to externalAttributesFromUnixMode by externalAttributesFor() |
+| `getExtendedTimestamps` | function | capability | list --long / inspect --entries / --entry: the timestamps row { mtime, atime, ctime, source: ut \| ntfs \| dos } |
+| `ExtendedTimestamps` | interface | type | the timestamps row of list --long / inspect --entries |
+| `getUnixIds` | function | capability | list --long / inspect --entries / --entry: the unixIds row { uid, gid } \| null (Info-ZIP 0x7875) |
+| `UnixIds` | interface | type | the unixIds row of list --long / inspect --entries |
 | `ZipEntry` | interface | capability | `rowFromEntry()` (incl. `rawName` → `rawNameHex`, raw `comment` → `commentHex`), `inspect` statistics, `cat` / `extract` / `modify` planning |
 | `ZipExtraField` | interface | capability | Read: `extraFields` rows under `--long` (ids, names, lengths) and hex under `inspect --extra`; write: manifest `extraFields` (`parseExtraFields` in `utils/zipops.ts`) |
-| `ZipCommonOptions` | interface | capability | `commonOptions(args, sink)` = `{ strict, onDiagnostic, limits }` for every core entry point |
+| `ZipCommonOptions` | interface | capability | `commonOptions(args, sink, command)` = `{ strict, onDiagnostic, limits, signal?, onProgress?, nameDecoder? }` for every core entry point; `dosTimeMode` is deliberately left at the engine default (`DosTimeMode` row) |
 | `ZipDiagnostic` | interface | capability | `createDiagnosticSink()` converts each one to a `DiagnosticRow` (deduplicated by code + entry) |
-| `ZipDiagnosticCode` | type | capability | The 11-code vocabulary listed in `ZIP_DIAGNOSTIC_CODES` (`utils/ziperr.ts`) and `schema diagnostics`; every code is reachable (§5 "raised by") |
+| `ZipDiagnosticCode` | type | capability | The 12-code vocabulary listed in `ZIP_DIAGNOSTIC_CODES` (`utils/ziperr.ts`, typed `satisfies Record<ZipDiagnosticCode, …>` so a new engine code fails `tsc`) and `schema diagnostics`; every code is reachable (§5 "raised by") |
 | `ZipDiagnosticHandler` | type | capability | The sink's `onDiagnostic` |
-| `ZipLimits` | interface | capability | The eight `--max-*` flags (`LIMIT_FLAGS` in `utils/limits.ts`), `doctor` `limits` check (`data`), `schema limits` |
+| `ZipNameDecoder` | type | capability | --name-encoding <label> on list, inspect, cat, extract, stream: a TextDecoder for names without the UTF-8 flag (parseNameEncoding in zipops.ts) |
+| `ZipNameEncoding` | type | type | EntryRow.nameEncoding: utf-8 \| cp437 \| custom (custom when --name-encoding decoded the name) |
+| `ZipProgressHandler` | type | capability | --progress (create --stream / --stdin-name / --parallel, extract without --buffered, stream, cat — the paths where the engine measures progress): progressHandler() in utils/control.ts writes throttled stderr lines or NDJSON {"type":"progress"} under --json |
+| `ZipProgress` | interface | type | the snapshot { entriesDone, entriesTotal, bytesIn, bytesOut } of --progress |
+| `DosTimeMode` | type | type | deliberately not passed: the CLI keeps the engine default "local" because its date convention is per entry (explicit dates store UTC fields, --date now / --mtime the local wall-clock), which one archive-wide mode cannot express (docs/adr/0008) |
+| `ZipLimits` | interface | capability | The eight `--max-*` flags (`LIMIT_FLAGS` in `utils/limits.ts`), `doctor` `limits` check (`data`), `schema limits`; the ninth key `maxEntryCompressedSize` (1.1, range reader only) is reported with its default and has no flag (`ENGINE_ONLY_LIMITS`) |
 | `DEFAULT_ZIP_LIMITS` | const | capability | Defaults shown by `--help`, `doctor`, `schema limits` / `manifest`, and `inflate`'s default `--max-output` |
 
 ### Errors
@@ -962,8 +991,8 @@ Every one of the 77 exports of zipnative 1.0.0 (72 from `zipnative`, 5 from `zip
 | `ZipSecurityErrorCode` | type | type | The 6 security-code rows of `ZIP_TO_CLI` (all reachable) |
 | `ZipDataErrorCode` | type | type | The 5 data-code rows of `ZIP_TO_CLI` (all reachable) |
 | `ZipLimitErrorCode` | type | type | The 2 limit-code rows of `ZIP_TO_CLI` (`ZIP_LIMIT_INVALID` pre-empted by the CLI) |
-| `ZipUnsupportedErrorCode` | type | type | The 6 unsupported-code rows of `ZIP_TO_CLI` (`ZIP_UNSUPPORTED_ZIP64_STREAMING` needs > 4 GiB) |
-| `ZipUnsupportedFeature` | type | capability | `detail.feature` in the `E_UNSUPPORTED` envelope (`zipcrypto`, `strong-encryption`, `multi-disk`, `zip64-streaming`, `cd-less-descriptor`, `method:<n>`) |
+| `ZipUnsupportedErrorCode` | type | type | The 6 unsupported-code rows of `ZIP_TO_CLI` (`ZIP_UNSUPPORTED_ZIP64_STREAMING` needs > 4 GiB without `--zip64`) |
+| `ZipUnsupportedFeature` | type | capability | `detail.feature` in the `E_UNSUPPORTED` envelope (`zipcrypto`, `aes` — 1.1, method 99 or the 0x9901 extra —, `strong-encryption`, `multi-disk`, `zip64-streaming`, `cd-less-descriptor`, `method:<n>`) |
 
 ### Codecs, checksums, constants, metadata
 
@@ -975,12 +1004,13 @@ Every one of the 77 exports of zipnative 1.0.0 (72 from `zipnative`, 5 from `zip
 | `getCodec` | function | capability | `inflate --method <id>`, `methodName()` in `utils/entryfmt.ts`, `doctor` `codecs`, unsupported / verifiability checks in `extract`, `cat`, `verify`, `modify` |
 | `registerCodec` | function | capability | `--codec <module>` (`utils/codecs.ts`) — serves the reader for any method **and** the writer for methods 0/8 (`overridesBuiltin`, announced with a `warning:`, refused by `create --parallel`) |
 | `setDeflateImpl` | function | capability | `--codec` module `deflateImpl` export — the sync deflate tier of `create` / `modify` (`tier: "injected"`) unless `--deterministic`; `create --parallel` refuses it without `--deterministic` (the worker bundle never sees it) |
-| `setInflateImpl` | function | capability | `--codec` module `inflateImpl` export — honoured by the sync / streaming reader paths (`cat`, `extract`, `verify`, `modify`, `inflate --sync`), not by `createInflator` (`inflate` default) nor the forward pump (`stream`); no `doctor` row until the engine exposes an inflate-tier getter (ROADMAP) |
+| `setInflateImpl` | function | capability | `--codec` module `inflateImpl` export — honoured by the sync / streaming reader paths (`cat`, `extract`, `verify`, `modify`, `inflate --sync`), not by `createInflator` (`inflate` default) nor the forward pump (`stream`); no `doctor` row until the engine exposes an inflate-tier getter (zipnative 1.1 still has none — ROADMAP) |
 | `initNodeZipCodecs` | function | capability | `ensureCodecsReady()` in the bridge, called by `prepareEngine()` (skipped under `--pure-codecs`) |
 | `activeDeflateTier` | function | capability | `tier` in the `create` / `modify` / `inflate` envelopes; `doctor` `deflate-tier` / `deflate-pinned`; under `create --parallel` the value is `node-zlib` or `pure-pinned`, never `injected` |
 | `DeflateTier` | type | capability | The `tier` enum in `schema status` (`pure-pinned` \| `injected` \| `node-zlib` \| `pure`) |
-| `ZipCodec` | interface | capability | `--codec` module contract (`isCodec()` validation: `method`, `name`, at least one of `compressSync` / `decompressSync` / `decompressStream`), `inflate --method`, the `cat` / `verify` / `modify` sync-vs-stream decisions |
+| `ZipCodec` | interface | capability | `--codec` module contract (`isCodec()` validation: `method`, `name`, at least one of `compressSync` / `decompressSync` / `decompressStream` / `createDecompressor`), `inflate --method`, the `cat` sync-vs-stream decision; `verify` and `modify` read the engine's own `skipped` classification (1.1) |
 | `CodecCompressOptions` | interface | capability | The `{ level, deterministic }` the engine hands to `compressSync` of a `--codec` module that registers method 0 or 8 (the writer only emits those two methods; a custom id's `compressSync` is never called) |
+| `ZipDecompressor` | interface | capability | --codec modules may export createDecompressor(maxOutput) (validated in utils/codecs.ts): the incremental decoder stream drives for a custom method |
 | `METHOD_STORE` / `METHOD_DEFLATE` | const | capability | `methodName()`, `inspect --check store-only / deflate-only / method=`, `inflate --method`, `extract --skip-unsupported`, `doctor` |
 | `FLAG_DATA_DESCRIPTOR` / `FLAG_ENCRYPTED` / `FLAG_STRONG_ENCRYPTION` / `FLAG_UTF8` | const | capability | `decodeFlags()` (`--long` rows), `inspect` UTF-8 verdict, forward `usesDataDescriptor` / `descriptorEntries` |
 | `VERSION` | const | capability | `doctor` `zipnative` check (package version vs the engine's `VERSION` export); `tests/docs/consistency.test.ts` pins `docs/data/*.json` to it (`--version --json` reports the installed package version by design) |

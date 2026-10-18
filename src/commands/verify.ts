@@ -15,9 +15,6 @@
 import { type ParsedArgs, getStringFlagAll, hasFlag } from '../utils/args.js';
 import { isJsonMode, isStrict } from '../utils/agent.js';
 import {
-    METHOD_DEFLATE,
-    METHOD_STORE,
-    getCodec,
     verifyZip,
     type EntryVerification,
     type ZipVerificationReport,
@@ -28,7 +25,7 @@ import { CliError, ErrorCode } from '../utils/error.js';
 import { parseLimitFlags } from '../utils/limits.js';
 import { emitJsonReport } from '../utils/projection.js';
 import { guard, mapZipError } from '../utils/ziperr.js';
-import { commonOptions, openArchive, parseFormat, readArchiveBytes, resolveInputPath } from '../utils/zipops.js';
+import { commonOptions, entryPasses, openArchive, parseFormat, readArchiveBytes, resolveInputPath } from '../utils/zipops.js';
 
 type VerifiedEntry = ZipVerificationReport['entries'][number];
 
@@ -71,10 +68,14 @@ function renderText(report: VerifyReport, source: string): string {
         lines.push(`  STRUCTURE  ${report.error.code}: ${report.error.message}`);
     }
     for (const e of report.entries) {
-        if (e.skipped !== undefined) {
-            lines.push(`  skip  ${e.name}  (${e.skipped})`);
-        } else if (e.ok) {
+        if (e.ok) {
             lines.push(`  ok    ${e.name}`);
+        } else if (e.skipped !== undefined && entryPasses(e)) {
+            lines.push(`  skip  ${e.name}  (${e.skipped})`);
+        } else if (e.skipped !== undefined) {
+            // A skip that fails the archive: no codec for the method, or a
+            // design-time skip whose local header disagrees.
+            lines.push(`  FAIL  ${e.name}  (${e.skipped}${e.localHeaderMatch ? '' : ',local-header'})`);
         } else {
             const why = [
                 !e.crcMatch ? 'crc' : null,
@@ -107,14 +108,16 @@ function verifyAll(bytes: Uint8Array, args: ParsedArgs): { core: CoreOutcome; di
 
 /**
  * `--entry`: open eagerly (structure first, like `verifyZip`), then
- * `verifyEntry()` each requested name. Encrypted entries and stream-only
- * codecs are `skipped` with the same two reasons the engine reports.
+ * `verifyEntry()` each requested name. Since zipnative 1.1 the engine names
+ * the `skipped` reason itself (issue #12) and cross-checks the local header
+ * of every entry, encrypted ones included; the verdict follows verifyZip's
+ * own archive rule ({@link entryPasses}).
  */
 function verifySelected(bytes: Uint8Array, args: ParsedArgs, names: readonly string[]): { core: CoreOutcome; diagnostics: readonly DiagnosticRow[] } {
     const sink = createDiagnosticSink();
     let reader;
     try {
-        reader = openArchive(bytes, { ...commonOptions(args, sink), validate: 'eager' });
+        reader = openArchive(bytes, { ...commonOptions(args, sink, 'verify'), validate: 'eager' });
     } catch (e) {
         if (!(e instanceof CliError)) throw e;
         // A structural refusal is the report's `error`, as with verifyZip.
@@ -129,26 +132,15 @@ function verifySelected(bytes: Uint8Array, args: ParsedArgs, names: readonly str
         if (entry === null) {
             throw new CliError(`Entry not found: ${name} (run \`zipnative list\` for the exact names).`, 1, ErrorCode.NOT_FOUND, { entryName: name, zipCode: 'ZIP_ENTRY_NOT_FOUND' });
         }
-        const custom = entry.compressionMethod !== METHOD_STORE && entry.compressionMethod !== METHOD_DEFLATE;
-        const codec = custom ? getCodec(entry.compressionMethod) : null;
-        const skipped: VerifiedEntry['skipped'] | undefined = entry.isEncrypted
-            ? 'encrypted'
-            : custom && codec !== null && codec.decompressSync === undefined
-                ? 'stream-only-codec'
-                : undefined;
         let v: EntryVerification;
-        if (skipped !== undefined) {
-            v = { ok: true, crcMatch: true, sizeMatch: true, localHeaderMatch: true };
-        } else {
-            try {
-                v = reader.verifyEntry(entry);
-            } catch (e) {
-                throw mapZipError(e, `Cannot verify entry "${name}"`, name);
-            }
+        try {
+            v = reader.verifyEntry(entry);
+        } catch (e) {
+            throw mapZipError(e, `Cannot verify entry "${name}"`, name);
         }
-        entries.push({ name: entry.name, ...v, ...(skipped !== undefined ? { skipped } : {}) });
+        entries.push({ name: entry.name, ...v });
     }
-    const ok = entries.every((e) => e.skipped !== undefined || e.ok);
+    const ok = entries.every(entryPasses);
     return {
         core: { ok, error: null, entryCount: reader.entryCount, entries },
         diagnostics: sink.diagnostics,
@@ -165,8 +157,11 @@ export async function verify(args: ParsedArgs): Promise<void> {
     const bytes = await readArchiveBytes(inputPath, args);
     const { core, diagnostics } = selected.length > 0 ? verifySelected(bytes, args, selected) : verifyAll(bytes, args);
 
-    const failed = core.entries.filter((e) => e.skipped === undefined && !e.ok).length;
-    const skipped = core.entries.filter((e) => e.skipped !== undefined).length;
+    // verifyZip's archive rule: a design-time skip with a matching local
+    // header passes; everything else that is not ok — corrupt, a mismatching
+    // header, an unregistered method — is a failure (zipnative 1.1).
+    const failed = core.entries.filter((e) => !entryPasses(e)).length;
+    const skipped = core.entries.filter((e) => e.skipped !== undefined && entryPasses(e)).length;
     const strictFail = strict && diagnostics.length > 0;
     const report: VerifyReport = {
         ok: core.ok && !strictFail,

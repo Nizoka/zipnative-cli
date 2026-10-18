@@ -35,18 +35,20 @@ describe('parseIsoDateUtc', () => {
         expect(d.getTimezoneOffset()).toBe(new Date(2021, 0, 15).getTimezoneOffset());
     });
 
-    it('warns about out-of-range years and odd seconds (suppressed by --quiet)', () => {
+    it('warns about odd seconds (suppressed by --quiet); the DOS range is the engine\'s diagnostic now', () => {
         const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+        // Out-of-range years parse silently: zipnative 1.1 clamps them at write
+        // time and reports ZIP_TIMESTAMP_CLAMPED through the diagnostic sink
+        // (tests/commands/engine-1-1.test.ts), so the CLI no longer pre-warns.
         parseIsoDateUtc('1970-01-01T00:00:00Z', '--date');
         parseIsoDateUtc('2200-01-01T00:00:00Z', '--date');
+        expect(stderr).not.toHaveBeenCalled();
         parseIsoDateUtc('2020-01-01T00:00:01Z', '--date');
         const text = stderr.mock.calls.map((c) => String(c[0])).join('');
-        expect(text).toContain('outside the DOS timestamp range');
-        expect(text).toContain('2200');
         expect(text).toContain('2-second resolution');
         stderr.mockClear();
         process.env['ZIPNATIVE_QUIET'] = '1';
-        parseIsoDateUtc('1970-01-01T00:00:00Z', '--date');
+        parseIsoDateUtc('2020-01-01T00:00:01Z', '--date');
         expect(stderr).not.toHaveBeenCalled();
     });
 

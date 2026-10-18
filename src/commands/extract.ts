@@ -111,7 +111,7 @@ export async function extract(args: ParsedArgs): Promise<void> {
     const inputPath = resolveInputPath(args);
     const bytes = await readArchiveBytes(inputPath, args);
     const sink = createDiagnosticSink();
-    const common = commonOptions(args, sink);
+    const common = commonOptions(args, sink, 'extract');
 
     // Directory entries and the "skipped because unsafe" inventory come from
     // the central directory (the extraction generator never yields them).

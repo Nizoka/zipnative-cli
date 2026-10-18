@@ -231,6 +231,10 @@ describe('inspect', () => {
                 noDataDescriptors: true,
                 canonicalLayout: true,
                 deterministic: true,
+                canonicalExtras: true,
+                canonicalVersionMadeBy: true,
+                canonicalForm: true,
+                offenders: [],
             });
             expect(doc.diagnostics).toEqual([]);
             expect(doc.entries).toBeUndefined();
@@ -257,6 +261,36 @@ describe('inspect', () => {
             // The data-descriptor layout is byte-stable for identical inputs:
             // it must not falsify the reproducibility verdict.
             expect(doc.determinism.deterministic).toBe(true);
+        });
+
+        it('analyzeDeterminism (zipnative 1.1): offenders name each broken rule; deterministic keeps its 1.0 meaning', async () => {
+            const insertion = await runJson(['--input', await insertionZip()]);
+            expect(insertion.determinism.offenders).toEqual([{ name: 'a.txt', concern: 'order' }]);
+            expect(insertion.determinism.canonicalForm).toBe(false);
+
+            // A streamed archive: the data-descriptor offender is informational —
+            // neither verdict is falsified by the layout.
+            const streamed = await runJson(['--input', await streamedZip()]);
+            expect(streamed.determinism.offenders).toEqual([{ name: 's.txt', concern: 'data-descriptor' }]);
+            expect(streamed.determinism.canonicalForm).toBe(true);
+
+            // A preserved extra field breaks the canonical FORM but not
+            // reproducibility: the 1.0 verdict must not flip on such archives.
+            const w = createZip();
+            w.add('x.txt', 'x\n', { extraFields: [{ id: 0x6375, data: new Uint8Array([1, 2]) }] });
+            const extra = await runJson(['--input', await save('extra.zip', w.toBytes())]);
+            expect(extra.determinism.canonicalExtras).toBe(false);
+            expect(extra.determinism.canonicalForm).toBe(false);
+            expect(extra.determinism.deterministic).toBe(true);
+            expect(extra.determinism.offenders).toEqual([{ name: 'x.txt', concern: 'extra-field' }]);
+        });
+
+        it('--check canonical-form gates the engine verdict and names the offenders', async () => {
+            expectPass(await check(await deterministicZip(), 'canonical-form'));
+            expectPass(await check(await streamedZip(), 'canonical-form'));
+            const failed = await check(await insertionZip(), 'canonical-form');
+            expectFail(failed, 'canonical-form');
+            expect(failed.report.checks?.[0]?.detail).toContain('a.txt (order)');
         });
 
         it('prependedData is true on a prefixed archive and the diagnostic is reported', async () => {
@@ -328,6 +362,7 @@ describe('inspect', () => {
                 encrypted: 0,
                 deterministic: true,
                 canonicalLayout: true,
+                canonicalForm: true,
                 diagnostics: 0,
             });
             const withCheck = await run(['--input', zip, '--format', 'json', '--summary', '--check', 'deterministic']);

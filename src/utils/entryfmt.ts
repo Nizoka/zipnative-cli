@@ -11,11 +11,14 @@ import {
     METHOD_DEFLATE,
     METHOD_STORE,
     getCodec,
+    getExtendedTimestamps,
+    getUnixIds,
     getUnixMode,
     isSymlinkEntry,
     type StreamedZipHeader,
     type ZipEntry,
     type ZipExtraField,
+    type ZipNameEncoding,
 } from '../core-bridge/index.js';
 import { bytesToHex, decodeComment } from './zipops.js';
 import { formatRatio } from './sizes.js';
@@ -39,7 +42,7 @@ export interface ExtraFieldRow {
 /** The public per-entry JSON row (see `schema entries`). */
 export interface EntryRow {
     readonly name: string;
-    readonly nameEncoding: 'utf-8' | 'cp437';
+    readonly nameEncoding: ZipNameEncoding;
     readonly isDirectory: boolean;
     readonly isSymlink: boolean | null;
     readonly method: number;
@@ -68,6 +71,21 @@ export interface EntryRow {
     readonly rawNameHex?: string;
     /** The stored comment bytes, hex (present when the entry has a comment). */
     readonly commentHex?: string;
+    /**
+     * --long, central-directory rows only (zipnative 1.1 `getExtendedTimestamps`):
+     * the best timestamps the metadata offers — the UT (0x5455) or NTFS
+     * (0x000a) extra, else the DOS fields — as ISO strings, null when absent.
+     */
+    readonly timestamps?: TimestampsRow;
+    /** --long, central-directory rows only (zipnative 1.1 `getUnixIds`): the Info-ZIP 0x7875 owner ids, or null. */
+    readonly unixIds?: { readonly uid: number; readonly gid: number } | null;
+}
+
+export interface TimestampsRow {
+    readonly mtime: string | null;
+    readonly atime: string | null;
+    readonly ctime: string | null;
+    readonly source: 'ut' | 'ntfs' | 'dos';
 }
 
 const EXTRA_FIELD_NAMES: Readonly<Record<number, string>> = {
@@ -175,7 +193,15 @@ export function rowFromEntry(entry: ZipEntry, options: RowOptions = {}): EntryRo
         extraFields: extraRows(entry.extraFields, options.extraHex === true),
         rawNameHex: bytesToHex(entry.rawName),
         ...(entry.comment.length > 0 ? { commentHex: bytesToHex(entry.comment) } : {}),
+        timestamps: timestampsRow(entry),
+        unixIds: getUnixIds(entry),
     };
+}
+
+function timestampsRow(entry: ZipEntry): TimestampsRow {
+    const t = getExtendedTimestamps(entry);
+    const iso = (d: Date | null): string | null => (d === null ? null : d.toISOString());
+    return { mtime: iso(t.mtime), atime: iso(t.atime), ctime: iso(t.ctime), source: t.source };
 }
 
 /** Row from a forward-streamed local header (no CD-only fields). */

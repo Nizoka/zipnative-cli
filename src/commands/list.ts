@@ -76,7 +76,7 @@ export async function list(args: ParsedArgs): Promise<void> {
     const bytes = await readArchiveBytes(resolveInputPath(args), args);
     const sink = createDiagnosticSink(format === 'ndjson' && isJsonMode());
     const reader = openArchive(bytes, {
-        ...commonOptions(args, sink),
+        ...commonOptions(args, sink, 'list'),
         ...(validate !== undefined ? { validate } : {}),
     });
 

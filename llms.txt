@@ -87,8 +87,9 @@ machine-readable JSON manifest run `zipnative schema manifest`.
   (capability list) — validate before you invoke. `zipnative doctor
   --format json` is the offline capability pre-flight (effective limits as
   numbers under the `limits` check's `data`).
-- **Diagnostics**: 11 informational `ZIP_*` codes (e.g. `ZIP_PREPENDED_DATA`,
-  `ZIP_DEAD_BYTES_RATIO`) travel as `diagnostics[]` in envelopes and reports.
+- **Diagnostics**: 12 informational `ZIP_*` codes (e.g. `ZIP_PREPENDED_DATA`,
+  `ZIP_DEAD_BYTES_RATIO`, `ZIP_TIMESTAMP_CLAMPED`) travel as `diagnostics[]`
+  in envelopes and reports.
 
 ## Commands (15)
 

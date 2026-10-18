@@ -12,7 +12,7 @@
 import type { ParsedArgs } from '../utils/args.js';
 import { CliError, ErrorCode } from '../utils/error.js';
 import { cliVersion, engineVersion } from '../utils/version.js';
-import { LIMIT_FLAGS } from '../utils/limits.js';
+import { ENGINE_ONLY_LIMITS, LIMIT_FLAGS, LIMIT_KEYS } from '../utils/limits.js';
 import { ZIP_REMEDY } from '../utils/agent.js';
 import { ZIP_DIAGNOSTIC_CODES, ZIP_TO_CLI } from '../utils/ziperr.js';
 import { MANIFEST_COMMANDS } from '../utils/manifest.js';
@@ -83,7 +83,7 @@ const entryRowSchema: JsonSchema = {
     required: ['name', 'nameEncoding', 'isDirectory', 'isSymlink', 'method', 'methodName', 'compressedSize', 'uncompressedSize', 'ratio', 'crc32', 'lastModified', 'isEncrypted', 'usesZip64', 'usesDataDescriptor', 'unixMode'],
     properties: {
         name: { type: 'string' },
-        nameEncoding: { enum: ['utf-8', 'cp437'] },
+        nameEncoding: { enum: ['utf-8', 'cp437', 'custom'], description: '"custom" when --name-encoding decoded the name (zipnative 1.1 nameDecoder).' },
         isDirectory: { type: 'boolean' },
         isSymlink: { type: ['boolean', 'null'], description: 'null in forward (stream) mode — attributes live only in the central directory.' },
         method: { type: 'integer' },
@@ -116,6 +116,25 @@ const entryRowSchema: JsonSchema = {
         },
         rawNameHex: { type: 'string', pattern: '^([0-9a-f]{2})*$', description: 'Present with --long: the stored name bytes (cp437 / invalid-UTF-8 forensics).' },
         commentHex: { type: 'string', pattern: '^([0-9a-f]{2})*$', description: 'Present with --long when the entry has a comment: its raw bytes.' },
+        timestamps: {
+            type: 'object',
+            description: 'Present with --long on central-directory rows (list, inspect): the best timestamps the metadata offers — the UT (0x5455) or NTFS (0x000a) extra, else the DOS fields (zipnative 1.1 getExtendedTimestamps).',
+            required: ['mtime', 'atime', 'ctime', 'source'],
+            additionalProperties: false,
+            properties: {
+                mtime: { type: ['string', 'null'], format: 'date-time' },
+                atime: { type: ['string', 'null'], format: 'date-time' },
+                ctime: { type: ['string', 'null'], format: 'date-time' },
+                source: { enum: ['ut', 'ntfs', 'dos'] },
+            },
+        },
+        unixIds: {
+            type: ['object', 'null'],
+            description: 'Present with --long on central-directory rows: the Info-ZIP 0x7875 uid/gid, null when the archive carries none (zipnative 1.1 getUnixIds).',
+            required: ['uid', 'gid'],
+            additionalProperties: false,
+            properties: { uid: { type: 'integer' }, gid: { type: 'integer' } },
+        },
     },
 };
 
@@ -325,12 +344,32 @@ function inspectSchema(): JsonSchema {
             },
             determinism: {
                 type: 'object',
-                required: ['epochTimestamps', 'canonicalOrder', 'utf8Flags', 'noDataDescriptors', 'canonicalLayout', 'deterministic'],
+                required: [
+                    'epochTimestamps', 'canonicalOrder', 'utf8Flags', 'noDataDescriptors', 'canonicalLayout', 'deterministic',
+                    'canonicalExtras', 'canonicalVersionMadeBy', 'canonicalForm', 'offenders',
+                ],
+                description: 'Measured by the engine\'s analyzeDeterminism() (zipnative 1.1). deterministic keeps the CLI 1.0 verdict; canonicalForm is the engine\'s stricter one.',
                 properties: {
                     epochTimestamps: { type: 'boolean' }, canonicalOrder: { type: 'boolean' }, utf8Flags: { type: 'boolean' },
                     noDataDescriptors: { type: 'boolean' },
                     canonicalLayout: { type: 'boolean', description: 'No data descriptors (buffered layout). A streamed archive is reproducible but not canonical.' },
                     deterministic: { type: 'boolean', description: 'Reproducible: epoch timestamps AND canonical order AND UTF-8 flags (layout excluded).' },
+                    canonicalExtras: { type: 'boolean', description: 'No extra field other than Zip64 (0x0001) on any entry.' },
+                    canonicalVersionMadeBy: { type: 'boolean', description: 'Every entry carries the version-made-by zipnative writes (0x032D).' },
+                    canonicalForm: { type: 'boolean', description: 'The engine verdict: deterministic AND canonicalExtras AND canonicalVersionMadeBy (data descriptors excluded) — the form zipnative\'s own writer emits.' },
+                    offenders: {
+                        type: 'array',
+                        description: 'Every canonical-form rule an entry breaks, in central-directory order (a data-descriptor offender is informational).',
+                        items: {
+                            type: 'object',
+                            required: ['name', 'concern'],
+                            additionalProperties: false,
+                            properties: {
+                                name: { type: 'string' },
+                                concern: { enum: ['timestamp', 'order', 'utf8-flag', 'extra-field', 'version-made-by', 'data-descriptor'] },
+                            },
+                        },
+                    },
                 },
             },
             entries: { type: 'array', items: entryRowSchema, description: 'Present with --entries / --entry.' },
@@ -648,20 +687,23 @@ function errorsDocument(): JsonSchema {
 }
 
 function limitsSchema(): JsonSchema {
+    // Engine declaration order: the eight flagged bounds and the engine-only one.
     const props: Record<string, unknown> = {};
-    for (const l of LIMIT_FLAGS) {
-        props[l.key] = {
-            type: 'number',
-            minimum: 1,
-            default: DEFAULT_ZIP_LIMITS[l.key],
-            description: `${l.description} (${l.cwe}); flag --${l.flag}; "none" disables the bound.`,
-        };
+    for (const key of LIMIT_KEYS) {
+        const flagged = LIMIT_FLAGS.find((l) => l.key === key);
+        const engineOnly = ENGINE_ONLY_LIMITS.find((l) => l.key === key);
+        const description = flagged !== undefined
+            ? `${flagged.description} (${flagged.cwe}); flag --${flagged.flag}; "none" disables the bound.`
+            : engineOnly !== undefined
+                ? `${engineOnly.description} (${engineOnly.cwe}); no flag: ${engineOnly.reason}.`
+                : `${key} (engine bound)`;
+        props[key] = { type: 'number', minimum: 1, default: DEFAULT_ZIP_LIMITS[key], description };
     }
     return {
         $schema: DRAFT,
         $id: id('limits'),
         title: 'zipnative ZipLimits (security bounds)',
-        description: 'The eight CWE-tagged bounds every core entry point enforces during parsing and inflation. Override with --max-* flags or .zipnativerc.json keys.',
+        description: `The ${LIMIT_KEYS.length} CWE-tagged ZipLimits bounds of the engine. The ${LIMIT_FLAGS.length} the CLI reaches are overridden with --max-* flags; maxEntryCompressedSize is reported with its default and has no flag.`,
         type: 'object',
         additionalProperties: false,
         properties: props,
@@ -673,7 +715,7 @@ function diagnosticsSchema(): JsonSchema {
         $schema: DRAFT,
         $id: id('diagnostics'),
         title: 'zipnative diagnostic',
-        description: 'Conformance / determinism concerns the engine reports without failing (11 codes). --strict escalates the first one into E_CHECK_FAILED.',
+        description: `Conformance / determinism concerns the engine reports without failing (${ZIP_DIAGNOSTIC_CODES.length} codes). --strict escalates the first one into E_CHECK_FAILED.`,
         ...diagnosticSchema,
     };
 }
