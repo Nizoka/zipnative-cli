@@ -47,6 +47,11 @@ Upstream: closes the CLI's engine asks answered by zipnative 1.1.0
 | `chore(supply-chain)` | Node security floor `^22.17.1 || >=24.4.1` + `node-floor` gate step, network-module denylist in the bundle probe, no `mcp` keyword |
 | `docs` | second-review fixes to the contract docs, exact migration notes, `### Security`, AI-instruction lists, count pins |
 | `feat(core)` | every export reachable: `canonicalize`, `merge`, `--range` (+ `--max-entry-compressed-size`), manifest `raw` entries — 17 commands |
+| `fix(review)` (counter-verification) | `canonicalize` counts hostile names (`unsafeNames`, `encrypted`) and warns, a `raw` DEFLATE payload refuses trailing bytes, `ZIPNATIVE_*` values strict, docs |
+| `chore(agents)` | the `release-audit` Claude Code skill tracked under `.claude/skills/`, a tracked `.claude/settings.json` (attribution off, the GitHub and npm writes denied), `.audit/` ignored, `tests/tools/agent-settings.test.ts` |
+| `chore(release)` | the review and triage reports moved out of the tree (`.audit/1.1.0/`, `.github/drafts/`), summarised here |
+| `fix(audit)` | the 29 actionable findings of `/release-audit` (§Independent audit): a bound is never a verdict in `verify`, a missing file is `E_IO`, the env-switch envelope, `zip64Entries`, remedies, CRC shapes, batch rows, the documentation findings |
+| `docs(release)` | the audit verdict and the final figures in this draft |
 
 ## Behaviour changes (reviewer attention)
 
@@ -81,7 +86,7 @@ adversarial verifier, an autonomy pass, a second verifier, a GO/NO-GO ledger) at
 | 1 | — | every finding reproduced on the built binary (the `stream --timeout` hang, a decompressor timeout, config `false`, batch create flags, one deadline per process, FIFO reads, per-field escaping, the consumer job, manifest `comment-file`) | fixed in `e2e820e`, one regression test per finding (`tests/integration/review-fixes-1-1.test.ts`, `built-binary-smoke.test.ts`) |
 | 2 | **Met** on all seven criteria | 31 findings: 23 confirmed (3 in part), 5 deferred to 1.2 (ROADMAP), 1 rejected, 2 rejected in part; 3 majors — `--overwrite=flase` was ON, the published schemas rejected real output, `--timeout` did not fire on a stalled pipe — plus a bounded `batch --task verify` | fixed in `aba500a` → `0536020`, one regression test per finding (`tests/integration/review2-1-1.test.ts`, `tests/commands/schema-conformance.test.ts`); the 11 last engine exports exposed (`canonicalize`, `merge`, `--range`, manifest `raw`) |
 | 2b | every finding **closed**, no regression | 3 minors: `canonicalize` carried hostile names silently, a `raw` DEFLATE payload could hide trailing bytes, docs gaps; nits: `ZIPNATIVE_*` values strict | fixed in `887254f` |
-| 3 | PENDING | `/release-audit release-notes/v1.1.0.md` at HEAD | — |
+| 3 | **GO** | `/release-audit` at `99bf8c3`: 238 rows over three reports (A 129, B 63, D 46); verifier 1 over A + B: 13 confirmed, 1 rejected, 2 duplicate, 2 raised; verifier 2 over D: 11 confirmed, 2 downgraded, 1 duplicate, 2 raised — **0 blockers, 5 majors, 23 minors, 2 notes**. Majors: `verify` reported an intact entry over a `--max-*` bound as a CRC / size failure on every path (the engine's verifiers swallow the refusal — drafted upstream), SECURITY.md denied the ninth bound its flag, the docs said streamed entries > 4 GiB were refused (they take `--zip64`), a missing file was `E_RUNTIME` on two paths | all 29 actionable rows fixed in `b04f15f`, one regression test per code finding (`tests/integration/audit-1-1.test.ts`, `core-surfaces-1-1`, the built-binary smoke test); the one note needs no action; 0 waived |
 
 The seven criteria after round 2b:
 
@@ -100,12 +105,16 @@ its verdict and commit), `corpus-1.0.0.sha256`, then the round-3 files `brief.md
 `auditor-a.md`, `auditor-b.md`, `verifier-1.md`, `auditor-d.md`, `verifier-2.md`, `ledger.md`,
 `verdict.md`.
 
-`/release-audit release-notes/v1.1.0.md` — PENDING.
+`/release-audit release-notes/v1.1.0.md` — **GO** (`verdict.md`: blockers open 0, majors open 0,
+waived 0; next: the maintainer's review of this branch). The agent-autonomy pass re-measured the
+token table: `--summary` / `--fields` cut stdout by 75–94 % against text (88–98 % against the full
+`--json` report); bare `--json` is text-sized on `inspect` and 2.8–2.9× on `list` / `verify` —
+the gain is the projection levers', as AGENTS.md §3 says.
 
 ## Validation (what actually ran, on Windows 11, Node 22.23.2)
 
 - [x] `npm run typecheck:all` clean; `npm run lint` 0 errors
-- [x] `npm run test:coverage` — 1368 passed, 9 skipped, 74 files; 95.92 / 91.77 / 97.78 / 96.83
+- [x] `npm run test:coverage` — 1385 passed, 9 skipped, 76 files; 95.91 / 91.48 / 97.81 / 96.77
       (thresholds 95 / 91 / 97 / 96)
 - [x] `npm run validate:zip` — 37 PASS + 4 XFAIL; the 37 inherited archives are byte-identical
       to the 1.0.0 build (SHA-256 compared)
@@ -163,8 +172,8 @@ its verdict and commit), `corpus-1.0.0.sha256`, then the round-3 files `brief.md
 - [x] No ZIP parsing logic in the CLI
 - [x] No security default loosened silently
 - [x] Docs counts updated (`tests/docs/consistency.test.ts` green)
-- [ ] The audit ledger is summarised above with a fix commit for every confirmed blocker and
-      major — or §Independent audit says PENDING and this PR is not ready to merge
+- [x] The audit ledger is summarised above with a fix commit for every confirmed blocker and
+      major (`b04f15f`; verdict GO, 0 waived)
 
 ## AI assistance
 
