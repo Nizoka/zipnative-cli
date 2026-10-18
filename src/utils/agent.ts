@@ -124,6 +124,7 @@ const DEFAULT_MESSAGE: Readonly<Record<ErrorCodeValue, string>> = {
 export function buildErrorEnvelope(command: string | null, err: unknown): AgentErrorEnvelope {
     if (err instanceof CliError) {
         const message = err.message.length > 0 ? err.message : DEFAULT_MESSAGE[err.code];
+        const remedy = remedyFor(err);
         return {
             ok: false,
             command,
@@ -134,7 +135,7 @@ export function buildErrorEnvelope(command: string | null, err: unknown): AgentE
                 ...(err.zipCode !== undefined ? { zipCode: err.zipCode } : {}),
                 ...(err.entryName !== undefined ? { entryName: err.entryName } : {}),
                 ...(err.detail !== undefined ? { detail: err.detail } : {}),
-                ...(remedyFor(err) !== undefined ? { remedy: remedyFor(err) } : {}),
+                ...(remedy !== undefined ? { remedy } : {}),
             },
         };
     }

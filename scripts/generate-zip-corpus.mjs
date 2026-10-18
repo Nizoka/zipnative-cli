@@ -465,6 +465,28 @@ const CORPUS = [
         },
     },
     {
+        // `--zip64` (zipnative 1.1 AddEntryOptions.zip64): the speculative
+        // streaming form — a Zip64 extra in the LOCAL header and an 8-byte
+        // data descriptor, the pairing WF/DESCRIPTOR-WIDTH checks.
+        file: 'streaming-zip64.zip',
+        run: (f) => cli(f, ['create', '--stdin-name', 'streamed.bin', '-o', dest(f), '--stream', '--zip64'], { input: readFileSync(input('stdin-payload.bin')) }),
+        after: (f) => {
+            const entry = inspectEntries(f).find((e) => e.name === 'streamed.bin');
+            if (!entry) fail(f, ['inspect --entries reports no entry named streamed.bin']);
+            if (entry.usesDataDescriptor !== true || entry.usesZip64 !== true) fail(f, [`entry streamed.bin: usesDataDescriptor ${entry.usesDataDescriptor}, usesZip64 ${entry.usesZip64} (both must be true)`]);
+        },
+    },
+    {
+        // A date before the DOS epoch is clamped to 1980-01-01 by the engine
+        // (ZIP_TIMESTAMP_CLAMPED, zipnative 1.1) — never a fictitious date.
+        file: 'clamped-date.zip',
+        run: (f) => cli(f, ['create', src('text'), '-o', dest(f), '--base', SRC_DIR, '--date', '1975-07-15', '--deterministic']),
+        after: (f) => {
+            const wrong = inspectEntries(f).filter((e) => e.dosDate !== 0x0021).map((e) => `${e.name}: 0x${Number(e.dosDate).toString(16)}`);
+            if (wrong.length > 0) fail(f, [`entries not clamped to the DOS epoch (0x0021): ${wrong.join(', ')}`]);
+        },
+    },
+    {
         file: 'incremental-original.zip',
         run: (f) => cli(f, ['create', '--from-manifest', manifestFile('incremental.json', {
             entries: [

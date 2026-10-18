@@ -1,6 +1,7 @@
 // Guards the rules in tests/fixtures/README.md: every committed archive has
 // foreign provenance recorded in the ledger, the corpus stays tiny, and no
 // adversarial (CLI- or engine-buildable) archive is ever committed.
+import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -47,6 +48,16 @@ describe('fixture policy (tests/fixtures/README.md)', () => {
         for (const file of archives) {
             const basename = file.split(/[\\/]/).pop() as string;
             expect(ledger.includes(basename), `${file} is missing from the provenance ledger`).toBe(true);
+        }
+    });
+
+    it('every committed archive matches the SHA-256 recorded in the ledger (no byte drift)', () => {
+        for (const file of archives) {
+            const basename = file.split(/[\\/]/).pop() as string;
+            const row = ledger.split('\n').find((l) => l.includes(basename));
+            const recorded = /`([0-9a-f]{64})`/.exec(row ?? '')?.[1];
+            expect(recorded, `${basename}: no SHA-256 in its ledger row`).toBeDefined();
+            expect(createHash('sha256').update(readFileSync(file)).digest('hex'), basename).toBe(recorded);
         }
     });
 

@@ -23,14 +23,14 @@ export default defineConfig({
                 'src/core-bridge/index.ts',
             ],
             thresholds: {
-                // Ratcheted after the 1.0.0 audit pass from the measured
-                // 96.3 / 92.3 / 97.9 / 96.8 (2026-09-05), three points below
-                // the actuals so a legitimate refactor does not flap the gate.
-                // Never lower them to make a change pass — add tests.
-                statements: 93,
-                branches: 88,
-                functions: 94,
-                lines: 93,
+                // Ratcheted for 1.1.0 from the measured 96.28 / 92.20 / 98.19 /
+                // 97.03 (2026-10-18), one point below the actuals (1.0.0 kept
+                // three: 93 / 88 / 94 / 93). Never lower them to make a change
+                // pass — add tests.
+                statements: 95,
+                branches: 91,
+                functions: 97,
+                lines: 96,
             },
         },
     },

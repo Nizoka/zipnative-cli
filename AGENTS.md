@@ -493,9 +493,9 @@ For `verify` / `inspect`, read the JSON result on stdout and use `--strict` /
 **Conformance changes → veraZIP gate.** An agent working **on this repository** must
 run `npm run validate:zip` for any change touching what the CLI writes (`create`,
 `modify`, `batch --task create`, the corpus generator, name handling): it builds the
-CLI, drives the built binary to write the 37-archive corpus (33 conformant archives —
+CLI, drives the built binary to write the 39-archive corpus (35 conformant archives —
 30 CLI-produced or crafted, plus 3 hostile-but-conformant ones `extract` must refuse —
-and 4 raw-crafted negative canaries; expected `33 PASS, 4 XFAIL, 0 FAIL`) and
+and 4 raw-crafted negative canaries; expected `35 PASS, 4 XFAIL, 0 FAIL`) and
 validates every file against ISO/IEC 21320-1:2015 with an engine-independent parser.
 Level 0 needs no external tool and always runs; level 1 (foreign integrity tools)
 skips visibly when a tool is absent — set `VERAZIP_REQUIRED=1` to fail closed as CI

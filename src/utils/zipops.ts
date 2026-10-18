@@ -67,7 +67,7 @@ export function parseNameEncoding(args: ParsedArgs): ZipNameDecoder | undefined 
     if (raw === undefined) return undefined;
     const label = raw.trim().toLowerCase();
     if (label === 'cp437' || label === 'ibm437') return undefined;
-    let decoder: TextDecoder;
+    let decoder: { decode(input: Uint8Array): string };
     try {
         decoder = new TextDecoder(label, { fatal: false });
     } catch {

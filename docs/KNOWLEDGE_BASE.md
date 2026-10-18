@@ -92,7 +92,7 @@ src/
     └── index.ts          # The ONLY import point of `zipnative` / `zipnative/worker` (106-export ledger of zipnative 1.1)
 
 scripts/
-├── generate-zip-corpus.mjs   # drives the BUILT CLI + a raw builder → test-output/zip/ (37 archives + manifest)
+├── generate-zip-corpus.mjs   # drives the BUILT CLI + a raw builder → test-output/zip/ (39 archives + manifest)
 ├── validate-zip.mjs          # veraZIP: ISO/IEC 21320-1:2015 validator, vendored from zipnative (independent parser)
 ├── sync-engine-data.mjs      # the engine-bump step: re-derives docs/data/{errors,core-exports}.json (--check for CI)
 └── helpers/interop-tools.mjs # level-1 foreign integrity tools (bsdtar, unzip, 7z, python-zipfile, jar)
@@ -809,7 +809,7 @@ See [AGENTS.md](../AGENTS.md) for the agent-facing summary.
 | Data remanence in `modify` | Documented on `--help` and printed as an `info:` line; `--compact` is the deletion path |
 | Forward-reader trust (`stream`) | Attribute-dependent flags refused; `trust: "local-headers-only"` in every JSON output; a `warning:` line at start; descriptor rows carry zero sizes (`bytesKnown: false` in the summary) |
 | Supply-chain risk | Zero extra runtime dependencies; a four-job release (guard → build → publish → attest, docs/adr/0009): no token where dev code runs, the `npm-publish` environment, Trusted Publishing (OIDC) with provenance, the published tarball re-verified against the gated one, CycloneDX + SPDX SBOMs and the tarball attested (Sigstore); every job hardened (`harden-runner`) and installing with `--ignore-scripts`; one SHA per action; zizmor, actionlint, CodeQL (TypeScript + workflows), Scorecard, dependency review, weekly npm audit + OSV-Scanner; rulesets as code; `tests/tools/workflows.test.ts` holds it all |
-| False conformance claims | Blocking veraZIP gate (`verazip.yml` on Linux + Windows on every PR, and pre-publish in `publish.yml`): a 37-archive corpus — 33 conformant (30 CLI-produced or crafted + 3 hostile-but-conformant archives `extract` must refuse) and 4 raw-crafted negative canaries — validated by an engine-independent ISO/IEC 21320-1 parser (`33 PASS, 4 XFAIL, 0 FAIL`) |
+| False conformance claims | Blocking veraZIP gate (`verazip.yml` on Linux + Windows on every PR, and pre-publish in `publish.yml`): a 39-archive corpus — 35 conformant (32 CLI-produced or crafted + 3 hostile-but-conformant archives `extract` must refuse) and 4 raw-crafted negative canaries — validated by an engine-independent ISO/IEC 21320-1 parser (`35 PASS, 4 XFAIL, 0 FAIL`) |
 
 **Network:** none. No command opens a socket in any mode.
 
@@ -1048,8 +1048,8 @@ npm run test:coverage       # thresholds: statements 93 / branches 88 / function
                             # (measured 96.32 / 92.52 / 97.93 / 96.91 on 2026-09-05; never lower them — add tests)
 
 # Conformance (veraZIP — ISO/IEC 21320-1:2015; level 0 needs no external tool)
-npm run corpus:zip          # write the 37-archive corpus to test-output/zip/ (needs a prior build)
-npm run validate:zip        # build + corpus + validate → 33 PASS, 4 XFAIL, 0 FAIL (exit 0/1/2/3 — see CONTRIBUTING.md)
+npm run corpus:zip          # write the 39-archive corpus to test-output/zip/ (needs a prior build)
+npm run validate:zip        # build + corpus + validate → 35 PASS, 4 XFAIL, 0 FAIL (exit 0/1/2/3 — see CONTRIBUTING.md)
 
 # Typecheck / lint (eslint covers src/ and tests/)
 npm run typecheck:all

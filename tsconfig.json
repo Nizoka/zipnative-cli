@@ -3,10 +3,9 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    // "dom" only for the global CompressionStream / DecompressionStream and
-    // TextEncoder / TextDecoder typings the engine's streaming API exposes;
-    // nothing here touches a browser.
-    "lib": ["ES2022", "dom"],
+    // No "dom": @types/node declares every global the CLI and the engine's
+    // streaming API use (TextEncoder / TextDecoder, the web streams).
+    "lib": ["ES2022"],
     "types": ["node"],
     "strict": true,
     "esModuleInterop": true,
@@ -23,7 +22,9 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedIndexedAccess": true,
-    "exactOptionalPropertyTypes": false
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noPropertyAccessFromIndexSignature": true
   },
   "include": ["src/**/*.ts"],
   "exclude": ["node_modules", "dist", "tests"]

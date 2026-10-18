@@ -277,10 +277,12 @@ async function planFromManifest(manifestPath: string, storeExt: Set<string>): Pr
         entries.push({ name, isDirectory, source, options });
     }
 
+    const defaultDate = parseManifestDate(m['date'], 'manifest');
+    const compression = m['compression'] !== undefined ? parseManifestCompression(m['compression'], 'manifest') : undefined;
     const archive: Plan['archive'] = {
         ...(order !== undefined ? { order } : {}),
-        ...(parseManifestDate(m['date'], 'manifest') !== undefined ? { defaultDate: parseManifestDate(m['date'], 'manifest') } : {}),
-        ...(m['compression'] !== undefined ? { compression: parseManifestCompression(m['compression'], 'manifest') } : {}),
+        ...(defaultDate !== undefined ? { defaultDate } : {}),
+        ...(compression !== undefined ? { compression } : {}),
         ...(archiveComment !== undefined ? { comment: archiveComment } : {}),
     };
     return { entries, skipped: [], archive };
@@ -290,12 +292,13 @@ async function planFromManifest(manifestPath: string, storeExt: Set<string>): Pr
 async function planFromPaths(args: ParsedArgs, inputs: readonly string[], stdinName: string | undefined, storeExt: Set<string>): Promise<Plan> {
     const base = getStringFlag(args.flags, 'base');
     const prefix = getStringFlag(args.flags, 'prefix');
+    const filter = parseNameFilter(args);
     const walk = await walkPaths(inputs, {
         ...(base !== undefined ? { base } : {}),
         ...(prefix !== undefined ? { prefix } : {}),
         followSymlinks: hasFlag(args.flags, 'follow-symlinks'),
         dirEntries: hasFlag(args.flags, 'dir-entries'),
-        ...(parseNameFilter(args) !== undefined ? { filter: parseNameFilter(args) } : {}),
+        ...(filter !== undefined ? { filter } : {}),
         // `--order insertion` = the argv order (directories walk name-sorted).
         preserveInputOrder: parseOrder(args) === 'insertion',
     });

@@ -19,3 +19,4 @@ SECURITY.md; the ADR series starts with 1.1.0.
 | [0007](0007-no-flag-without-an-effect.md) | No flag without an effect: `maxEntryCompressedSize` is reported, not flagged | accepted |
 | [0008](0008-dos-dates-per-entry-convention.md) | DOS dates: a per-entry convention, so the engine's `dosTimeMode` is not adopted | accepted |
 | [0009](0009-release-integrity.md) | Release integrity: the bytes that passed the gate are the bytes published | accepted |
+| [0010](0010-seeded-fuzzing-of-cli-parsers.md) | Seeded fuzzing of the CLI-owned parsers; coverage-guided fuzzing stays in the engine | accepted |

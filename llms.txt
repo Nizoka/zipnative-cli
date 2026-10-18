@@ -187,7 +187,7 @@ entries > 4 GiB (buffer instead). No network access, ever.
 ## Conformance
 
 Every archive the CLI writes is validated against ISO/IEC 21320-1:2015 by an
-engine-independent validator (veraZIP, `npm run validate:zip`; 37-archive
+engine-independent validator (veraZIP, `npm run validate:zip`; 39-archive
 corpus), blocking in CI on Linux and Windows for every pull request and before
 every publish. Conformant does not mean safe — the extraction guards exist on
 top.

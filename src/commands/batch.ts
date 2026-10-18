@@ -290,6 +290,7 @@ async function runManifest(manifestPath: string, args: ParsedArgs): Promise<void
             progress(`${label} … ${style('ok', 'green')}`);
         } catch (e) {
             const cli = e instanceof CliError ? e : new CliError(e instanceof Error ? e.message : String(e), 1, ErrorCode.RUNTIME);
+            const remedy = remedyFor(cli);
             firstError ??= cli;
             status.set(task.id, 'failed');
             results.push({
@@ -300,7 +301,7 @@ async function runManifest(manifestPath: string, args: ParsedArgs): Promise<void
                     code: cli.code,
                     message: cli.message,
                     ...(cli.zipCode !== undefined ? { zipCode: cli.zipCode } : {}),
-                    ...(remedyFor(cli) !== undefined ? { remedy: remedyFor(cli) } : {}),
+                    ...(remedy !== undefined ? { remedy } : {}),
                 },
             });
             progress(`${label} … ${style('failed', 'red')} (${cli.message})`);

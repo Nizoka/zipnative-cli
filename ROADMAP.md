@@ -82,9 +82,9 @@ This document outlines the planned development direction for zipnative-cli. Prio
   (11 codes), token economy (`--summary`, `--fields`, compact JSON), `llms.txt`,
   `docs/data/core-exports.json`, `docs/data/errors.json`, `AGENTS.md` — `AGENTS.md`, `llms.txt`
   and `docs/data/errors.json` ship in the npm tarball.
-- [x] **Blocking veraZIP gate** — `npm run validate:zip` over a 37-archive corpus written by the
-  built CLI (33 conformant incl. 3 hostile-but-conformant that `extract` must refuse, + 4
-  raw-crafted negative canaries → 33 PASS, 4 XFAIL), validated by the ISO/IEC 21320-1:2015
+- [x] **Blocking veraZIP gate** — `npm run validate:zip` over a 39-archive corpus written by the
+  built CLI (35 conformant incl. 3 hostile-but-conformant that `extract` must refuse, + 4
+  raw-crafted negative canaries → 35 PASS, 4 XFAIL), validated by the ISO/IEC 21320-1:2015
   parser vendored from the engine (independent by construction), level 1 foreign integrity
   tools, blocking in `verazip.yml` (Linux + Windows, on every push and PR) and pre-publish.
 - [x] **Governance & supply chain** — CI on Ubuntu 22 / 24, Windows 22 / 24 (blocking) and

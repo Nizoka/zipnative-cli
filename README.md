@@ -185,17 +185,17 @@ Official CLI for the [`zipnative`](https://github.com/Nizoka/zipnative) engine �
 
 ZIP has no veraPDF, so the CLI ships its own gate — **veraZIP**: an ISO/IEC 21320-1:2015
 (Document Container File) validator vendored from the engine
-(`zipnative/scripts/validate-zip.ts`, commit `4f1bc36`) that **raw-parses the bytes with its own
+(`zipnative/scripts/validate-zip.ts`, commit `1e2ab42`, zipnative 1.1.0) that **raw-parses the bytes with its own
 EOCD / central-directory / local-header reader and never imports `zipnative`** — a validator that
 shared the engine's parser would attest the engine with the engine. `npm run validate:zip` builds
-the CLI, drives the **built binary** to write a **37-archive corpus** (33 conformant archives —
+the CLI, drives the **built binary** to write a **39-archive corpus** (35 conformant archives —
 30 across every writer path: buffered, `--stream`, `--parallel`, `--deterministic`, `--order
 insertion`, manifest extra fields, binary comments, `modify` append-only and `--compact` — plus
 **4 raw-crafted negative canaries** the validator must reject with a declared clause id), then
 validates every file clause by clause. Three of the conformant archives are
 **hostile-but-conformant** (zip-slip, a Windows device name, duplicate paths): the ISO profile
 constrains the container, not the meaning of names, so they PASS the validator and `extract`
-**must refuse** them — the gate checks both (`33 PASS, 4 XFAIL, 0 FAIL`). Level 0 (the ISO clauses)
+**must refuse** them — the gate checks both (`35 PASS, 4 XFAIL, 0 FAIL`). Level 0 (the ISO clauses)
 needs no external tool and always runs; level 1 re-tests every conformant archive with the
 foreign integrity tools present on the machine (`unzip -t`, `7z t`, `python -m zipfile -t`,
 `tar -tf`, `jar tf`) and **skips** the absent ones visibly; `VERAZIP_REQUIRED=1` (set in CI)

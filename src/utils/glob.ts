@@ -9,6 +9,8 @@
 // depth (`*.txt` ≡ `**/*.txt`); a pattern ending in `/` matches the whole
 // subtree of that directory. Matching is case-sensitive.
 
+import { CliError } from './error.js';
+
 const RE_SPECIAL = /[.+^${}()|\\]/g;
 
 function escapeLiteral(s: string): string {
@@ -57,7 +59,14 @@ export function compileGlob(pattern: string): RegExp {
         }
     }
     const prefix = anyDepth ? '(?:.*/)?' : '';
-    return new RegExp(`^${prefix}${body}${source}$`);
+    try {
+        return new RegExp(`^${prefix}${body}${source}$`);
+    } catch {
+        // A character class is passed through to the regex: `[z-a]` or `[h-%]`
+        // (a range out of order) is not a pattern — a usage error, never
+        // E_RUNTIME (found by tests/fuzz/parsers.test.ts).
+        throw new CliError(`Invalid glob ${JSON.stringify(pattern)}: a character class such as [a-z] must list its ranges in order.`, 2);
+    }
 }
 
 export type NameFilter = (name: string) => boolean;
