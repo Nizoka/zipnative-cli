@@ -647,6 +647,8 @@ function statusSchema(): JsonSchema {
             inputs: { type: 'integer', description: 'merge: the number of source archives.' },
             canonical: { type: 'boolean', description: 'modify --compact --canonical: the output is in the canonical deterministic form.' },
             canonicalForm: { type: 'boolean', description: 'canonicalize: analyzeDeterminism() on the OUTPUT (the full form the engine writes).' },
+            unsafeNames: { type: 'integer', description: 'canonicalize: names that would not extract safely; kept as they are (reproducible is not safe).' },
+            encrypted: { type: 'integer', description: 'canonicalize: encrypted entries, copied unchanged.' },
             output: { type: 'string' },
             outputDir: { type: 'string' },
             bytes: { type: 'integer' },

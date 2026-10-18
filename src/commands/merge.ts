@@ -103,7 +103,9 @@ export async function merge(args: ParsedArgs): Promise<void> {
                 if (entry.isDirectory && prior.entry.isDirectory) continue; // one directory
                 if (onDuplicate === 'error') {
                     throw new CliError(
-                        `Entry "${entry.name}" is in ${prior.input} and in ${input}: refusing to pick one silently (pass --on-duplicate first|last).`,
+                        prior.input === input && prior.reader === reader
+                            ? `Entry "${entry.name}" appears twice in ${input}: refusing to pick one silently (pass --on-duplicate first|last).`
+                            : `Entry "${entry.name}" is in ${prior.input} and in ${input}: refusing to pick one silently (pass --on-duplicate first|last).`,
                         1,
                         ErrorCode.INPUT,
                         { entryName: entry.name, remedy: '--on-duplicate first|last' },

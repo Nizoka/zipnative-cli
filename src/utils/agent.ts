@@ -58,6 +58,30 @@ export function remedyFor(err: CliError): string | undefined {
 }
 
 /** True when the caller passed the global `--json` flag (agent mode). */
+/** The environment switches the CLI reads (each mirrors a global flag). */
+export const ENV_SWITCHES: readonly string[] = [
+    'ZIPNATIVE_JSON', 'ZIPNATIVE_DRY_RUN', 'ZIPNATIVE_QUIET', 'ZIPNATIVE_STRICT',
+    'ZIPNATIVE_PURE_CODECS', 'ZIPNATIVE_PROGRESS', 'ZIPNATIVE_DEBUG',
+];
+
+/**
+ * Normalise the environment switches once, at start-up: `true|1|yes|on` →
+ * `1`, `false|0|no|off` or empty → unset; any other value is a usage error
+ * (exit 2). Before 1.1.0 only `1` counted, so `ZIPNATIVE_DRY_RUN=true` was
+ * silently OFF and the run wrote its output — the env twin of the
+ * `--overwrite=flase` typo (second 1.1.0 review). The value is not echoed.
+ */
+export function normalizeEnvSwitches(env: NodeJS.ProcessEnv = process.env): void {
+    for (const name of ENV_SWITCHES) {
+        const raw = env[name];
+        if (raw === undefined) continue;
+        const v = raw.trim().toLowerCase();
+        if (v === '1' || v === 'true' || v === 'yes' || v === 'on') env[name] = '1';
+        else if (v === '' || v === '0' || v === 'false' || v === 'no' || v === 'off') Reflect.deleteProperty(env, name);
+        else throw new CliError(`${name} is a switch: set it to 1 / true / yes / on, or 0 / false / no / off.`, 2);
+    }
+}
+
 export function isJsonMode(): boolean {
     return process.env['ZIPNATIVE_JSON'] === '1';
 }

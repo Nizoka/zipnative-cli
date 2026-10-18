@@ -23,8 +23,8 @@ export default defineConfig({
                 'src/core-bridge/index.ts',
             ],
             thresholds: {
-                // Ratcheted for 1.1.0 from the measured 95.94 / 91.78 / 97.76 /
-                // 96.87 (2026-10-18), within one point of the actuals (1.0.0 kept
+                // Ratcheted for 1.1.0 from the measured 95.92 / 91.77 / 97.78 /
+                // 96.83 (2026-10-18), within one point of the actuals (1.0.0 kept
                 // three: 93 / 88 / 94 / 93). Never lower them to make a change
                 // pass — add tests.
                 statements: 95,

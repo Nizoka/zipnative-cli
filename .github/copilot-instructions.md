@@ -88,7 +88,7 @@ src/
 │   ├── version.ts     # CLI + engine version resolution (source layout and bundled dist/)
 │   ├── colors.ts      # ANSI helper decided on stderr: NO_COLOR off, FORCE_COLOR on, TERM=dumb off, else TTY
 │   ├── sizes.ts       # `<size>` (512k, 1GiB) and count parsing — always finite (`none` refused since 1.1.0)
-│   ├── limits.ts      # Eight --max-* flags → Partial<ZipLimits> (ZIP_LIMIT_INVALID unreachable) + --max-input-size
+│   ├── limits.ts      # Nine --max-* flags → Partial<ZipLimits> (ZIP_LIMIT_INVALID unreachable) + --max-input-size
 │   ├── diagnostics.ts # Core diagnostic sink: text warning lines | collected into the --json envelope
 │   ├── engine.ts      # prepareEngine(): --codec modules (argv only) + node:zlib tier unless --pure-codecs
 │   ├── codecs.ts      # `--codec <module>` loader — the ONLY dynamic import of user code

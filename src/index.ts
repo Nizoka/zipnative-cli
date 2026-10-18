@@ -1,6 +1,6 @@
 import { parseArgs, hasFlag, getStringFlag } from './utils/args.js';
 import { CliError, ErrorCode } from './utils/error.js';
-import { isJsonMode, emitJsonError, remedyFor } from './utils/agent.js';
+import { isJsonMode, emitJsonError, normalizeEnvSwitches, remedyFor } from './utils/agent.js';
 import { loadConfig, applyConfigDefaults, setActiveConfig } from './utils/config.js';
 import { armTimeout, runSignal } from './utils/control.js';
 import { escapeLine } from './utils/sanitize.js';
@@ -23,7 +23,8 @@ Global options (any command):
                     zipnative's ZIP_* code verbatim.
   --pretty          Indent JSON output under --json
   --dry-run         Validate inputs and plan without writing output (create,
-                    extract, modify, stream, cat, inflate, batch)
+                    canonicalize, merge, extract, modify, stream, cat,
+                    inflate, batch)
   --strict          Escalate the first engine diagnostic into E_CHECK_FAILED
                     before any output byte (verify: the report is printed and
                     the verdict becomes E_VERIFY_FAILED)
@@ -74,6 +75,8 @@ Environment:
   ZIPNATIVE_QUIET=1        same as --quiet        ZIPNATIVE_STRICT=1   --strict
   ZIPNATIVE_PURE_CODECS=1  same as --pure-codecs  ZIPNATIVE_DEBUG=1    traces
   ZIPNATIVE_PROGRESS=1     same as --progress
+  The ZIPNATIVE_* switches take 1/true/yes/on or 0/false/no/off; any other
+  value is a usage error (exit 2).
   NO_COLOR / FORCE_COLOR / TERM=dumb              colour of the stderr lines
 `;
 
@@ -217,7 +220,9 @@ timestamps pinned, entries sorted by raw name bytes, names re-encoded as UTF-8
 (flag bit 11), extra fields and comments dropped, version-made-by and internal
 attributes constant. NO recompression: payloads are copied bit for bit, so an
 encrypted or corrupt entry travels unchanged (run verify first). Running it
-twice yields the same bytes.
+twice yields the same bytes. Names keep their meaning: a traversal or device
+name travels into the output (counted in unsafeNames, with a warning) —
+reproducible is not safe to extract.
 
 Options:
   --input,   -i       Archive path (default: stdin)
@@ -760,6 +765,8 @@ function applyGlobalEnv(args: ReturnType<typeof parseArgs>): void {
 async function main(): Promise<void> {
     installEpipeGuard();
     installSignalCleanup();
+    // ZIPNATIVE_* switches take the same eight spellings as the flags.
+    normalizeEnvSwitches();
     const argv = process.argv.slice(2);
     // Agent mode must hold for a refusal raised BY the parse itself (a repeated
     // switch, a prototype name): `--json` is never a flag's value (a token

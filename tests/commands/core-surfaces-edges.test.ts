@@ -12,6 +12,7 @@ import { canonicalize } from '../../src/commands/canonicalize.js';
 import { merge } from '../../src/commands/merge.js';
 import { verify } from '../../src/commands/verify.js';
 import { createZip } from '../../src/core-bridge/index.js';
+import { normalizeEnvSwitches } from '../../src/utils/agent.js';
 import { parseArgs } from '../../src/utils/args.js';
 import { CliError, ErrorCode } from '../../src/utils/error.js';
 import { fileRangeSource } from '../../src/utils/io.js';
@@ -148,5 +149,47 @@ describe('canonicalize edge cases', () => {
         await mkdir(join(dir, 'sub'));
         await canonicalize(parseArgs([src, '-o', join(dir, 'c.zip'), '--overwrite']));
         expect(envelope()).toMatchObject({ ok: true });
+    });
+});
+
+describe('counter-verification findings', () => {
+    it('a raw DEFLATE payload with trailing bytes, or a stored one of the wrong length, is refused', async () => {
+        const { deflateRawSync, crc32 } = await import('node:zlib');
+        const data = Buffer.from('hidden-free payload');
+        const meta = { method: 8, crc32: crc32(data), uncompressedSize: data.length };
+        const clean = deflateRawSync(data);
+        expect(() => { verifyRawPayload('r', clean, meta); }).not.toThrow();
+        const trailing = Buffer.concat([clean, Buffer.from('SECRET')]);
+        expect(await refusal(() => { verifyRawPayload('r', trailing, meta); })).toMatchObject({ code: ErrorCode.DATA, zipCode: 'ZIP_SIZE_MISMATCH' });
+        expect(await refusal(() => { verifyRawPayload('s', Buffer.concat([data, Buffer.from('X')]), { method: 0, crc32: crc32(data), uncompressedSize: data.length }); })).toMatchObject({ zipCode: 'ZIP_SIZE_MISMATCH' });
+    });
+
+    it('canonicalize counts hostile names it carries over, and warns', async () => {
+        const slip = join(dir, 'slip.zip');
+        await writeFile(slip, buildRawZip([{ name: 'ok.txt', data: enc.encode('ok') }, { name: '../evil.txt', data: enc.encode('x') }]));
+        await canonicalize(parseArgs([slip, '-o', join(dir, 'c.zip')]));
+        expect(envelope()).toMatchObject({ unsafeNames: 1, encrypted: 0 });
+        delete process.env['ZIPNATIVE_JSON'];
+        err = '';
+        await canonicalize(parseArgs([slip, '-o', join(dir, 'c2.zip')]));
+        expect(err).toMatch(/warning: 1 entry name\(s\) would not extract safely/);
+    });
+
+    it('merge names an internal duplicate as such', async () => {
+        const dup = join(dir, 'dup.zip');
+        await writeFile(dup, buildRawZip([{ name: 'a.txt', data: enc.encode('1') }, { name: 'a.txt', data: enc.encode('2') }]));
+        const e = await refusal(() => merge(parseArgs([dup, '-o', join(dir, 'o.zip')])));
+        expect(e.message).toMatch(/appears twice in/);
+    });
+});
+
+describe('normalizeEnvSwitches', () => {
+    it('maps the eight spellings, unsets the off forms and refuses anything else', async () => {
+        const env: NodeJS.ProcessEnv = { ZIPNATIVE_DRY_RUN: 'true', ZIPNATIVE_QUIET: 'off', ZIPNATIVE_JSON: ' YES ', ZIPNATIVE_STRICT: '' };
+        normalizeEnvSwitches(env);
+        expect(env).toEqual({ ZIPNATIVE_DRY_RUN: '1', ZIPNATIVE_JSON: '1' });
+        const bad = await refusal(() => { normalizeEnvSwitches({ ZIPNATIVE_DRY_RUN: 'maybe' }); });
+        expect(bad.exitCode).toBe(2);
+        expect(bad.message).not.toContain('maybe');
     });
 });

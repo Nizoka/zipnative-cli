@@ -7,17 +7,17 @@
 zipnative-cli 1.1.0 on **zipnative 1.1.0** (`^1.1.0`, still the only runtime dependency). The
 release covers three things:
 
-- **Engine parity:** 106/106 exports bridged; the 1.1.0 capabilities that complete existing
-  commands are exposed as flags.
+- **Engine parity:** 106/106 exports bridged and every one reachable — new flags on the existing
+  commands, and two new commands, `canonicalize` and `merge` (17 commands).
 - **Runtime hardening** to the pkinative-cli level.
 - **Release integrity** at the level of zipnative 1.1.0.
 
-Three inputs that 1.0.0 accepted are now refused. They ship as security fixes with a migration
-(CHANGELOG "Security and behaviour changes"). Everything else is additive: the envelopes, the
+Inputs that 1.0.0 accepted and ignored or misread are now refused. They ship as security fixes
+with a migration (CHANGELOG `### Security`). Everything else is additive: the envelopes, the
 `E_*` codes, the exit codes and the `ZIP_*` mapping are unchanged, and the 37 archives of the
 1.0.0 veraZIP corpus are byte-identical.
 
-Release notes: [release-notes/v1.1.0.md](../v1.1.0.md). Decisions:
+Release notes: [release-notes/v1.1.0.md](../v1.1.0.md). Second review (two independent reviewers + a verifier, every finding with its verdict): [release-notes/draft/review-v1.1.0.md](review-v1.1.0.md). Decisions:
 [docs/adr/](../../docs/adr/README.md) (ADRs 0001–0010). Triage of the open PRs and alerts:
 [release-notes/draft/triage-v1.1.0.md](triage-v1.1.0.md).
 
@@ -40,6 +40,12 @@ Upstream: closes the CLI's engine asks answered by zipnative 1.1.0
 | `test(fuzz)` | seeded parser fuzzing (one bug found and fixed), stricter `tsconfig` / ESLint, veraZIP re-port (`WF/DESCRIPTOR-WIDTH`), corpus 39, docs link / anchor / EOL tests, ADR 0010 |
 | `chore(release)` | 1.1.0: CHANGELOG, ROADMAP, release notes, docs refresh, four new samples, `typescript-eslint` 8.71.1 |
 | `fix(review)` | findings of two independent pre-PR reviews (correctness, security), each reproduced first: `stream --timeout` no longer exits 0 with a truncated file, a timeout in a decompressor is `E_LIMIT`, config `false` never turns a switch on, `batch` accepts the create flags it forwards, one deadline per process, FIFO reads bounded in memory, per-field terminal escaping (LF, invisible characters, remedies), the consumer check moved to a read-only fifth publish job, manifest `comment-file` anchored |
+| `fix(security)` (2nd review) | strict switch values (`--overwrite=flase` was ON), bounded `batch --task verify`, mode-strict `batch`, process-wide flags refused in tasks, `--workers` 0–64, prototype-free aliases, `extract` file/dir conflict and missing `--entry` refused up front |
+| `fix(control)` | `--timeout` fires while an input is stalled (stdin, pipes, FIFOs) |
+| `fix(contract)` | schemas match the output (conformance test), typed `schema manifest`, safety facts in `inspect --summary`, failing names in `verify` errors, `verify --name-encoding`, compact `schema` under `--json`, text-mode failure lines |
+| `chore(supply-chain)` | Node security floor `^22.17.1 || >=24.4.1` + `node-floor` gate step, network-module denylist in the bundle probe, no `mcp` keyword |
+| `docs` | second-review fixes to the contract docs, exact migration notes, `### Security`, AI-instruction lists, count pins |
+| `feat(core)` | every export reachable: `canonicalize`, `merge`, `--range` (+ `--max-entry-compressed-size`), manifest `raw` entries — 17 commands |
 
 ## Behaviour changes (reviewer attention)
 
@@ -59,7 +65,7 @@ No security default was loosened. `dosTimeMode` is deliberately not adopted (ADR
 ## Test plan
 
 - [x] `npm run typecheck:all` clean; `npm run lint` 0 errors
-- [x] `npm run test:coverage` — 1364 passed, 9 skipped, 74 files; 95.94 / 91.78 / 97.76 / 96.87
+- [x] `npm run test:coverage` — 1368 passed, 9 skipped, 74 files; 95.92 / 91.77 / 97.78 / 96.83
       (thresholds 95 / 91 / 97 / 96)
 - [x] `npm run validate:zip` — 37 PASS + 4 XFAIL; the 37 inherited archives are byte-identical
       to the 1.0.0 build (SHA-256 compared)

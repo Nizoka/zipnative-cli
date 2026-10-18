@@ -16,14 +16,14 @@
 // the proof, not the promise.
 
 import { type ParsedArgs, getStringFlag, hasFlag } from '../utils/args.js';
-import { emitStatus, isDryRun } from '../utils/agent.js';
+import { emitStatus, isDryRun, progress } from '../utils/agent.js';
 import { createDiagnosticSink } from '../utils/diagnostics.js';
 import { prepareEngine } from '../utils/engine.js';
 import { CliError } from '../utils/error.js';
 import { writeOutput } from '../utils/io.js';
 import { guard, mapZipError } from '../utils/ziperr.js';
 import { commonOptions, openArchive, parseIsoDateUtc, readArchiveBytes, resolveInputPath } from '../utils/zipops.js';
-import { analyzeDeterminism, canonicalizeZip } from '../core-bridge/index.js';
+import { analyzeDeterminism, canonicalizeZip, sanitizeEntryPath } from '../core-bridge/index.js';
 
 /** `--date epoch|<ISO 8601>` → the canonical timestamp (undefined = the DOS epoch). `now` would not be canonical. */
 export function parseCanonicalDate(args: ParsedArgs): Date | undefined {
@@ -32,7 +32,11 @@ export function parseCanonicalDate(args: ParsedArgs): Date | undefined {
     if (raw === 'now') {
         throw new CliError('--date now is not a canonical form (the bytes would change with every run): pass epoch (the default) or an ISO 8601 date.', 2);
     }
-    return parseIsoDateUtc(raw, '--date');
+    try {
+        return parseIsoDateUtc(raw, '--date');
+    } catch {
+        throw new CliError(`--date expects "epoch" or an ISO 8601 date, got "${raw}".`, 2);
+    }
 }
 
 function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
@@ -59,6 +63,12 @@ export async function canonicalize(args: ParsedArgs): Promise<void> {
     // before anything is rewritten.
     const reader = openArchive(bytes, { ...common, validate: 'eager' });
     const entries = reader.entryCount;
+    // Canonicalisation rewrites metadata, never names' meaning: a hostile name
+    // (traversal, absolute, device) travels into the output exactly like an
+    // encrypted payload does. Say so — the archive is reproducible, not safe.
+    const all = guard('Failed to read the central directory', () => [...reader.entries()]);
+    const unsafeNames = all.filter((e) => sanitizeEntryPath(e.isDirectory && e.name.endsWith('/') ? e.name.slice(0, -1) : e.name) === null).length;
+    const encrypted = all.filter((e) => e.isEncrypted).length;
 
     const out = guard('Failed to canonicalize the archive', () => canonicalizeZip(bytes, {
         ...common,
@@ -76,7 +86,12 @@ export async function canonicalize(args: ParsedArgs): Promise<void> {
         // The same two verdicts `inspect` reports (reproducibility; the engine's full form).
         deterministic: report.epochTimestamps && report.canonicalOrder && report.utf8Flags,
         canonicalForm: report.deterministic,
+        unsafeNames,
+        encrypted,
     };
+    if (unsafeNames > 0) {
+        progress(`warning: ${unsafeNames} entry name(s) would not extract safely (traversal, absolute, drive/UNC, NUL, ADS or device names); canonicalize keeps names as they are — the output is reproducible, not safe to extract.`);
+    }
 
     if (dryRun) {
         emitStatus({ ...summary, dryRun: true, ...sink.field() });

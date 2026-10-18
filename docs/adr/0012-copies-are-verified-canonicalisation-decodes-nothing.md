@@ -34,11 +34,18 @@ re-emitted entries: verify every one, with no opt-out.
 - **Manifest `raw` entries** (`create --from-manifest`, `addRaw`) are not vouched for by the
   manifest. A manifest is data. The CLI decodes the payload once through the registered codec,
   bounded by the declared size and `--max-entry-size`, and requires the declared size and CRC-32
-  (`ZIP_SIZE_MISMATCH` / `ZIP_CRC_MISMATCH` otherwise). A method without a synchronous decoder is
+  (`ZIP_SIZE_MISMATCH` / `ZIP_CRC_MISMATCH` otherwise). Nothing may ride behind the payload: a
+  DEFLATE stream is decoded by the resumable inflater, which reports what follows it, and any
+  trailing byte is refused (a stored payload must be exactly the declared size). The counter-
+  verification of the second review found that gap. A registered third-party codec exposes no
+  leftover, so its trailing bytes cannot be detected. A method without a synchronous decoder is
   `ZIP_UNSUPPORTED_METHOD`. `raw` saves the recompression, never the verification.
 - **`canonicalize`** (and `modify --compact --canonical`) decodes nothing: it rewrites the
-  metadata around unchanged payloads, so a corrupt entry travels unchanged. That is stated in its
-  help, the README and AGENTS.md (run `verify` first). The output's determinism is measured, not
+  metadata around unchanged payloads, so a corrupt entry travels unchanged. Names keep their
+  meaning: a traversal or device name is carried into the output, counted in the envelope
+  (`unsafeNames`) and announced with a `warning:` line — reproducible is not safe to extract. That
+  is stated in its help, the README and AGENTS.md (run `verify` first; gate with
+  `inspect --check safe-names`). The output's determinism is measured, not
   assumed: the envelope carries `analyzeDeterminism()` on the bytes written.
 
 ### Consequences

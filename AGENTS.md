@@ -62,6 +62,9 @@ process reads back, and you may set them yourself instead of passing the flag:
 | `ZIPNATIVE_PURE_CODECS=1` | `--pure-codecs` | |
 | `ZIPNATIVE_PROGRESS=1` | `--progress` | NDJSON `{"type":"progress",…}` lines on stderr under `--json` |
 | `ZIPNATIVE_DEBUG=1` | — | stack traces on stderr |
+
+Each `ZIPNATIVE_*` switch takes `1|true|yes|on` or `0|false|no|off` (empty = off); any other
+value is `E_USAGE` (exit 2) — `ZIPNATIVE_DRY_RUN=ture` never silently writes.
 | `NO_COLOR`, `FORCE_COLOR`, `TERM` | `--no-color` | colour decision, see above |
 
 (`VERAZIP_REQUIRED`, `VERAZIP_REPORT_DIR`, `VERAZIP_TOOLS` are read by the
@@ -178,7 +181,7 @@ Command-specific fields (all confirmed against the built binary):
 | Command | Envelope fields beyond `ok`, `command`, `dryRun`, `diagnostics` |
 |---------|-------------------------------------------------------------------|
 | `create` | `output`, `entries`, `files`, `directories`, `bytesIn`, `method`, `level`, `deterministic`, `order`, `stream`, `zip64` (`--zip64`: streamed entries carry a Zip64 local header), `layout: "buffered" \| "data-descriptor"` (streamed entries), `parallel: false \| { workers }`, `skipped: [{ name, path, reason: "symlink" \| "special" \| "filtered" }]`, `tier` and `bytes` (both absent under `--dry-run`; under `--parallel` `tier` is `node-zlib` or `pure-pinned`, never `injected`) |
-| `canonicalize` | `output`, `entries`, `bytes`, `changed` (the output differs from the input), `deterministic` / `canonicalForm` (`analyzeDeterminism()` on the OUTPUT) |
+| `canonicalize` | `output`, `entries`, `bytes`, `changed` (the output differs from the input), `deterministic` / `canonicalForm` (`analyzeDeterminism()` on the OUTPUT), `unsafeNames` (hostile names kept as they are — reproducible is not safe), `encrypted` |
 | `merge` | `output`, `inputs`, `entries`, `files`, `directories`, `order`, `layout`, `skipped: [{ name, input, reason: "filtered" \| "duplicate" \| "unsupported" }]`, `bytes` (absent under `--dry-run`) |
 | `modify` | `output`, `bytes`, `edits: [{ op, name, to? }]` (a binary comment shows as `"<N bytes>"`), `layout: "append-only" \| "compact"`, `canonical` (`--compact --canonical`), `changed` (false when the save returned the same bytes), `verified` (untouched entries verified before re-emission), `verifySkipped` (encrypted / stream-only-codec entries copied as-is), `tier` (deflate tier of new payloads) |
 | `extract` | `outputDir`, `entries`, `files`, `directories`, `bytes`, `skipped: [{ name, reason: "unsafe-path" \| "symlink" \| "filtered" \| "duplicate" \| "unsupported" }]`, `symlinksAsData` |

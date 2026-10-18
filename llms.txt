@@ -85,7 +85,8 @@ machine-readable JSON manifest run `zipnative schema manifest`.
 - **Limits** (always on, CWE-tagged): `--max-entries 100000`,
   `--max-entry-size 1g`, `--max-total-size 8g`, `--max-ratio 1024`,
   `--max-name-bytes 4096`, `--max-extra-bytes 65535`,
-  `--max-comment-bytes 65535`, `--max-cd-bytes 256m`; every bound is finite
+  `--max-comment-bytes 65535`, `--max-cd-bytes 256m`,
+  `--max-entry-compressed-size 1g` (+1 MiB; `--range` fetches); every bound is finite
   (`none` is refused since 1.1.0). Exceeding one is `E_LIMIT` /
   `ZIP_LIMIT_EXCEEDED`. `--timeout <duration>` bounds the run →
   `E_LIMIT` with `detail.limit = "timeout"`. The CLI adds
@@ -97,7 +98,8 @@ machine-readable JSON manifest run `zipnative schema manifest`.
   `ZIPNATIVE_STRICT`, `ZIPNATIVE_PURE_CODECS`, `ZIPNATIVE_PROGRESS` (set by the global flags; also
   honoured when the caller sets them), `NO_COLOR` (off), `FORCE_COLOR` (on),
   `TERM=dumb` (off) — colour is decided on stderr; `ZIPNATIVE_DEBUG=1` adds
-  stack traces.
+  stack traces. A `ZIPNATIVE_*` switch takes `1|true|yes|on` or
+  `0|false|no|off`; any other value is exit 2.
 - **Self-description**: `zipnative schema <subject>` (Draft 2020-12, 22
   subjects incl. `create-manifest`, `batch-manifest`, `inspect`, `verify`,
   `status`, `error`, `errors`, `limits`) and `zipnative schema manifest`
@@ -135,7 +137,8 @@ machine-readable JSON manifest run `zipnative schema manifest`.
   (`canonicalizeZip`: pinned timestamps, sorted UTF-8 names, no extras or
   comments) without recompression; the envelope reports `deterministic` /
   `canonicalForm` measured on the output; `--date`, `--keep-comments`,
-  `--normalize-modes`; idempotent.
+  `--normalize-modes`; idempotent; hostile names are kept (counted in
+  `unsafeNames`): reproducible is not safe to extract.
 - `merge` — merge archives, or split one with `--include/--exclude`, copying
   compressed entries (`addFromReader`); every entry VERIFIED first (no
   opt-out); duplicate names refused unless `--on-duplicate first|last`;
@@ -146,7 +149,9 @@ machine-readable JSON manifest run `zipnative schema manifest`.
   `--name-encoding <label>` (also inspect, cat, extract, stream) decodes names
   stored without the UTF-8 flag (`shift_jis`, `gbk`, `windows-1252`, … —
   default cp437) → `nameEncoding: "custom"`; the engine decodes BEFORE it
-  sanitises, so extraction guards still apply.
+  sanitises, so extraction guards still apply. `--range` (also cat, verify)
+  reads a regular file by byte ranges (never loaded whole, `--max-input-size`
+  does not apply; whole-entry fetches bounded by `--max-entry-compressed-size`).
 - `inspect` — eager forensic report (stats, diagnostics, determinism verdict:
   `deterministic` = reproducibility, `canonicalLayout` = no data descriptors,
   `canonicalForm` = the engine's stricter `analyzeDeterminism()` verdict with

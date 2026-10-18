@@ -47,12 +47,14 @@ Security fixes that change behaviour, each with its migration.
   with `--manifest`), and a manifest task cannot set a process-wide flag (`json`, `quiet`,
   `no-color`, `config`, `no-config`, `progress`, `timeout`). `extract --entry` naming no entry
   is `E_NOT_FOUND` (it was an empty success), like `cat` and `verify`. `--workers` is bounded
-  `0`–`64`.
+  `0`–`64`. The `ZIPNATIVE_*` environment switches take the same eight spellings, any other
+  value is `E_USAGE` (1.0.0 counted only `1`: `ZIPNATIVE_DRY_RUN=true` was silently off and the
+  run wrote its output).
   **Migration:** remove the flags the command never honoured; spell switch values with the
   eight accepted words; `--codec`, `--include`, `--exclude`, `--entry`, `--check` and the other
   declared repeatable flags still repeat.
 - **Every bound is finite** ([ADR 0002](docs/adr/0002-every-bound-is-finite.md)). `none`, `inf`
-  and `infinity` are refused on the eight `--max-*` flags, `--max-input-size` and `inflate
+  and `infinity` are refused on the nine `--max-*` flags, `--max-input-size` and `inflate
   --max-output`, with a remedy naming an explicit value. **Migration:** pass the size you mean
   (`--max-total-size 64g`).
 - **Reads through one descriptor; overwrites by rename** ([ADR 0005](docs/adr/0005-one-descriptor-reads-and-rename-overwrites.md)).
@@ -86,7 +88,8 @@ Security fixes that change behaviour, each with its migration.
   (`canonicalizeZip`): pinned timestamps (`--date`), names sorted and re-encoded as UTF-8, extras
   and comments dropped (`--keep-comments`), canonical modes on request (`--normalize-modes`). No
   recompression; idempotent; the envelope carries `deterministic` / `canonicalForm` measured on
-  the output. **`modify --compact --canonical`** applies the same form with edits
+  the output, plus `unsafeNames` / `encrypted` with a warning when a hostile name is carried
+  over (reproducible is not safe to extract). **`modify --compact --canonical`** applies the same form with edits
   (`saveCompact({ canonical })`). ([ADR 0012](docs/adr/0012-copies-are-verified-canonicalisation-decodes-nothing.md))
 - **`merge`** — merge archives, or split one with `--include` / `--exclude`, copying compressed
   entries without recompression (`addFromReader`). Every source is opened eagerly and every entry
@@ -100,7 +103,7 @@ Security fixes that change behaviour, each with its migration.
 - **Pre-compressed manifest entries** — a `create --from-manifest` entry with
   `raw: { method, crc32, uncompressedSize }` is written with `addRaw` after the CLI decodes the
   payload once and checks its size and CRC-32 (`ZIP_SIZE_MISMATCH` / `ZIP_CRC_MISMATCH`
-  otherwise).
+  otherwise); bytes trailing a DEFLATE stream are refused, so nothing hides inside an entry.
 - **`create --stream --zip64`** (also with `--stdin-name`): a
   streamed entry is written with a Zip64 local header and the 24-byte data descriptor, so it may
   exceed 4 GiB (`AddEntryOptions.zip64`). Without it, an entry past 4 GiB stays refused with
@@ -188,7 +191,7 @@ Security fixes that change behaviour, each with its migration.
   `noPropertyAccessFromIndexSignature`, `lib` without `dom`; ESLint adds
   `no-non-null-assertion`, `no-console` and a rule forbidding a `zipnative` import outside the
   core bridge. Coverage thresholds ratcheted to 95 / 91 / 97 / 96 (measured
-  95.94 / 91.78 / 97.76 / 96.87).
+  95.92 / 91.77 / 97.78 / 96.83).
 - **veraZIP** re-ported from zipnative 1.1.0 (`scripts/validate-zip.ts`, commit `1e2ab42`, blob
   `604321f`): the new `WF/DESCRIPTOR-WIDTH` check keys the data-descriptor width on the local
   header's Zip64 extra (APPNOTE 4.3.9.2), a 23-id vocabulary. The corpus gains `create --stream
@@ -198,48 +201,7 @@ Security fixes that change behaviour, each with its migration.
 - `samples/config` demonstrates the presentation-only contract, including a refused planted
   file.
 
-### Fixed
-
-- **`--timeout` fires while an input is stalled**: a silent pipe made `list -`, `crc32`,
-  `create --stdin-name`, `stream` and `extract -` wait forever; the input streams now carry the
-  deadline, and the dispatcher fails a run still pending 500 ms after it.
-- **`batch --task verify` honours `--max-input-size`** (it read each archive whole, with no
-  bound — a FIFO named `*.zip` included).
-- **The published schemas match the output**: `inspect --summary` emitted `canonicalForm`,
-  and an error envelope carried `config`, which their closed schemas refused.
-- `extract` refuses a file entry that is also a parent directory (`f` and `f/child`) with
-  `E_IO` naming the entry, before anything is written (it failed midway with `E_RUNTIME`).
-- An undeclared alias is named as typed (`--output-dir (-d)`), and `--toString` is reported by
-  name (the alias table is prototype-free).
-- **A run never ends with exit 0 while an engine call is still pending.** If the event loop
-  drains with the command unfinished, the run fails (the deadline's `E_LIMIT` when it fired,
-  `E_RUNTIME` otherwise) and the files being written are removed. `stream` does not hand the
-  deadline to the engine's forward reader, whose pending entry read did not settle on abort;
-  the CLI's own input and write loops enforce it there.
-- **`MaxListenersExceededWarning` on large entries** (1.0.0): every backpressure wait of the
-  file writer left a `close` listener behind; one listener pair now lives per wait, so
-  stderr carries envelopes only.
-- **A pipe, FIFO or device read is bounded in memory, not only in bytes**: reads fill 64 KiB
-  blocks, so a peer trickling 1-byte reads cannot pin 64 KiB per byte below
-  `--max-input-size`.
-- **`false` in `.zipnativerc.json` never turns a switch on** (`{"json": false}` printed
-  JSON; `{"quiet": false}` silenced the warnings): it only turns off what a broader section
-  turned on.
-- `--json` after `--` is an operand, not agent mode.
-- **Data loss on an early error** (1.0.0): when the engine failed before the deferred exclusive
-  open, `cat`, `inflate` and `create` unlinked the output path — which could be a pre-existing
-  file the run had refused to overwrite. The write layer now removes only what it created.
-- A glob character class with a range out of order (`--include '[h-%]'`) is a usage error
-  (exit 2) instead of a RegExp `SyntaxError` surfacing as `E_RUNTIME` (found by the fuzz suite).
-- `--constructor x`, `--__proto__ x` and other prototype names no longer crash the parser with
-  `E_RUNTIME`; they are `E_USAGE`.
-- `--json` is honoured for the refusals raised while argv is parsed (the envelope used to be
-  text).
-- A literal NUL in `src/utils/diagnostics.ts` made git treat the source as binary;
-  `tests/docs/source-hygiene.test.ts` now forbids raw control and bidi characters in every
-  tracked text file (Trojan Source, CVE-2021-42574).
-
-### Supply chain
+#### Supply chain
 
 - **Five-job release** ([ADR 0009](docs/adr/0009-release-integrity.md)): `guard` (the tag must
   equal `v<version>`) → `build` (no `id-token`, no cache, the publish gate, pack + SHA-256 /
@@ -283,7 +245,7 @@ Security fixes that change behaviour, each with its migration.
 - AI governance 1.1.0: `ai_attribution_trailers_allowed: false`,
   `configuration_relaxes_checks: false`; opt-in git hooks (`npm run hooks:install`).
 
-### Documentation
+#### Documentation
 
 - README, AGENTS.md, llms.txt, the knowledge base, SECURITY.md and CONTRIBUTING.md describe the
   1.1.0 surface: the new flags, the presentation-only configuration, strict invocation, the
@@ -292,6 +254,47 @@ Security fixes that change behaviour, each with its migration.
 - SECURITY.md: 1.1.x supported; 1.0.x receives security fixes until 2027-04-18.
 - The `[Unreleased]` entries listed after 1.0.0 shipped in the 1.0.0 tarball; they now sit
   under [1.0.0] ("Release-branch review").
+
+### Fixed
+
+- **`--timeout` fires while an input is stalled**: a silent pipe made `list -`, `crc32`,
+  `create --stdin-name`, `stream` and `extract -` wait forever; the input streams now carry the
+  deadline, and the dispatcher fails a run still pending 500 ms after it.
+- **`batch --task verify` honours `--max-input-size`** (it read each archive whole, with no
+  bound — a FIFO named `*.zip` included).
+- **The published schemas match the output**: `inspect --summary` emitted `canonicalForm`,
+  and an error envelope carried `config`, which their closed schemas refused.
+- `extract` refuses a file entry that is also a parent directory (`f` and `f/child`) with
+  `E_IO` naming the entry, before anything is written (it failed midway with `E_RUNTIME`).
+- An undeclared alias is named as typed (`--output-dir (-d)`), and `--toString` is reported by
+  name (the alias table is prototype-free).
+- **A run never ends with exit 0 while an engine call is still pending.** If the event loop
+  drains with the command unfinished, the run fails (the deadline's `E_LIMIT` when it fired,
+  `E_RUNTIME` otherwise) and the files being written are removed. `stream` does not hand the
+  deadline to the engine's forward reader, whose pending entry read did not settle on abort;
+  the CLI's own input and write loops enforce it there.
+- **`MaxListenersExceededWarning` on large entries** (1.0.0): every backpressure wait of the
+  file writer left a `close` listener behind; one listener pair now lives per wait, so
+  stderr carries envelopes only.
+- **A pipe, FIFO or device read is bounded in memory, not only in bytes**: reads fill 64 KiB
+  blocks, so a peer trickling 1-byte reads cannot pin 64 KiB per byte below
+  `--max-input-size`.
+- **`false` in `.zipnativerc.json` never turns a switch on** (`{"json": false}` printed
+  JSON; `{"quiet": false}` silenced the warnings): it only turns off what a broader section
+  turned on.
+- `--json` after `--` is an operand, not agent mode.
+- **Data loss on an early error** (1.0.0): when the engine failed before the deferred exclusive
+  open, `cat`, `inflate` and `create` unlinked the output path — which could be a pre-existing
+  file the run had refused to overwrite. The write layer now removes only what it created.
+- A glob character class with a range out of order (`--include '[h-%]'`) is a usage error
+  (exit 2) instead of a RegExp `SyntaxError` surfacing as `E_RUNTIME` (found by the fuzz suite).
+- `--constructor x`, `--__proto__ x` and other prototype names no longer crash the parser with
+  `E_RUNTIME`; they are `E_USAGE`.
+- `--json` is honoured for the refusals raised while argv is parsed (the envelope used to be
+  text).
+- A literal NUL in `src/utils/diagnostics.ts` made git treat the source as binary;
+  `tests/docs/source-hygiene.test.ts` now forbids raw control and bidi characters in every
+  tracked text file (Trojan Source, CVE-2021-42574).
 
 ## [1.0.0] – 2026-09-05
 

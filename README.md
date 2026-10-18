@@ -457,7 +457,7 @@ cat file | zipnative create --stdin-name <name> -o <out.zip>
 | `<path>...` | — | Files and directories (directories are walked recursively, sorted by name) |
 | `--input <path>`, `-i` _(repeatable)_ | — | Same as a positional (useful in manifests) |
 | `--stdin-name <name>` | — | Read stdin as one entry named `<name>` |
-| `--from-manifest <file>` | — | JSON manifest `{ comment\|commentBase64, order, date, compression, entries: [{ name, path\|data\|dataBase64\|directory, method, level, date, comment, mode, extraFields: [{ id, hex\|base64 }] }] }` — see `zipnative schema create-manifest`; entries are emitted in array order under `order: "insertion"`; mutually exclusive with paths / `--stdin-name` |
+| `--from-manifest <file>` | — | JSON manifest `{ comment\|commentBase64, order, date, compression, entries: [{ name, path\|data\|dataBase64\|directory, raw, method, level, date, comment, mode, extraFields: [{ id, hex\|base64 }] }] }` — see `zipnative schema create-manifest`; `raw: { method, crc32, uncompressedSize }` makes `path` / `dataBase64` a PRE-COMPRESSED payload, written as-is after the CLI decodes it once and checks size and CRC-32 (trailing bytes after a DEFLATE stream are refused); entries are emitted in array order under `order: "insertion"`; mutually exclusive with paths / `--stdin-name` |
 | `--output <file>`, `-o` | stdout | Output path |
 | `--overwrite` | false | Replace an existing output file (default: refuse, `E_IO`, the file is left intact) |
 | `--base <dir>` | each input's parent directory | Entry names are relative to `<dir>` |
@@ -578,8 +578,11 @@ every payload is copied bit for bit, so an encrypted or corrupt entry travels un
 | `--dry-run` | false | Canonicalise and report; write nothing |
 
 Status envelope: `{ ok, command: "canonicalize", output, entries, bytes, changed, deterministic,
-canonicalForm, dryRun, diagnostics }` — `deterministic` and `canonicalForm` are measured on the
-**output** by `analyzeDeterminism()` (the same two verdicts `inspect` reports).
+canonicalForm, unsafeNames, encrypted, dryRun, diagnostics }` — `deterministic` and
+`canonicalForm` are measured on the **output** by `analyzeDeterminism()` (the same two verdicts
+`inspect` reports). Names keep their meaning: a traversal or device name travels into the output
+(counted in `unsafeNames`, with a `warning:` line) — **reproducible is not safe to extract**;
+gate with `inspect --check safe-names` or let `extract` refuse it.
 
 ### `zipnative merge`
 
@@ -1071,6 +1074,9 @@ value — raise a bound for trusted input instead), and a bound cannot come from
 | `130` / `143` | Interrupted by `SIGINT` / `SIGTERM` (in-flight files removed) |
 
 #### Environment
+
+Each `ZIPNATIVE_*` switch takes `1` / `true` / `yes` / `on` or `0` / `false` / `no` / `off`
+(empty = off); any other value is refused (exit 2), so a misspelt `ZIPNATIVE_DRY_RUN` never writes.
 
 | Variable | Effect |
 |----------|--------|

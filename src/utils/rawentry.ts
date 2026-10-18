@@ -10,7 +10,7 @@
 // codec decodes is refused (ZIP_UNSUPPORTED_METHOD). So `raw` saves the
 // recompression, never the verification — the `modify` / `merge` rule.
 
-import { crc32, DEFAULT_ZIP_LIMITS, getCodec, type RawEntryMeta } from '../core-bridge/index.js';
+import { crc32, createInflator, DEFAULT_ZIP_LIMITS, getCodec, type RawEntryMeta } from '../core-bridge/index.js';
 import { CliError, ErrorCode } from './error.js';
 
 /** Parse a manifest `raw` object: `{ method, crc32, uncompressedSize }` (crc32 as 8 hex digits or an integer). */
@@ -61,12 +61,38 @@ export function verifyRawPayload(name: string, payload: Uint8Array, meta: RawEnt
             { entryName: name, zipCode: 'ZIP_UNSUPPORTED_METHOD' },
         );
     }
+    // Nothing may ride behind the payload: bytes after the end of a DEFLATE
+    // stream (or past a stored entry's size) would be written into the entry
+    // and survive every CRC check — data hidden in plain sight.
+    if (meta.method === 0 && payload.length !== meta.uncompressedSize) {
+        throw new CliError(
+            `Raw entry "${name}": a stored payload is ${payload.length} bytes, not the declared ${meta.uncompressedSize}.`,
+            1, ErrorCode.DATA,
+            { entryName: name, zipCode: 'ZIP_SIZE_MISMATCH' },
+        );
+    }
     let decoded: Uint8Array;
     try {
-        // One byte of headroom past the declared size: an over-long stream
-        // is caught as a size mismatch, never decoded without bound.
-        decoded = codec.decompressSync(payload, meta.uncompressedSize + 1);
+        if (meta.method === 8) {
+            // The resumable inflater reports what follows the stream (`leftover`).
+            const inflator = createInflator(meta.uncompressedSize + 1);
+            const parts = inflator.push(payload);
+            inflator.end();
+            if (inflator.leftover.length > 0) {
+                throw new CliError(
+                    `Raw entry "${name}": ${inflator.leftover.length} byte(s) follow the end of the DEFLATE stream — refused, they would be hidden inside the entry.`,
+                    1, ErrorCode.DATA,
+                    { entryName: name, zipCode: 'ZIP_SIZE_MISMATCH' },
+                );
+            }
+            decoded = Buffer.concat(parts);
+        } else {
+            // One byte of headroom past the declared size: an over-long stream
+            // is caught as a size mismatch, never decoded without bound.
+            decoded = codec.decompressSync(payload, meta.uncompressedSize + 1);
+        }
     } catch (e) {
+        if (e instanceof CliError) throw e;
         throw new CliError(
             `Raw entry "${name}": the payload does not decode as method ${meta.method} (${e instanceof Error ? e.message : String(e)}).`,
             1, ErrorCode.DATA,
