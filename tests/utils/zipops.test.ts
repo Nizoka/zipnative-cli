@@ -22,7 +22,6 @@ import { createDiagnosticSink } from '../../src/utils/diagnostics.js';
 import { createZip } from '../../src/core-bridge/index.js';
 import { parseArgs } from '../../src/utils/args.js';
 import { CliError } from '../../src/utils/error.js';
-import { _resetLimitWarnings } from '../../src/utils/limits.js';
 
 let dir = '';
 
@@ -40,7 +39,6 @@ function expectUsage(fn: () => unknown, pattern?: RegExp): void {
 
 beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), 'zipnative-cli-'));
-    _resetLimitWarnings();
 });
 
 afterEach(async () => {
@@ -155,7 +153,7 @@ describe('parseChunkSize', () => {
 
     it('rejects 0, none and garbage with exit 2', () => {
         expectUsage(() => parseChunkSize(parseArgs(['--chunk-size', '0'])), /--chunk-size must be a positive byte size/);
-        expectUsage(() => parseChunkSize(parseArgs(['--chunk-size', 'none'])), /--chunk-size must be a positive byte size/);
+        expectUsage(() => parseChunkSize(parseArgs(['--chunk-size', 'none'])), /--chunk-size "none" is no longer accepted/);
         expectUsage(() => parseChunkSize(parseArgs(['--chunk-size', 'big'])), /--chunk-size expects a byte size/);
     });
 });

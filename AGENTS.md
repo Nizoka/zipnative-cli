@@ -34,7 +34,18 @@ invocation: a boolean flag never consumes the token after it, `--flag=false`
 (`0`, `no`, `off`) is the explicit off form, and combined short flags (`-lq`)
 are refused with exit 2. Short aliases that take a value: `-i --input`,
 `-o --output`, `-d --output-dir`, `-e --entry`, `-f --format`; boolean short
-aliases: `-q`, `-h`, `-V`. There is no `-l`.
+aliases: `-q`, `-h`, `-V` — an alias means its long flag on every command that
+declares it. There is no `-l`.
+
+**The invocation is checked before anything runs (1.1.0).** A flag the command
+does not declare (`--overwite`), a switch given twice, a single-value flag given
+twice, a flag given both bare and with a value, more positionals than the command
+takes, or an operand together with its flag (`list a.zip --input b.zip`) is
+`E_USAGE` (exit 2) — never a silent no-op. Every `batch --manifest` task gets the
+same check, for all tasks before the first one runs. `zipnative schema manifest`
+lists each command's flags; repeatable flags are `--include`, `--exclude`,
+`--entry`, `--check`, `--cat`, `--input` (create, crc32), `--add`, `--add-dir`,
+`--remove`, `--rename`, `--replace`, `--entry-comment` and `--codec`.
 
 **Environment.** The global flags set process-wide variables that the same
 process reads back, and you may set them yourself instead of passing the flag:
@@ -46,6 +57,7 @@ process reads back, and you may set them yourself instead of passing the flag:
 | `ZIPNATIVE_QUIET=1` | `--quiet` | |
 | `ZIPNATIVE_STRICT=1` | `--strict` | |
 | `ZIPNATIVE_PURE_CODECS=1` | `--pure-codecs` | |
+| `ZIPNATIVE_PROGRESS=1` | `--progress` | NDJSON `{"type":"progress",…}` lines on stderr under `--json` |
 | `ZIPNATIVE_DEBUG=1` | — | stack traces on stderr |
 | `NO_COLOR`, `FORCE_COLOR`, `TERM` | `--no-color` | colour decision, see above |
 
@@ -54,15 +66,28 @@ conformance scripts only.)
 
 **Hermetic invocation.** `.zipnativerc.json` is discovered by walking up from the
 working directory to the filesystem root, so an unattended call inherits whatever a
-parent directory holds (`extract: { overwrite: true }`, `max-ratio: none`, …). Always
-pass `--no-config` (or `--config <file>`) in a pipeline; an explicit flag always wins
-over the file, and the `codec` key is refused from any config file.
+parent directory holds. Since 1.1.0 a config file is **presentation only** — `format`,
+`fields`, `json`, `pretty`, `quiet`, `no-color`, `progress`, `strict`, `long`,
+`summary` — and every other key (`overwrite`, `skip-unsafe`, `max-*`, paths, `codec`,
+…) makes the run fail with `E_USAGE` naming the file. It can therefore change the
+SHAPE of your output, not its safety: still pass `--no-config` (or `--config <file>`) in
+a pipeline so stdout is exactly what you asked for. When a file did apply defaults, the
+envelopes carry `config: { path, applied: [keys] }` and text mode prints `info:
+defaults from <path>: …`. An explicit flag always wins over the file.
 
 **Parse stderr line by line.** Under `--json` stderr is newline-delimited and may still
-carry text lines (`warning:` progress for skipped entries, `--codec` / `none` notices,
-NDJSON diagnostics, `ZIPNATIVE_DEBUG` traces). Each line is either a JSON object
-(starts with `{`) or text; the envelope is the *last line that starts with `{`*. Never
-`JSON.parse` the whole stream. `--quiet` removes the text lines, never an envelope.
+carry text lines (`warning:` progress for skipped entries, `--codec` notices, NDJSON
+diagnostics, `ZIPNATIVE_DEBUG` traces) and, with `--progress`, NDJSON objects
+`{ "type": "progress", "command", "entriesDone", "entriesTotal", "bytesIn", "bytesOut" }`.
+Each line is either a JSON object (starts with `{`) or text; the envelope is the *last
+line that starts with `{` and has an `ok` key*. Never `JSON.parse` the whole stream.
+`--quiet` removes the text and progress lines, never an envelope.
+
+**Text mode is terminal-safe.** In text output entry names, comments and messages are
+printed with control and bidi characters escaped (`\x1b`, `\u202e`); JSON carries the
+exact text and `--long` the bytes (`rawNameHex`). A text-mode error leads with its class
+and cause — `error E_DATA (ZIP_CRC_MISMATCH): …`, `error E_USAGE: …` — then `remedy: …`
+when one exists.
 
 **Edge cases you can rely on.**
 
@@ -172,9 +197,11 @@ selects / compacts the JSON format. Shapes worth knowing:
 - `stream --list` rows for data-descriptor entries carry zero sizes and CRC
   (local headers hold none) — see `stream --summary` in §3.
 - `doctor`: `checks[].data` is the machine-readable payload; the `limits` check
-  carries `{ maxEntries, maxEntryUncompressedSize, maxTotalUncompressedSize,
-  maxCompressionRatio, maxNameBytes, maxExtraFieldBytes, maxCommentBytes,
-  maxCentralDirectoryBytes, maxInputSize }` (numbers; `"none"` when disabled).
+  carries `{ maxEntries, maxEntryUncompressedSize, maxEntryCompressedSize,
+  maxTotalUncompressedSize, maxCompressionRatio, maxNameBytes, maxExtraFieldBytes,
+  maxCommentBytes, maxCentralDirectoryBytes, maxInputSize }` (numbers, always finite;
+  `maxEntryCompressedSize` is the zipnative 1.1 range-reader bound, reported without a
+  flag).
 - **`batch --manifest` under `--json` owns stdout: one document.** Each task
   runs with its stdout captured (64 MiB cap → `E_LIMIT` `{ limit:
   "captureBytes" }`) into `tasks[i].report` (parsed JSON object, or an array of
@@ -516,7 +543,9 @@ the first failing task's `E_*` code and `zipCode`.
   `schema`, not `--json`. The engine never touches the network either. There is nothing
   to allow-list.
 - **Run hermetically.** `--no-config` (or `--config <file>`) in every unattended call —
-  `.zipnativerc.json` discovery walks up to the filesystem root (§1).
+  `.zipnativerc.json` discovery walks up to the filesystem root (§1). A config can only
+  change presentation since 1.1.0 (any other key is `E_USAGE`), but it still changes
+  what stdout looks like.
 - **The sink is guarded three times.** The engine sanitises every path
   (`sanitizeEntryPath`) and refuses hostile shapes; the CLI re-proves lexically that each
   destination stays under `--output-dir` (`safeJoin`); then, before creating a directory,
@@ -527,19 +556,25 @@ the first failing task's `E_*` code and `zipCode`.
   like any other; case-fold collisions are refused on case-insensitive filesystems; a
   symlink is never materialised. Opt-outs skip; they never write anything unsafe. A
   residual window exists between the `realpath` check and the open — extract into an
-  empty or trusted directory.
+  empty or trusted directory. Under `--overwrite` each file is written to a temp sibling
+  and renamed into place, so a symlink planted at a target is replaced, never followed.
 - **Overwrite is opt-in everywhere.** `create -o`, `modify -o`, `cat -o`,
   `inflate -o`, `extract`, `stream --output-dir` and `batch --task create` refuse an
-  existing file (`E_IO`) unless `--overwrite`; `modify --in-place` writes an
-  unpredictable exclusive temp file and renames atomically. Interrupting (SIGINT /
-  SIGTERM) removes the in-flight files and exits 130 / 143.
+  existing path — a dangling symlink included — (`E_IO`, `remedy: --overwrite`) unless
+  `--overwrite`, which writes a temp file and renames it into place (a failed write
+  leaves the original untouched); `modify --in-place` works the same way. A failed run
+  never removes a file it did not create. Interrupting (SIGINT / SIGTERM) removes the
+  in-flight files and exits 130 / 143.
 - **Bounded input.** The engine's eight CWE-tagged limits are always on (100000 entries,
   1 GiB per entry, 8 GiB total, 1024:1 ratio, 4096-byte names, 65535-byte extra fields and
   comments, 256 MiB central directory) — when reading **and** when writing; tighten them
   for untrusted uploads (`--max-total-size 512m --max-ratio 50`). `--max-input-size`
   (default 4 GiB) bounds every buffered read of an archive or payload, so a huge upload
-  cannot exhaust memory before the engine sees it; the streaming commands stay
-  constant-memory. `none` disables a bound and warns — never do that on untrusted input.
+  cannot exhaust memory before the engine sees it — a file is read through one
+  descriptor and a pipe or device (`/dev/zero`) is byte-counted; the streaming commands
+  stay constant-memory. Every bound is finite: `none` is refused since 1.1.0 (`E_USAGE`,
+  the remedy names an explicit value). `--timeout <duration>` bounds the wall-clock
+  (`E_LIMIT`, `detail.limit: "timeout"`).
   JSON inputs are capped at 50 MB; a captured `batch --json` task stdout at 64 MiB.
   `inflate` always has an output bound.
 - **Argv paths are yours; data paths are checked.** `--input ../a.zip` or
@@ -551,18 +586,20 @@ the first failing task's `E_*` code and `zipCode`.
   CD↔LFH structure checked before any edit) and every untouched entry is verified
   (CRC-32, sizes, local header — one decompress pass, never a recompress) before it is
   re-emitted verbatim; a failure is `E_DATA` / `E_SECURITY` with `entryName`.
-  Encrypted and stream-only-codec entries are copied as-is and counted in
-  `verifySkipped`; an unregistered method is `E_UNSUPPORTED`. There is no opt-out.
+  Encrypted and stream-only-codec entries have their local header checked (zipnative
+  1.1) and are counted in `verifySkipped`; an unregistered method is `E_UNSUPPORTED`.
+  There is no opt-out.
 - **Data remanence.** `modify` without `--compact` keeps removed / replaced bytes
   recoverable in the output. When deletion matters, pass `--compact`. The CLI prints an
   `info:` line and the engine emits `ZIP_DEAD_BYTES_RATIO` when it is significant.
 - **Forward reading is unverified metadata.** `stream` trusts local headers alone — no
   central directory to cross-check names, sizes or methods — so mode / symlink policy is
-  unavailable, data-descriptor entries show zero sizes (`bytesKnown: false`), custom-method
-  entries cannot be decoded, and every JSON output says `trust: "local-headers-only"`.
+  unavailable, data-descriptor entries show zero sizes (`bytesKnown: false`), a custom
+  method decodes only through a codec's `createDecompressor()` (otherwise refused before
+  its first byte), and every JSON output says `trust: "local-headers-only"`.
   Use it only for streams you cannot seek; prefer `list` / `extract` on a complete file.
 - **`--codec` runs user code and shapes what you write.** It is the CLI's only dynamic
-  import (same trust as `node -r`): argv only, refused from `.zipnativerc.json`, refused
+  import (same trust as `node -r`): argv only, refused from `.zipnativerc.json` (like every non-presentation key), refused
   inside a `batch --manifest` without `--allow-codec-load`. Codecs are not read-side
   only: a module registering method 0/8 replaces the compressor of `create` / `modify`
   (announced by a `warning:`, also under `--deterministic`), a `deflateImpl` replaces the

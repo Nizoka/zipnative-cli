@@ -52,7 +52,7 @@ function pick(value: unknown, segments: readonly string[]): unknown {
     }
     if (isPlainObject(value)) {
         const [head, ...rest] = segments;
-        if (head === undefined || !(head in value)) return undefined;
+        if (head === undefined || !Object.hasOwn(value, head)) return undefined;
         const picked = pick(value[head], rest);
         if (picked === undefined) return undefined;
         return { [head]: picked };

@@ -275,12 +275,11 @@ describe('inflate', () => {
         expect(r.error).toMatchObject({ exitCode: 2, code: ErrorCode.USAGE });
     });
 
-    it('--max-output none lifts the bound to MAX_SAFE_INTEGER', async () => {
+    it('--max-output none is refused (exit 2): the output bound is always finite since 1.1.0', async () => {
         await setup();
-        process.env['ZIPNATIVE_JSON'] = '1';
         const r = await run(() => inflate(parseArgs(['--input', small, '--max-output', 'none'])));
-        expect(r.error).toBeUndefined();
-        expect(envelope(r.err)['maxOutput']).toBe(Number.MAX_SAFE_INTEGER);
+        expect(r.error).toMatchObject({ exitCode: 2, code: 'E_USAGE' });
+        expect((r.error as Error).message).toMatch(/no longer accepted/);
     });
 
     it('--dry-run reports the plan and decompresses nothing', async () => {

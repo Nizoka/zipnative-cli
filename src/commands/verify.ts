@@ -24,6 +24,7 @@ import { prepareEngine } from '../utils/engine.js';
 import { CliError, ErrorCode } from '../utils/error.js';
 import { parseLimitFlags } from '../utils/limits.js';
 import { emitJsonReport } from '../utils/projection.js';
+import { escapeTerminal } from '../utils/sanitize.js';
 import { guard, mapZipError } from '../utils/ziperr.js';
 import { commonOptions, entryPasses, openArchive, parseFormat, readArchiveBytes, resolveInputPath } from '../utils/zipops.js';
 
@@ -178,7 +179,7 @@ export async function verify(args: ParsedArgs): Promise<void> {
     if (format === 'json') {
         emitJsonReport(args, report, () => verifySummary(report));
     } else {
-        process.stdout.write(renderText(report, inputPath ?? '-'));
+        process.stdout.write(escapeTerminal(renderText(report, inputPath ?? '-')));
     }
 
     if (!report.ok) {

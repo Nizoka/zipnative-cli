@@ -19,6 +19,8 @@
 // presentation layer over the existing dispatch, never a separate runtime.
 
 import type { ZipErrorCode } from '../core-bridge/index.js';
+import { activeConfig } from './config.js';
+import { escapeTerminal } from './sanitize.js';
 import { CliError, ErrorCode, type ErrorCodeValue, type ErrorDetail } from './error.js';
 
 /**
@@ -75,9 +77,22 @@ export function isStrict(): boolean {
     return process.env['ZIPNATIVE_STRICT'] === '1';
 }
 
+/** The config file that supplied defaults to this run, as the envelopes carry it. */
+export interface ConfigField {
+    readonly path: string;
+    readonly applied: readonly string[];
+}
+
+function configField(): { readonly config?: ConfigField } {
+    const c = activeConfig();
+    return c === null ? {} : { config: { path: c.path, applied: c.applied } };
+}
+
 export interface AgentErrorEnvelope {
     readonly ok: false;
     readonly command: string | null;
+    /** Present when a `.zipnativerc.json` supplied defaults to this run. */
+    readonly config?: ConfigField;
     readonly error: {
         readonly code: ErrorCodeValue;
         readonly message: string;
@@ -112,6 +127,7 @@ export function buildErrorEnvelope(command: string | null, err: unknown): AgentE
         return {
             ok: false,
             command,
+            ...configField(),
             error: {
                 code: err.code,
                 message,
@@ -123,7 +139,7 @@ export function buildErrorEnvelope(command: string | null, err: unknown): AgentE
         };
     }
     const message = err instanceof Error ? err.message : String(err);
-    return { ok: false, command, error: { code: ErrorCode.RUNTIME, message } };
+    return { ok: false, command, ...configField(), error: { code: ErrorCode.RUNTIME, message } };
 }
 
 /** Write the JSON error envelope to stderr (single line, newline-terminated). */
@@ -138,7 +154,7 @@ export function emitJsonError(command: string | null, err: unknown): void {
  */
 export function emitStatus(envelope: Readonly<Record<string, unknown>>): void {
     if (!isJsonMode()) return;
-    process.stderr.write(JSON.stringify({ ok: true, ...envelope }) + '\n');
+    process.stderr.write(JSON.stringify({ ok: true, ...envelope, ...configField() }) + '\n');
 }
 
 /**
@@ -147,5 +163,6 @@ export function emitStatus(envelope: Readonly<Record<string, unknown>>): void {
  */
 export function progress(line: string): void {
     if (isQuiet()) return;
-    process.stderr.write(line + '\n');
+    // Progress lines quote entry names (skipped, warnings): display-escaped.
+    process.stderr.write(escapeTerminal(line) + '\n');
 }

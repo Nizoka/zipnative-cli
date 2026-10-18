@@ -31,6 +31,7 @@ import { prepareEngine } from '../utils/engine.js';
 import { CliError, ErrorCode } from '../utils/error.js';
 import { methodName, rowFromEntry, type EntryRow } from '../utils/entryfmt.js';
 import { emitJsonReport } from '../utils/projection.js';
+import { escapeTerminal } from '../utils/sanitize.js';
 import { formatBytes, parseByteSize, parseCount } from '../utils/sizes.js';
 import { guard } from '../utils/ziperr.js';
 import { runSignal } from '../utils/control.js';
@@ -435,7 +436,7 @@ export async function inspect(args: ParsedArgs): Promise<void> {
     if (format === 'json') {
         emitJsonReport(args, report, () => inspectSummary(report));
     } else {
-        process.stdout.write(renderText(report, inputPath ?? '-'));
+        process.stdout.write(escapeTerminal(renderText(report, inputPath ?? '-')));
     }
 
     if (checkResults !== undefined) {

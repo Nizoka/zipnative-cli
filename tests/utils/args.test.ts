@@ -30,9 +30,10 @@ describe('parseArgs', () => {
         expect(result.flags['add']).toBe('name=path/with=eq');
     });
 
-    it('handles -f value (single-dash short flag)', () => {
+    it('handles -i value (single-dash short flag), canonicalised to its long name', () => {
         const result = parseArgs(['-i', 'file.zip']);
-        expect(result.flags['i']).toBe('file.zip');
+        expect(result.flags['input']).toBe('file.zip');
+        expect(result.flags['i']).toBeUndefined();
     });
 
     it('handles boolean --flag (no value following)', () => {
@@ -85,20 +86,39 @@ describe('parseArgs', () => {
         expect(result.flags['remove']).toEqual(['a.txt', 'b.txt', 'c.txt']);
     });
 
-    it('lets a later string value replace an earlier boolean', () => {
-        const result = parseArgs(['--x', '--x', 'v']);
-        expect(result.flags['x']).toBe('v');
+    it('refuses a flag given both bare and with a value (one would silently win)', () => {
+        expect(() => parseArgs(['--x', '--x', 'v'])).toThrow(/both with and without a value/);
+        expect(() => parseArgs(['--x', 'v', '--x'])).toThrow(/both with and without a value/);
     });
 
-    it('keeps the existing string value when a later occurrence is boolean', () => {
-        const result = parseArgs(['--x', 'v', '--x']);
-        expect(result.flags['x']).toBe('v');
+    it('refuses a switch given twice, in either spelling', () => {
+        expect(() => parseArgs(['--long', '--long'])).toThrow(/given more than once/);
+        expect(() => parseArgs(['-q', '--quiet'])).toThrow(/--quiet is given more than once/);
+    });
+
+    it('refuses prototype names and keeps the record prototype-free', () => {
+        for (const bad of ['--__proto__', '--constructor', '--prototype', '--__proto__=x']) {
+            let caught: unknown;
+            try { parseArgs([bad, 'v']); } catch (e) { caught = e; }
+            expect(caught, bad).toBeInstanceOf(CliError);
+            expect((caught as CliError).exitCode).toBe(2);
+        }
+        expect(Object.getPrototypeOf(parseArgs(['--x', '1']).flags)).toBeNull();
+    });
+
+    it('refuses a short flag written with "=" (never echoing its value)', () => {
+        expect(() => parseArgs(['-o=secret'])).toThrow(/takes no "="/);
+        try { parseArgs(['-o=secret']); } catch (e) { expect((e as CliError).message).not.toContain('secret'); }
+    });
+
+    it('collects -i and --input into ONE flag (the command decides whether two values are allowed)', () => {
+        expect(parseArgs(['-i', 'a', '--input', 'b']).flags['input']).toEqual(['a', 'b']);
     });
 
     it.each([
         ['--flag value', ['--format', 'json'], 'format', 'json'],
         ['--flag=value', ['--format=ndjson'], 'format', 'ndjson'],
-        ['-f value', ['-f', 'table'], 'f', 'table'],
+        ['-f value', ['-f', 'table'], 'format', 'table'],
     ])('handles %s correctly', (_label, argv, key, expected) => {
         const result = parseArgs(argv);
         expect(result.flags[key]).toBe(expected);

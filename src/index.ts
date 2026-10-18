@@ -1,8 +1,9 @@
 import { parseArgs, hasFlag, getStringFlag } from './utils/args.js';
 import { CliError, ErrorCode } from './utils/error.js';
 import { isJsonMode, emitJsonError, remedyFor } from './utils/agent.js';
-import { loadConfig, applyConfigDefaults } from './utils/config.js';
+import { loadConfig, applyConfigDefaults, setActiveConfig } from './utils/config.js';
 import { armTimeout } from './utils/control.js';
+import { escapeTerminal } from './utils/sanitize.js';
 import { installSignalCleanup } from './utils/inflight.js';
 import { installEpipeGuard } from './utils/io.js';
 import { cliVersion, engineVersion } from './utils/version.js';
@@ -36,8 +37,8 @@ Global options (any command):
                     extract without --buffered, stream, cat): one throttled
                     line per update, or NDJSON {"type":"progress",...}
                     under --json; off under --quiet
-  --max-entries <n>            Security bounds (zipnative ZipLimits); "none"
-  --max-entry-size <size>      disables a bound. Defaults: 100000 entries,
+  --max-entries <n>            Security bounds (zipnative ZipLimits), always
+  --max-entry-size <size>      finite and positive. Defaults: 100000 entries,
   --max-total-size <size>      1 GiB per entry, 8 GiB total, ratio 1024:1,
   --max-ratio <n>              4096-byte names, 65535-byte extra fields and
   --max-name-bytes <size>      comments, 256 MiB central directory.
@@ -48,9 +49,11 @@ Global options (any command):
                     or payload read from stdin or a file into memory (list,
                     inspect, verify, extract, cat, modify, create --stdin-name,
                     inflate --sync, govern verify-issue). Default 4 GiB;
-                    "none" disables it;
-                    exceeding it is E_LIMIT. The streaming commands (stream,
-                    crc32, inflate, create --stream) are not bounded by it.
+                    a file is read through one descriptor (regular files
+                    capped at the size checked; pipes and devices byte-
+                    counted), so exceeding it is always E_LIMIT. The
+                    streaming commands (stream, crc32, inflate, create
+                    --stream) are not bounded by it.
   --pure-codecs     Skip node:zlib and run the pure-TS codec tier
   --codec <module>  Load an ESM module exporting { codecs: ZipCodec[] } and
                     register it. A codec for method 0/8 (or a deflateImpl)
@@ -457,7 +460,7 @@ Options:
   --output,  -o       Decompressed output (default: stdout)
   --overwrite         Replace an existing --output file (default: refuse, E_IO)
   --max-output <size> Hard output bound (default: the effective
-                      --max-entry-size, 1 GiB); "none" only for trusted input
+                      --max-entry-size, 1 GiB); raise it for trusted input
   --method deflate|store|<id>   Codec (default deflate; ids via --codec)
   --sync              Buffer the input and use the codec's decompressSync
   --allow-trailing    Silence the warning about bytes after the stream end
@@ -625,17 +628,17 @@ async function loadCommand(name: string): Promise<CommandFn> {
 // The command being dispatched, captured for the agent JSON error envelope.
 let activeCommand: string | null = null;
 
-async function main(): Promise<void> {
-    installEpipeGuard();
-    installSignalCleanup();
-    const argv = process.argv.slice(2);
-    const args = parseArgs(argv);
-
-    // Global output flags (recognised anywhere in argv).
+/**
+ * The env-backed global flags: index.ts turns them into ZIPNATIVE_* (and
+ * NO_COLOR) so every module — and every batch task run in-process — sees the
+ * same mode. Called on the raw argv and again after the config merge (a
+ * presentation default from `.zipnativerc.json` behaves like its flag).
+ */
+function applyGlobalEnv(args: ReturnType<typeof parseArgs>): void {
     if (hasFlag(args.flags, 'no-color') || process.env['NO_COLOR'] !== undefined) {
         process.env['NO_COLOR'] = '1';
     }
-    if (hasFlag(args.flags, 'quiet', 'q')) {
+    if (hasFlag(args.flags, 'quiet')) {
         process.env['ZIPNATIVE_QUIET'] = '1';
     }
     if (hasFlag(args.flags, 'json')) {
@@ -653,23 +656,40 @@ async function main(): Promise<void> {
     if (hasFlag(args.flags, 'progress')) {
         process.env['ZIPNATIVE_PROGRESS'] = '1';
     }
+}
+
+async function main(): Promise<void> {
+    installEpipeGuard();
+    installSignalCleanup();
+    const argv = process.argv.slice(2);
+    // Agent mode must hold for a refusal raised BY the parse itself (a repeated
+    // switch, a prototype name): `--json` is never a flag's value (a token
+    // starting with "-" is not consumed), so the bare token decides.
+    if (argv.includes('--json')) process.env['ZIPNATIVE_JSON'] = '1';
+    const args = parseArgs(argv);
+
+    // Global output flags (recognised anywhere in argv).
+    applyGlobalEnv(args);
     // The --timeout deadline starts with the process, not with the first
     // engine call (utils/control.ts; idempotent for in-process re-arming).
     armTimeout(args);
 
-    if (hasFlag(args.flags, 'help', 'h') && args.positionals.length === 0) {
+    // Help / version: write and RETURN (exit code 0 by default) — never
+    // process.exit() right after a stdout write: on macOS and Windows a pipe
+    // is asynchronous and the tail of the text would be lost.
+    if (hasFlag(args.flags, 'help') && args.positionals.length === 0) {
         process.stdout.write(USAGE);
-        process.exit(0);
+        return;
     }
 
-    if (hasFlag(args.flags, 'version', 'V')) {
+    if (hasFlag(args.flags, 'version')) {
         const version = cliVersion();
         if (hasFlag(args.flags, 'json')) {
             process.stdout.write(JSON.stringify({ name: 'zipnative-cli', version, zipnative: engineVersion() }) + '\n');
         } else {
             process.stdout.write(version + '\n');
         }
-        process.exit(0);
+        return;
     }
 
     const commandName = args.positionals[0];
@@ -677,7 +697,7 @@ async function main(): Promise<void> {
     if (commandName === undefined) {
         if (argv.length === 0) {
             process.stdout.write(USAGE);
-            process.exit(0);
+            return;
         }
         // Flags but no command (`zipnative --frob`, `zipnative --json`): a usage
         // error, never the help text with exit 0.
@@ -689,13 +709,13 @@ async function main(): Promise<void> {
 
     activeCommand = commandName;
 
-    if (hasFlag(args.flags, 'help', 'h')) {
+    if (hasFlag(args.flags, 'help')) {
         const usage = COMMAND_USAGE[commandName];
         if (usage === undefined) {
             throw new CliError(`Unknown command: ${commandName}. Run zipnative --help for usage.`, 2);
         }
         process.stdout.write(usage);
-        process.exit(0);
+        return;
     }
 
     // Strip ONLY the first occurrence of the command name from argv.
@@ -710,16 +730,51 @@ async function main(): Promise<void> {
 
     const commandArgs = parseArgs(rest);
 
-    // Apply `.zipnativerc.json` defaults (unless --no-config). CLI flags win.
+    // An unknown command is refused before anything else looks at its flags.
+    const command = await loadCommand(commandName);
+
+    // The invocation contract (completion.ts COMMANDS is the table): only
+    // declared flags, each value flag once unless repeatable, no stray
+    // positionals — E_USAGE, exit 2, before any input is read.
+    const { assertInvocation, knownFlags } = await import('./commands/completion.js');
+    assertInvocation(commandName, commandArgs);
+
+    // Apply `.zipnativerc.json` defaults (unless --no-config): presentation
+    // keys only, and only those this command declares. CLI flags win.
     let effectiveArgs = commandArgs;
     if (!hasFlag(commandArgs.flags, 'no-config')) {
         const configPath = getStringFlag(commandArgs.flags, 'config');
-        const defaults = loadConfig(commandName, configPath);
-        effectiveArgs = applyConfigDefaults(commandArgs, defaults);
+        const loaded = loadConfig(commandName, configPath);
+        const merged = applyConfigDefaults(commandArgs, loaded.defaults, knownFlags(commandName));
+        effectiveArgs = merged.args;
+        setActiveConfig(loaded.path, merged.applied);
+        // The env-backed globals a config may set (json, quiet, no-color,
+        // progress, strict) take effect like their flags.
+        applyGlobalEnv(effectiveArgs);
+        if (loaded.path !== undefined && merged.applied.length > 0 && !isJsonMode() && process.env['ZIPNATIVE_QUIET'] !== '1') {
+            process.stderr.write(`info: defaults from ${loaded.path}: ${merged.applied.join(', ')}\n`);
+        }
     }
 
-    const command = await loadCommand(commandName);
     await command(effectiveArgs);
+}
+
+/**
+ * Exit with `code` once everything already written to stdout and stderr has
+ * been flushed: an empty write's callback runs after the queued writes, so a
+ * pipe (asynchronous on macOS and Windows) never loses the error envelope or
+ * the tail of a report. The explicit exit still ends a run whose handles
+ * (an unconsumed stdin, a worker) would keep the loop alive.
+ */
+function exitAfterFlush(code: number): void {
+    process.exitCode = code;
+    let pending = 2;
+    const done = (): void => {
+        pending--;
+        if (pending === 0) process.exit(code);
+    };
+    process.stdout.write('', done);
+    process.stderr.write('', done);
 }
 
 main().catch((e: unknown) => {
@@ -729,22 +784,28 @@ main().catch((e: unknown) => {
         if (process.env['ZIPNATIVE_DEBUG'] === '1' && e instanceof Error) {
             process.stderr.write((e.stack ?? e.message) + '\n');
         }
-        process.exit(e instanceof CliError ? e.exitCode : 1);
+        exitAfterFlush(e instanceof CliError ? e.exitCode : 1);
+        return;
     }
     if (e instanceof CliError) {
         if (e.message.length > 0) {
-            process.stderr.write(e.message + '\n');
+            // Text mode: the class and the engine cause lead, the message may
+            // quote archive bytes (display-escaped; the --json envelope keeps
+            // the raw text).
+            const cause = e.zipCode !== undefined ? ` (${e.zipCode})` : '';
+            process.stderr.write(`error ${e.code}${cause}: ${escapeTerminal(e.message)}\n`);
         }
         // The machine-actionable counterpart of the message (same text as the
         // --json envelope's error.remedy); part of the error, never suppressed.
         const remedy = remedyFor(e);
         if (remedy !== undefined) process.stderr.write(`remedy: ${remedy}\n`);
-        process.exit(e.exitCode);
+        exitAfterFlush(e.exitCode);
+        return;
     }
     const message = e instanceof Error ? e.message : String(e);
     if (process.env['ZIPNATIVE_DEBUG'] === '1' && e instanceof Error) {
         process.stderr.write((e.stack ?? e.message) + '\n');
     }
-    process.stderr.write(`Error: ${message}\n`);
-    process.exit(1);
+    process.stderr.write(`error ${ErrorCode.RUNTIME}: ${escapeTerminal(message)}\n`);
+    exitAfterFlush(1);
 });

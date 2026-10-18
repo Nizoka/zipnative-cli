@@ -93,7 +93,9 @@ describe('parseManifest — valid pipelines', () => {
         expect(a.flags['base']).toBe(resolve(DIR, 'src'));
         expect(a.flags['from-manifest']).toBe(resolve(DIR, 'files.json'));
         const b = plan.tasks[1] as ManifestPlan['tasks'][number];
-        expect(b.flags['i']).toBe(a.output);
+        // Aliases are canonicalised, as on argv: { i } is { input }.
+        expect(b.flags['input']).toBe(a.output);
+        expect(b.flags['i']).toBeUndefined();
         expect(b.outputDir).toBe(resolve(DIR, 'out'));
     });
 

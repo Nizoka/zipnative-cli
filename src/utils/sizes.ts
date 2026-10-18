@@ -2,8 +2,10 @@
 //
 // `<size>` grammar: a decimal integer with an optional binary suffix
 // `k | m | g | t` (case-insensitive), optionally followed by `i`, `b` or `ib`
-// (`512m`, `1GiB`, `4gb` are all binary multiples). The words `none`, `inf`,
-// `infinity` (and `0` for limits) resolve to `Infinity` — a disabled bound.
+// (`512m`, `1GiB`, `4gb` are all binary multiples). Every value is a finite,
+// exactly representable integer: since 1.1.0 there is no unbounded form —
+// `none` / `inf` / `infinity` are refused with a remedy naming an explicit
+// value (docs/adr/0002-every-bound-is-finite.md).
 
 import { CliError } from './error.js';
 
@@ -17,17 +19,29 @@ const UNITS: Readonly<Record<string, number>> = {
 
 const SIZE_RE = /^(\d+)\s*([kmgt])?(?:i?b)?$/i;
 
+const UNBOUNDED = new Set(['none', 'inf', 'infinity']);
+
+/** The 1.0 "disabled bound" words: refused, with the migration in the message. */
+function refuseUnbounded(raw: string, flag: string, example: string): CliError {
+    return new CliError(
+        `--${flag} "${raw.trim()}" is no longer accepted: since 1.1.0 every bound is finite. Pass an explicit, larger value for trusted input (e.g. --${flag} ${example}).`,
+        2,
+        undefined,
+        { remedy: `--${flag} ${example} (an explicit bound; trusted input only)` },
+    );
+}
+
 /**
- * Parse a byte size. Returns `Infinity` for `none|inf|infinity`.
- * Throws a usage error (exit 2) on any other malformed value.
+ * Parse a byte size (a finite, safe integer). Throws a usage error (exit 2)
+ * on a malformed value, an unrepresentable one, or the 1.0 `none` word.
  */
 export function parseByteSize(raw: string, flag: string): number {
     const v = raw.trim().toLowerCase();
-    if (v === 'none' || v === 'inf' || v === 'infinity') return Infinity;
+    if (UNBOUNDED.has(v)) throw refuseUnbounded(raw, flag, '64g');
     const m = SIZE_RE.exec(v);
     if (m === null) {
         throw new CliError(
-            `--${flag} expects a byte size such as 65536, 512k, 1m, 8g or "none", got "${raw}".`,
+            `--${flag} expects a byte size such as 65536, 512k, 1m or 8g, got "${raw}".`,
             2,
         );
     }
@@ -40,10 +54,10 @@ export function parseByteSize(raw: string, flag: string): number {
     return bytes;
 }
 
-/** Parse a non-negative integer count (or `none` → Infinity). */
+/** Parse a non-negative integer count (finite; the 1.0 `none` word is refused). */
 export function parseCount(raw: string, flag: string): number {
     const v = raw.trim().toLowerCase();
-    if (v === 'none' || v === 'inf' || v === 'infinity') return Infinity;
+    if (UNBOUNDED.has(v)) throw refuseUnbounded(raw, flag, '10000000');
     if (!/^\d+$/.test(v)) {
         throw new CliError(`--${flag} expects a non-negative integer, got "${raw}".`, 2);
     }
@@ -57,7 +71,7 @@ export function parseCount(raw: string, flag: string): number {
 /** Parse a strictly positive integer. */
 export function parsePositiveInt(raw: string, flag: string): number {
     const n = parseCount(raw, flag);
-    if (n === Infinity || n <= 0) {
+    if (n <= 0) {
         throw new CliError(`--${flag} expects a positive integer, got "${raw}".`, 2);
     }
     return n;

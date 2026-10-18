@@ -14,8 +14,14 @@ We will acknowledge receipt within 48 hours and aim to provide a fix within 7 da
 
 | Version | Supported |
 |---------|-----------|
-| 1.0.x   | ✅        |
+| 1.1.x   | ✅        |
+| 1.0.x   | ⚠️ security fixes only, until 2027-04-18 (six months after 1.1.0) |
 | < 1.0   | ❌        |
+
+1.1.0 ships the security fixes recorded below — configuration limited to presentation, strict
+invocation, finite bounds, symlink-safe overwrites, single-descriptor reads, terminal-safe text.
+Three of them narrow what 1.0 accepted; the [CHANGELOG](CHANGELOG.md) lists each with its
+migration. A security fix may narrow an input in a minor release; it never widens one.
 
 ## Security Model
 
@@ -25,6 +31,47 @@ The engine, by design, never touches the filesystem, never opens a socket and ne
 
 The CLI exposes 15 commands (run `zipnative --help` or `zipnative schema manifest` for the authoritative list). **No command can open a socket, in any mode** — there is no network opt-in.
 
+### Configuration cannot relax a check
+
+A `.zipnativerc.json` planted in a cloned repository is found by the upward discovery the moment
+someone types `zipnative extract …` inside it. Since 1.1.0 a configuration file is
+**presentation only** (`src/utils/config.ts`, [ADR 0001](docs/adr/0001-configuration-is-presentation-only.md)):
+it may set `format`, `fields`, `json`, `pretty`, `quiet`, `no-color`, `progress`, `strict`,
+`long` and `summary` — how a result is shown, or a stricter run — and nothing else. Every other
+key (`overwrite`, `skip-unsafe`, `skip-unsupported`, `allow-symlinks`, every `--max-*`, input and
+output paths, `name-encoding`, `timeout`, `codec`, …), the prototype names (`__proto__`,
+`constructor`, `prototype`) and a value of the wrong type are `E_USAGE` naming the file; the
+whole file is validated whatever command runs. Only a regular file of at most 1 MiB is read
+(size checked on the open descriptor). A key applies only where the command declares the flag,
+and the file that supplied defaults is announced on stderr and carried as `config: { path,
+applied }` in the `--json` envelopes. `--no-config` skips discovery entirely — the recommended
+posture for unattended runs. Before 1.1.0 every key but `codec` was accepted, so a planted file
+could disable the limits or turn on `--overwrite` / `--skip-unsafe` / `--allow-symlinks`.
+
+### Strict invocation
+
+The parser stores flags in a prototype-free record and refuses `__proto__` / `constructor` /
+`prototype` as names; since 1.1.0 the dispatcher also refuses, before any input is read, a flag
+the command does not declare, a switch given twice, a single-value flag given twice, a flag given
+both bare and with a value, more positionals than the command takes, and an operand together
+with the flag it stands for — all `E_USAGE`, exit 2. A typo such as `--overwite` or
+`--skip-unsafe` on the wrong command is therefore never a silent no-op. Every task of a `batch
+--manifest` gets the same check, for all tasks before the first one runs. A refused value is
+never echoed (it may be a secret typed in the wrong place).
+
+### Terminal-safe text
+
+Entry names, comments and the engine messages that quote them come from whoever produced the
+archive. In **text** mode every such string is printed through `escapeTerminal()`
+(`src/utils/sanitize.ts`): C0 controls other than TAB / LF, DEL, C1 controls and the Unicode
+bidi embedding / override / isolate controls are rendered as visible escapes (`\x1b`,
+`\u202e`), so a hostile name cannot clear the screen, retitle the window, rewrite earlier lines
+of a listing or make `evil\u202etxt.exe` display as `evilexe.txt` (Trojan Source,
+CVE-2021-42574). JSON output keeps the exact text (`JSON.stringify` escapes C0 controls) and
+`--long` keeps the bytes in `rawNameHex`. The repository holds itself to the same rule:
+`tests/docs/source-hygiene.test.ts` fails on any raw control or bidi character in a tracked text
+file.
+
 ### Agent Mode (`--json`, `--dry-run`, `--strict`)
 
 The agent-native contract is a **pure local presentation/validation layer** and adds **no network surface**:
@@ -33,14 +80,15 @@ The agent-native contract is a **pure local presentation/validation layer** and 
 - `--dry-run` validates inputs and plans — archives are opened, every destination is proven safe, edits are applied to the modifier, `modify` verifies the entries it would re-emit, manifests are resolved — and short-circuits **before** producing or writing output.
 - `--strict` only tightens: the first engine diagnostic becomes a hard error before any output byte.
 - Stable `E_*` classes carry a failure class; `error.zipCode` carries the engine's frozen `ZIP_*` cause verbatim; `detail` carries only the structured fields the engine (or the CLI-owned `--max-input-size` bound) defines (`{ limit, configured, observed }`, `{ feature }`, `{ expectedCrc, actualCrc }`). Internal parser state and byte offsets are never exposed beyond what the engine's own remedy-bearing message states.
-- The same switches are honoured from the environment (`ZIPNATIVE_JSON`, `ZIPNATIVE_DRY_RUN`, `ZIPNATIVE_QUIET`, `ZIPNATIVE_STRICT`, `ZIPNATIVE_PURE_CODECS`), so a manifest task inherits the mode of its `batch` invocation; there is no environment variable that loosens a check.
+- The same switches are honoured from the environment (`ZIPNATIVE_JSON`, `ZIPNATIVE_DRY_RUN`, `ZIPNATIVE_QUIET`, `ZIPNATIVE_STRICT`, `ZIPNATIVE_PURE_CODECS`, `ZIPNATIVE_PROGRESS`), so a manifest task inherits the mode of its `batch` invocation; there is no environment variable that loosens a check.
+- `--timeout <duration>` only bounds a run: past the deadline the engine (zipnative 1.1 `signal`) and the CLI's own byte loops stop at the next chunk or entry boundary with `E_LIMIT` (`detail.limit: "timeout"`) and the file being written is removed. `--progress` writes snapshots to stderr only.
 
 ### Extraction sink
 
 The engine's `extractZip` / `extractZipStream` yield `{ path, entry, data | stream() }` with `path` already run through `sanitizeEntryPath()` and the hostile shapes already refused (`rejectTraversal`, `rejectSymlinks`, `onDuplicate: 'error'`, the limits). `extract` and `stream --output-dir` share **one sink** (`src/utils/sink.ts`), hardened in two phases:
 
 1. **Plan (lexical)** — the extraction generator is drained **without decompressing anything**. For every entry the CLI recomputes the destination with `safeJoin(root, path)` (`src/utils/io.ts`), which resolves the absolute target and proves it stays inside the resolved `--output-dir` (a relative-path escape, an absolute result or a `..` segment throws `E_SECURITY`). Existing files are refused unless `--overwrite` (`E_IO`). On case-insensitive filesystems (win32, darwin) two entries whose targets fold to the same path are refused (`ZIP_EXTRACT_DUPLICATE_PATH`) unless `--on-duplicate first|last` resolves it deliberately. Directory entries go through `sanitizeEntryPath()` + `safeJoin` too.
-2. **Write (physical)** — before `mkdir -p` of a target's parent, the nearest **existing** ancestor is `realpath`'d and must lie under the root's `realpath`; after the directory is created it is re-checked the same way. A symbolic link or junction planted inside the destination that points outside is refused with `E_SECURITY` ("Refusing to write through a link that leaves the output directory…") and nothing is created beyond the link. Every file is then opened **exclusively** (`wx`) unless `--overwrite`, so a file that appears between the plan and the write is refused like any pre-existing one — there is no check-then-write window. Each entry streams into its file with backpressure; a CRC / size failure removes the partial file. `--preserve-mode` applies `mode & 0o777` to files only (never setuid, setgid or sticky; POSIX only).
+2. **Write (physical)** — before `mkdir -p` of a target's parent, the nearest **existing** ancestor is `realpath`'d and must lie under the root's `realpath`; after the directory is created it is re-checked the same way. A symbolic link or junction planted inside the destination that points outside is refused with `E_SECURITY` ("Refusing to write through a link that leaves the output directory…") and nothing is created beyond the link. Without `--overwrite` any existing path — a dangling symlink included (`lstat`, which also closes Windows' `CREATE_NEW`-follows-a-dangling-link hole) — is refused and every file is created **exclusively** (`wx`), so a file that appears between the plan and the write is refused like any pre-existing one — there is no check-then-write window. With `--overwrite` the entry is written to an exclusively created temp sibling and `rename()`d over the target, so a symlink planted **at** the target is replaced, never followed (1.0 opened it with `w`, which truncated and wrote through the link). Each entry streams in with backpressure; a CRC / size failure removes only the file the write created — a pre-existing target is never truncated or removed. `--preserve-mode` applies `mode & 0o777` to files only (never setuid, setgid or sticky; POSIX only).
 
 **Residual window.** The only gap left is between the `realpath` check and the exclusive `open`: an attacker who can replace a directory with a link *inside that interval* and who already has write access to the destination could redirect one file. The posture is therefore: **extract into an empty or trusted destination**; the CLI never extracts into a location it did not check, but it cannot lock a directory it does not own.
 
@@ -50,17 +98,18 @@ Opt-outs are **skip-not-write**: `--skip-unsafe` skips entries whose names canno
 
 ### Overwrite policy
 
-The policy is **uniform** across every writer, not only the sink: `create -o`, `modify -o`, `cat -o`, `inflate -o`, `extract`, `stream --output-dir` and `batch --task create` (directory mode) refuse an existing file with `E_IO` ("Refusing to overwrite existing file <path> (pass --overwrite)") and leave it intact; `--overwrite` replaces it. `modify --in-place` never writes into the original: it writes to an unpredictable, exclusively created temporary file (`<input>.tmp-<pid>-<12 hex>`) and renames atomically. Writing to stdout (`-` or no `-o`) is unaffected. Partial outputs are removed on failure, and a `SIGINT` / `SIGTERM` handler removes **only the file currently being written** (never a completed output, never the original of `--in-place`) before exiting 130 / 143.
+The policy is **uniform** across every writer, not only the sink: `create -o`, `modify -o`, `cat -o`, `inflate -o`, `extract`, `stream --output-dir` and `batch --task create` (directory mode) refuse an existing path — a dangling symlink included — with `E_IO` ("Refusing to overwrite existing file <path> (pass --overwrite)") and leave it intact; `--overwrite` writes an exclusive temp file next to the target and renames it into place (a planted symlink is replaced, not followed; a failed write leaves the original untouched). The write layer is the only code that removes a partial file, and only one it created: before 1.1.0 an engine error raised before the deferred exclusive open could make `cat` / `inflate` / `create` unlink a **pre-existing** output. `modify --in-place` never writes into the original: it writes to an unpredictable, exclusively created temporary file (`<input>.tmp-<pid>-<12 hex>`) and renames atomically. Writing to stdout (`-` or no `-o`) is unaffected. Partial outputs are removed on failure, and a `SIGINT` / `SIGTERM` handler removes **only the file currently being written** (never a completed output, never the original of `--in-place`) before exiting 130 / 143.
 
 ### Input Validation
 
 - **Argv paths are the user's own filesystem authority.** `zipnative list ../a.zip`, `-o ../out.zip` or `--output-dir ../x` are ordinary shell usage and are accepted; the CLI does not second-guess where the invoking user may read or write. `validatePath()` — the `..` refusal, `E_INPUT` "Path traversal detected" — applies to paths that arrive as **data**: the path flags of `batch --manifest` tasks and the `path` values of `create` / `modify` manifests. Entry **names** are a different matter (see below).
-- **`--max-input-size <size>`** (global; default **4 GiB**; `none` disables it with a one-shot warning) bounds every **buffered** read: stdin is byte-counted and the read aborted, files are `stat`'d before reading — `list`, `inspect`, `verify`, `extract`, `cat`, `modify`, `create --stdin-name`, `inflate --sync`, `govern verify-issue`. Exceeding it is `E_LIMIT` with `detail { limit: "maxInputSize", configured, observed }` (CWE-400). It is a CLI-owned bound, not a `ZipLimits` key; `doctor` reports it under `limits`. The streaming paths — `stream`, `crc32`, `inflate` (default), `create --stream` — are constant-memory and are not bounded by it. Random-access commands hold the whole archive in memory, so the bound is also the memory envelope.
-- JSON input size is capped at **50 MB** before `JSON.parse` — `create --from-manifest`, `modify --from-manifest`, `batch --manifest`, `govern verify-issue` drafts. Batch manifests are additionally bounded to **1 000 tasks**. `.zipnativerc.json` is capped at 1 MB.
+- **`--max-input-size <size>`** (global; default **4 GiB**; always finite) bounds every **buffered** read through **one descriptor**: stdin is byte-counted and the read aborted; a regular file is size-checked on its open descriptor and read to that size only (a file that grows after the check is never read past it; short reads loop); a pipe, FIFO or device (`<(curl …)`, `/dev/zero`) is byte-counted like stdin — 1.0 `stat`'d the path, saw size 0 for `/dev/zero` and read it whole — `list`, `inspect`, `verify`, `extract`, `cat`, `modify`, `create --stdin-name`, `inflate --sync`, `govern verify-issue`. Exceeding it is `E_LIMIT` with `detail { limit: "maxInputSize", configured, observed }` (CWE-400). It is a CLI-owned bound, not a `ZipLimits` key; `doctor` reports it under `limits`. The streaming paths — `stream`, `crc32`, `inflate` (default), `create --stream` — are constant-memory and are not bounded by it. Random-access commands hold the whole archive in memory, so the bound is also the memory envelope.
+- JSON input size is capped at **50 MB** before `JSON.parse` — `create --from-manifest`, `modify --from-manifest`, `batch --manifest`, `govern verify-issue` drafts. Batch manifests are additionally bounded to **1 000 tasks**. `.zipnativerc.json` is capped at 1 MiB (checked on the open descriptor).
 - **Manifest values** — `batch --manifest` is validated strictly before anything executes: structural violations exit 2 / `E_USAGE`, value violations (bad or duplicate id, non-whitelisted command, forward or unknown `@ref`) exit 1 / `E_INPUT`; only 10 archive commands may appear (never `batch`, `govern`, `schema`, `completion`, `doctor`); a `codec` flag is refused unless the `batch` invocation itself carries `--allow-codec-load`. A manifest has the filesystem access of the user who invokes `batch` — the same trust level as flags typed on the command line, no more.
-- **`--max-*` semantics** — the eight flags map one-to-one onto the engine's `ZipLimits` and are pre-validated (`E_USAGE` on malformed or zero values), so an invalid limits object can never reach the engine. `none` disables a bound (`Infinity`) and prints a one-shot warning; the defaults are always on when no flag is given. `inflate` derives its mandatory `--max-output` default from the effective `--max-entry-size`. The bounds also apply on the write side (`create` / `modify`).
+- **`--max-*` semantics** — the eight flags map one-to-one onto the engine's `ZipLimits` and are pre-validated (`E_USAGE` on malformed or zero values), so an invalid limits object can never reach the engine. **Every bound is finite**: the 1.0 `none` / `inf` form (`Infinity`) is refused since 1.1.0 with a remedy naming an explicit value ([ADR 0002](docs/adr/0002-every-bound-is-finite.md)), and no bound can come from a config file; the defaults are always on when no flag is given. zipnative 1.1's ninth bound, `maxEntryCompressedSize` (CWE-770), is consulted only by the byte-range reader, which no 1.1.0 command uses: `doctor` / `schema limits` report its default and it has no flag. `inflate` derives its mandatory `--max-output` default from the effective `--max-entry-size`. The bounds also apply on the write side (`create` / `modify`).
 - Every entry name the CLI **writes** (`create` inputs, `--stdin-name`, manifests, `modify --add` / `--rename` / `--add-dir`) is pre-checked with the engine's `sanitizeEntryPath()`: a name that could not be extracted safely is refused at creation time (`E_INPUT`, with `entryName`). Malformed flags stay `E_USAGE`; unsafe **data** is `E_INPUT`.
-- Dates are data too: `--date <ISO>` and manifest `date` values are read as **UTC wall-clock**, so the stored DOS fields — and the archive bytes — do not depend on the host time zone.
+- Dates are data too: `--date <ISO>` and manifest `date` values are read as **UTC wall-clock**, so the stored DOS fields — and the archive bytes — do not depend on the host time zone. A date outside 1980–2107 is clamped by the engine and reported (`ZIP_TIMESTAMP_CLAMPED`, zipnative 1.1), an error under `--strict`.
+- `--name-encoding <label>` hands the engine a `TextDecoder` (the runtime's own, no table shipped) for names without the UTF-8 flag; the engine decodes **before** `sanitizeEntryPath()`, so a decoded name passes exactly the same guards (zipnative 1.1, CWE-22).
 - `list` / `inspect` JSON output is derived from the engine's typed entry objects; raw payload bytes are never emitted except by `cat` / `stream --cat` / `inflate`, whose purpose is exactly that. Raw name and comment bytes are exposed only as hex (`rawNameHex`, `commentHex` under `--long`; `archive.commentHex`) and extra-field payloads only as hex under `inspect --extra`.
 
 ### The engine's guards
@@ -88,11 +137,15 @@ The rows the CLI adds because it owns the process and the filesystem (the knowle
 
 | Threat | Defence | Status / residual |
 |---|---|---|
-| Unbounded stdin / file buffering (memory exhaustion) | `--max-input-size` (4 GiB default) on every buffered read; streaming commands are constant-memory | `none` disables it with a visible warning |
+| Unbounded stdin / file / device buffering (memory exhaustion) | `--max-input-size` (4 GiB default) on every buffered read, through one descriptor (devices and pipes byte-counted); streaming commands are constant-memory | always finite (1.1.0) |
+| Hostile `.zipnativerc.json` in a cloned repository | presentation-only keys; every other key `E_USAGE` naming the file; the applying file named on stderr and in the envelope | `--no-config` for unattended runs |
+| A typo or a misplaced flag silently ignored | unknown / repeated / surplus flags and operands `E_USAGE` before any input is read (argv and every manifest task) | none |
+| Terminal escape / bidi injection through entry names | text output escaped (`escapeTerminal`); JSON exact; `rawNameHex` | none |
+| A symlink planted at an output path | `lstat` refusal without `--overwrite`; temp + `rename()` with it (replaced, never followed) | none |
 | Symlink / junction planted inside `--output-dir` | `realpath` anchor of the nearest existing ancestor before `mkdir`, re-check after; refused with `E_SECURITY` | the realpath → open window: use an empty or trusted destination |
 | File appearing between plan and write | exclusive `wx` open unless `--overwrite`; `E_IO` refusal | none |
-| Partial output under its final name (failure or interrupt) | removed on failure; `SIGINT` / `SIGTERM` remove the in-flight file only, exit 130 / 143 | signals are POSIX-only in practice |
-| `modify` laundering a hostile record into a canonical-looking archive | eager open + `verifyEntry()` on every re-emitted entry before the save (see below) | encrypted / stream-only-codec entries are copied as-is and counted |
+| Partial output under its final name (failure or interrupt) | the write layer removes only the file it created (a pre-existing target is never removed); `SIGINT` / `SIGTERM` remove the in-flight file only, exit 130 / 143 | signals are POSIX-only in practice |
+| `modify` laundering a hostile record into a canonical-looking archive | eager open + `verifyEntry()` on every re-emitted entry before the save (see below) | encrypted / stream-only-codec content cannot be checked: their local header is, and they are counted |
 | A `--codec` module shaping the writer silently | override announced (`warning:` line, `tier`); `create --parallel` refuses such a module | see Code Safety |
 
 ### Data remanence (`modify`)
@@ -101,11 +154,11 @@ The default `modify` save is the engine's append-only `save()`: the original byt
 
 ### `modify` verifies what it re-emits
 
-Because both save modes copy untouched records verbatim, `modify` must not launder a hostile archive into a clean-looking one. It opens the archive **eagerly** (overlaps and the central-directory ↔ local-header structure are checked before any edit) and, before `save()` / `saveCompact()`, calls `reader.verifyEntry()` on **every entry that will be re-emitted** (every entry not removed or replaced; renamed entries are verified under their original record): CRC-32, sizes and the local header against the central directory — one decompress pass, never a recompress. A lying record is refused with the entry named: `E_SECURITY` `ZIP_CD_LFH_MISMATCH`, `E_DATA` `ZIP_CRC_MISMATCH` or `ZIP_SIZE_MISMATCH`. Encrypted entries and entries whose registered codec has no `decompressSync` cannot be verified: they are copied as-is and counted in `verifySkipped`; an entry with an unregistered method is refused (`E_UNSUPPORTED`, load `--codec`). The check runs under `--dry-run` too and has **no opt-out** — an opt-out would write unverified bytes. The envelope reports `verified`, `verifySkipped`, `tier`, `changed` and `layout: append-only | compact`.
+Because both save modes copy untouched records verbatim, `modify` must not launder a hostile archive into a clean-looking one. It opens the archive **eagerly** (overlaps and the central-directory ↔ local-header structure are checked before any edit) and, before `save()` / `saveCompact()`, calls `reader.verifyEntry()` on **every entry that will be re-emitted** (every entry not removed or replaced; renamed entries are verified under their original record): CRC-32, sizes and the local header against the central directory — one decompress pass, never a recompress. A lying record is refused with the entry named: `E_SECURITY` `ZIP_CD_LFH_MISMATCH`, `E_DATA` `ZIP_CRC_MISMATCH` or `ZIP_SIZE_MISMATCH`. Encrypted entries and entries whose registered codec has no `decompressSync` cannot have their content verified: since zipnative 1.1 their **local header is still cross-checked** (a mismatch is refused like any other, `ZIP_CD_LFH_MISMATCH`) and they are counted in `verifySkipped`; an entry with an unregistered method is refused (`E_UNSUPPORTED` / `ZIP_UNSUPPORTED_METHOD`, load `--codec`). The check runs under `--dry-run` too and has **no opt-out** — an opt-out would write unverified bytes. The envelope reports `verified`, `verifySkipped`, `tier`, `changed` and `layout: append-only | compact`.
 
 ### Forward reader trust caveat (`stream`)
 
-`stream` reads local headers **alone** through `iterateZipEntries` — there is no central directory to cross-check names, sizes, methods or attributes, so a hostile archive can present different content there than `list` / `extract` authoritatively report. Consequently `--preserve-mode`, `--allow-symlinks` and `--skip-symlinks` are refused in forward mode (`E_USAGE`), every JSON output carries `trust: "local-headers-only"`, a `warning:` line is printed at start, and every name written to disk goes through `sanitizeEntryPath()` + `safeJoin`. All size limits are enforced by output counting and CRCs are verified. Entries written with data descriptors carry zero sizes in their local header, so `--summary` reports `descriptorEntries` and `bytesKnown: false` rather than pretending. Custom-method entries can be listed and skipped but not decoded in forward mode (the engine's pump knows store and deflate): `--cat` / `--output-dir` on such an entry fail with `E_DATA` `ZIP_DECOMPRESSION_FAILED`, which `--skip-unsupported` does not cover — use `cat` / `extract --codec` on the complete file. Use `stream` only for input you cannot seek; prefer `list` / `extract` on a complete file.
+`stream` reads local headers **alone** through `iterateZipEntries` — there is no central directory to cross-check names, sizes, methods or attributes, so a hostile archive can present different content there than `list` / `extract` authoritatively report. Consequently `--preserve-mode`, `--allow-symlinks` and `--skip-symlinks` are refused in forward mode (`E_USAGE`), every JSON output carries `trust: "local-headers-only"`, a `warning:` line is printed at start, and every name written to disk goes through `sanitizeEntryPath()` + `safeJoin`. All size limits are enforced by output counting and CRCs are verified. Entries written with data descriptors carry zero sizes in their local header, so `--summary` reports `descriptorEntries` and `bytesKnown: false` rather than pretending. A custom-method entry is decoded in forward mode only when its `--codec` exposes `createDecompressor()` (zipnative 1.1); otherwise the engine refuses it **before the first byte** (`E_UNSUPPORTED` `ZIP_UNSUPPORTED_CODEC_MODE`), which `--skip-unsupported` skips — `cat` / `extract --codec` read it from the complete file. Use `stream` only for input you cannot seek; prefer `list` / `extract` on a complete file.
 
 ### Code Safety
 
@@ -117,7 +170,7 @@ Because both save modes copy untouched records verbatim, `modify` must not laund
 
 ### Not supported by policy
 
-- **Encryption, read or write.** ZipCrypto is cryptographically broken; the engine will never write it and does not read it in 1.x. Encrypted entries are detected (`isEncrypted`), listed, counted by `inspect`, reported as `skipped` by `verify` (and by `verify --entry`), skippable with `extract --skip-unsupported` / `stream --skip-unsupported`, copied unverified by `modify` (counted in `verifySkipped`), and refused on read with `ZIP_UNSUPPORTED_ENCRYPTION`. There is no password flag.
+- **Encryption, read or write.** ZipCrypto is cryptographically broken; the engine will never write it and does not read it in 1.x. Encrypted entries are detected (`isEncrypted`; since zipnative 1.1 the scheme is named — `detail.feature` `zipcrypto`, `aes` or `strong-encryption`), listed, counted by `inspect`, reported as `skipped: "encrypted"` by `verify` (passing only when their local header agrees), skippable with `extract --skip-unsupported` / `stream --skip-unsupported`, copied with their header checked by `modify` (counted in `verifySkipped`), and refused on read with `ZIP_UNSUPPORTED_ENCRYPTION`. There is no password flag.
 - **Multi-disk / spanned archives** — refused (`ZIP_UNSUPPORTED_MULTI_DISK`).
 - **Archive repair / salvage** — structural problems are reported (`verify`, `inspect`), never guessed at.
 - **Other archive formats** — none.

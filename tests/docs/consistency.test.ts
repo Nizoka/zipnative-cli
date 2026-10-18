@@ -419,3 +419,24 @@ describe('release metadata', () => {
         }
     });
 });
+
+describe('docs/adr — numbered without gaps, front matter, index (since 1.1.0)', () => {
+    const dirEntries = readdirSync(join(ROOT, 'docs', 'adr')).filter((f) => /^\d{4}-[a-z0-9-]+\.md$/.test(f)).sort();
+    const index = read('docs/adr/README.md');
+
+    it('numbers the records 0001..N without gaps', () => {
+        expect(dirEntries.length).toBeGreaterThan(0);
+        dirEntries.forEach((f, i) => expect(f.slice(0, 4), f).toBe(String(i + 1).padStart(4, '0')));
+    });
+
+    it('every record opens with status / date / since and the index lists it with the same status', () => {
+        for (const f of dirEntries) {
+            const text = read(`docs/adr/${f}`);
+            const fm = /^---\nstatus: (proposed|accepted|superseded|deprecated)\ndate: (\d{4}-\d{2}-\d{2})\nsince: (\d+\.\d+\.\d+)\n---\n\n# .+/.exec(text);
+            expect(fm, `${f} front matter`).not.toBeNull();
+            const row = index.split('\n').find((l) => l.includes(`](${f})`));
+            expect(row, `README lacks ${f}`).toBeDefined();
+            expect(row, `${f} status`).toContain(`| ${(fm as RegExpExecArray)[1] as string} |`);
+        }
+    });
+});

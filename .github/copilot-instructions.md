@@ -78,10 +78,10 @@ src/
 │   │                  #   of the nearest existing ancestor before mkdir (+ re-check) → exclusive open → unlink on failure
 │   ├── inflight.ts    # In-flight output registry; SIGINT/SIGTERM remove exactly those files, exit 130/143
 │   ├── projection.ts  # Agent output projection (compact JSON, --summary, --fields dot-paths)
-│   ├── config.ts      # `.zipnativerc.json` discovery + flag-default merge; refuses the `codec` key
+│   ├── config.ts      # `.zipnativerc.json` discovery + PRESENTATION-ONLY defaults (CONFIG_KEYS; every other key E_USAGE)
 │   ├── version.ts     # CLI + engine version resolution (source layout and bundled dist/)
 │   ├── colors.ts      # ANSI helper decided on stderr: NO_COLOR off, FORCE_COLOR on, TERM=dumb off, else TTY
-│   ├── sizes.ts       # `<size>` (512k, 1GiB, none) and count parsing
+│   ├── sizes.ts       # `<size>` (512k, 1GiB) and count parsing — always finite (`none` refused since 1.1.0)
 │   ├── limits.ts      # Eight --max-* flags → Partial<ZipLimits> (ZIP_LIMIT_INVALID unreachable) + --max-input-size
 │   ├── diagnostics.ts # Core diagnostic sink: text warning lines | collected into the --json envelope
 │   ├── engine.ts      # prepareEngine(): --codec modules (argv only) + node:zlib tier unless --pure-codecs
@@ -111,7 +111,10 @@ src/
   `ZIPNATIVE_STRICT=1`, `--pure-codecs` → `ZIPNATIVE_PURE_CODECS=1`, `--no-color` → `NO_COLOR=1`.
   The variables are also honoured when the caller sets them (an env-driven `--dry-run` prints
   no text plan under `ZIPNATIVE_JSON`).
-- `.zipnativerc.json` defaults are merged unless `--no-config`; explicit flags always win.
+- `.zipnativerc.json` defaults are merged unless `--no-config`; explicit flags always win. The
+  file is presentation only (`CONFIG_KEYS` in `utils/config.ts`, docs/adr/0001): never add an
+  operational key to that list — an input, an output, an opt-out, a bound or `codec` in a config
+  file must stay `E_USAGE`.
 - Commands are lazy-imported so `--help` / `--version` stay fast.
 - `main()` installs the process handlers once: `EPIPE` on stdout/stderr → exit 0 quietly;
   `SIGINT` / `SIGTERM` → remove the in-flight output files (`utils/inflight.ts`), exit 130 / 143.
@@ -125,15 +128,21 @@ src/
 
 - `parseArgs(argv: string[], { booleans }): ParsedArgs` — `booleans` is the flag table from
   `utils/flags.ts` (`BOOLEAN_FLAGS`, re-exported by `completion.ts`).
-- `ParsedArgs = { flags: Record<string, string | boolean | readonly string[]>; positionals: string[] }`
-- Supports: `--flag value`, `--flag=value`, `-f value`, `--flag` (boolean true); a flag
-  given twice becomes an array (`getStringFlagAll`).
+- `ParsedArgs = { flags: Readonly<Record<string, string | boolean | readonly string[]>>; positionals: string[] }`
+  (the record has no prototype).
+- Supports: `--flag value`, `--flag=value`, `-f value`, `--flag` (boolean true); a value flag
+  given twice becomes an array (`getStringFlagAll`); a switch given twice, a flag both bare and
+  with a value, and `__proto__` / `constructor` / `prototype` are refused. Aliases are
+  canonicalised to their long name (`FLAG_ALIASES`) — read `'input'`, never `'i'`.
 - A boolean flag NEVER consumes the next token, so flags and positionals are order-independent
   (`--json list a.zip`, `list --long a.zip`); `--flag=false|0|no|off` is the explicit off form.
   A token matching `-<digit>` is always a value. Combined short flags (`-lq`) are refused
   with exit 2. Value short aliases: `-i -o -d -e -f`; boolean: `-q -h -V` (no `-l`).
 - `--` terminates flag parsing; all following tokens go into `positionals`.
-- Never throws on unknown flags — they are collected as-is.
+- The dispatcher runs `assertInvocation()` (`src/commands/completion.ts`) before every command
+  and every batch task: undeclared flags, repeated single-value flags and surplus operands are
+  `E_USAGE`. A new flag must be declared in `COMMANDS` (and `REPEATABLE_FLAGS` /
+  `OPERANDS` when relevant) or it is refused.
 
 ## Command Conventions (`src/commands/`)
 
@@ -194,8 +203,13 @@ src/
   `create --stream`) must never be routed through it.
 - Input JSON (manifests, drafts) is capped at 50 MB before `JSON.parse`; a `batch` manifest
   is capped at 1000 tasks; a captured task stdout (`batch --json`) at 64 MiB.
-- `--max-*` values are pre-validated so `ZIP_LIMIT_INVALID` is unreachable; `none` disables a
-  bound with a visible warning.
+- `--max-*` values are pre-validated so `ZIP_LIMIT_INVALID` is unreachable; every bound is a
+  positive, finite integer (`none` is refused since 1.1.0, docs/adr/0002).
+- Text output that may quote archive bytes goes through `escapeTerminal()`
+  (`utils/sanitize.ts`); JSON stays exact. Never write a raw control or bidi character in a
+  source file — `tests/docs/source-hygiene.test.ts` fails on it; use escapes.
+- Writes go through `writeOutput` / `writeFileStream` (lstat + `wx`, or temp + `rename()` under
+  `--overwrite`); a command never unlinks an output path itself.
 - `stream` parses local headers only: mode / symlink policy flags are refused with `E_USAGE`,
   and every JSON output carries `trust: "local-headers-only"`.
 - `inflate` always runs under a mandatory output bound (`--max-output`, default the

@@ -16,6 +16,7 @@
 // command modules.
 
 import { dirname, isAbsolute, resolve } from 'node:path';
+import { FLAG_ALIASES } from './args.js';
 import { CliError, ErrorCode } from './error.js';
 import { validatePath } from './io.js';
 
@@ -129,15 +130,25 @@ function resolveFlags(
     manifestDir: string,
     priorOutputs: ReadonlyMap<string, string | undefined>,
 ): { flags: Record<string, string | boolean | readonly string[]>; dependsOn: readonly string[] } {
-    const flags: Record<string, string | boolean | readonly string[]> = {};
+    // No prototype: a "__proto__" key from JSON.parse must stay a refused
+    // name, never reach Object.prototype through the record.
+    const flags = Object.create(null) as Record<string, string | boolean | readonly string[]>;
     const dependsOn = new Set<string>();
 
-    for (const [key, value] of Object.entries(rawFlags)) {
-        if (key.length === 0 || key.startsWith('-') || /[\s=]/.test(key)) {
+    for (const [raw, value] of Object.entries(rawFlags)) {
+        if (raw.length === 0 || raw.startsWith('-') || /[\s=]/.test(raw)) {
             throw usageError(
-                `Task "${taskId}": invalid flag name "${key}" (use the bare flag name, `
+                `Task "${taskId}": invalid flag name "${raw}" (use the bare flag name, `
                 + 'without leading dashes, whitespace or "=").',
             );
+        }
+        if (raw === '__proto__' || raw === 'constructor' || raw === 'prototype') {
+            throw usageError(`Task "${taskId}": invalid flag name "${raw}".`);
+        }
+        // One name per flag, as on argv: { "o": … } is { "output": … }.
+        const key = FLAG_ALIASES[raw] ?? raw;
+        if (key !== raw && rawFlags[key] !== undefined) {
+            throw usageError(`Task "${taskId}": "${raw}" and "${key}" are the same flag; give it once.`);
         }
         if (typeof value === 'boolean') {
             // true → bare `--key`; false → the flag is simply omitted, matching
@@ -250,9 +261,9 @@ export function parseManifest(raw: string, manifestDir: string): ManifestPlan {
 
         const { flags, dependsOn } = resolveFlags(id, flagsRaw, manifestDir, priorOutputs);
 
-        const outputValue = flags['output'] ?? flags['o'];
+        const outputValue = flags['output'];
         const output = typeof outputValue === 'string' && outputValue !== '-' ? outputValue : undefined;
-        const outputDirValue = flags['output-dir'] ?? flags['d'];
+        const outputDirValue = flags['output-dir'];
         const outputDir = typeof outputDirValue === 'string'
             ? outputDirValue
             : (output !== undefined ? dirname(output) : undefined);

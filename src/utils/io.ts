@@ -1,8 +1,10 @@
+import { randomBytes } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { open, readFile, rm, stat, type FileHandle } from 'node:fs/promises';
-import { isAbsolute, relative, resolve as resolvePath, sep } from 'node:path';
+import { lstat, open, rename, rm, type FileHandle } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from 'node:path';
 import type { Readable } from 'node:stream';
 import { streamIsTty } from './colors.js';
+import { checkAborted } from './control.js';
 import { CliError, ErrorCode } from './error.js';
 import { clearInFlight, markInFlight } from './inflight.js';
 
@@ -58,7 +60,7 @@ function inputTooLarge(observed: number, configured: number, what: string): CliE
  * Read all bytes from stdin, bounded.
  *
  * @param explicit true when the caller wrote `-` (skip the TTY guard)
- * @param maxBytes bound (E_LIMIT above it; `Infinity` disables)
+ * @param maxBytes bound (E_LIMIT above it; always finite since 1.1.0)
  */
 export function readStdin(explicit = false, maxBytes: number = DEFAULT_MAX_INPUT_SIZE): Promise<Buffer> {
     if (!explicit) assertStdinNotTty();
@@ -81,20 +83,62 @@ export function readStdin(explicit = false, maxBytes: number = DEFAULT_MAX_INPUT
     });
 }
 
+/** Chunk size for a byte-counted read of a pipe or device. */
+const STREAM_READ_CHUNK = 64 * 1024;
+
 /**
  * Read a file by path, or fall back to stdin if `filePath` is undefined
- * (or is the conventional `-`). Bounded by `maxBytes` (file size checked
- * before reading).
+ * (or is the conventional `-`). Bounded by `maxBytes` through ONE
+ * descriptor, with no check-then-read window (pkinative-cli audit A-13,
+ * ported):
+ *
+ *   • a regular file — its size is checked on the open descriptor and the
+ *     read is capped at that size (a file that grows after the check is
+ *     read to the checked size only), looping over short reads (one read
+ *     call may return less than asked — Linux caps a call just under 2 GiB);
+ *   • a pipe, FIFO, character device or socket (`<(curl …)`, /dev/stdin,
+ *     /dev/zero) — read from the same descriptor and BYTE-COUNTED like
+ *     stdin: past the bound the read stops with E_LIMIT, so `/dev/zero` can
+ *     never exhaust memory (1.0 `stat()`ed such a path, saw size 0 and read
+ *     it whole);
+ *   • a directory — E_IO.
  */
 export async function readFileOrStdin(filePath: string | undefined, maxBytes: number = DEFAULT_MAX_INPUT_SIZE): Promise<Buffer> {
     if (filePath === undefined || filePath === '-') {
         return readStdin(filePath === '-', maxBytes);
     }
-    if (Number.isFinite(maxBytes)) {
-        const st = await stat(filePath);
-        if (st.size > maxBytes) throw inputTooLarge(st.size, maxBytes, `"${filePath}"`);
+    const handle = await open(filePath, 'r');
+    try {
+        const st = await handle.stat();
+        if (st.isDirectory()) {
+            throw new CliError(`Cannot read "${filePath}": it is a directory.`, 1, ErrorCode.IO);
+        }
+        if (st.isFile()) {
+            if (st.size > maxBytes) throw inputTooLarge(st.size, maxBytes, `"${filePath}"`);
+            const buf = Buffer.allocUnsafe(st.size);
+            let total = 0;
+            while (total < st.size) {
+                const { bytesRead } = await handle.read(buf, total, st.size - total, total);
+                if (bytesRead === 0) break; // truncated after the check: read what is there
+                total += bytesRead;
+            }
+            return buf.subarray(0, total);
+        }
+        // Not a regular file: no trustworthy size — count every byte.
+        const chunks: Buffer[] = [];
+        let total = 0;
+        for (;;) {
+            const chunk = Buffer.allocUnsafe(STREAM_READ_CHUNK);
+            const { bytesRead } = await handle.read(chunk, 0, STREAM_READ_CHUNK, null);
+            if (bytesRead === 0) break;
+            total += bytesRead;
+            if (total > maxBytes) throw inputTooLarge(total, maxBytes, `"${filePath}"`);
+            chunks.push(chunk.subarray(0, bytesRead));
+        }
+        return Buffer.concat(chunks, total);
+    } finally {
+        await handle.close();
     }
-    return readFile(filePath);
 }
 
 /**
@@ -158,9 +202,20 @@ export function assertJsonSizeLimit(buf: Uint8Array): void {
 
 export interface WriteOptions {
     /**
-     * Open the file exclusively (`wx`): an existing file is refused with E_IO
-     * ("pass --overwrite"), and a file that appears between the caller's
-     * check and the open is refused too (no TOCTOU window).
+     * true (no `--overwrite`): refuse an existing path — a regular file, a
+     * directory, or a symlink (dangling ones included) — with E_IO ("pass
+     * --overwrite"), then create the file exclusively (`wx`), so a file that
+     * appears between the check and the open is refused too.
+     *
+     * false (`--overwrite`): write an exclusively created temp file in the
+     * same directory, then `rename()` it over the target in one step — a
+     * reader never sees a half-written file, a symlink AT the target is
+     * replaced instead of followed (1.0 opened the target with `w`, which
+     * truncated and wrote through a planted link), and a failed write
+     * leaves the original untouched.
+     *
+     * Either way a failed write removes only what THIS write created; the
+     * callers never unlink the target themselves.
      */
     readonly exclusive?: boolean;
 }
@@ -179,31 +234,71 @@ function isEexist(err: unknown): boolean {
     return err instanceof Error && (err as NodeJS.ErrnoException).code === 'EEXIST';
 }
 
+/** True when ANYTHING exists at `path`, a dangling symlink included (lstat, not stat). */
+export async function lexists(filePath: string): Promise<boolean> {
+    try {
+        await lstat(filePath);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+/** An unpredictable sibling path for a temp file (same directory → same filesystem for rename()). */
+export function tempPathFor(filePath: string): string {
+    return join(dirname(filePath), `.${basename(filePath)}.${randomBytes(6).toString('hex')}.tmp`);
+}
+
+/**
+ * Create `filePath` exclusively and write `data`; on failure the file we
+ * created is removed. O_EXCL refuses an existing path (dangling symlinks
+ * included) on POSIX; Windows' CREATE_NEW follows a dangling symlink and
+ * creates its target, so lstat closes that hole first (pkinative-cli,
+ * ported). Signal cleanup is registered only once the open succeeded: an
+ * EEXIST refusal never removes the existing file.
+ */
+async function writeExclusive(filePath: string, data: Uint8Array, shown: string): Promise<void> {
+    if (await lexists(filePath)) throw overwriteRefused(shown);
+    let handle: FileHandle;
+    try {
+        handle = await open(filePath, 'wx');
+    } catch (e) {
+        if (isEexist(e)) throw overwriteRefused(shown);
+        throw e;
+    }
+    markInFlight(filePath);
+    try {
+        await handle.writeFile(data);
+        await handle.close();
+    } catch (e) {
+        await handle.close().catch(() => undefined);
+        await unlinkQuiet(filePath);
+        throw e;
+    } finally {
+        clearInFlight(filePath);
+    }
+}
+
 /**
  * Write binary data to a file path, or to stdout if `filePath` is undefined
- * (or `-`).
+ * (or `-`). See {@link WriteOptions} for the exclusive / overwrite contract.
  */
 export async function writeOutput(data: Uint8Array, filePath: string | undefined, options: WriteOptions = {}): Promise<void> {
     if (filePath === undefined || filePath === '-') {
         await writeStdout(data);
         return;
     }
-    // Open first, register for signal cleanup only once the open succeeded:
-    // an EEXIST refusal must never remove the existing file, while a file WE
-    // created is removed if SIGINT/SIGTERM lands mid-write.
-    let handle: FileHandle;
-    try {
-        handle = await open(filePath, options.exclusive === true ? 'wx' : 'w');
-    } catch (e) {
-        if (isEexist(e)) throw overwriteRefused(filePath);
-        throw e;
+    if (options.exclusive === true) {
+        await writeExclusive(filePath, data, filePath);
+        return;
     }
-    markInFlight(filePath);
+    const tmp = tempPathFor(filePath);
+    await writeExclusive(tmp, data, filePath);
     try {
-        await handle.writeFile(data);
-    } finally {
-        await handle.close();
-        clearInFlight(filePath);
+        await rename(tmp, filePath);
+    } catch (e) {
+        await unlinkQuiet(tmp);
+        throw e;
     }
 }
 
@@ -231,8 +326,10 @@ export async function writeStreamingOutput(
 /**
  * Stream chunks into a file (parents are NOT created — callers decide).
  * Backpressure-aware: waits for `drain` when the kernel buffer is full.
- * With `exclusive`, the file is opened `wx` and EEXIST becomes the uniform
- * overwrite refusal.
+ * See {@link WriteOptions}: exclusive → lstat refusal + `wx`; overwrite →
+ * an exclusive temp sibling renamed over the target once complete. A failed
+ * write removes only the file THIS call created; an existing target is never
+ * truncated, followed or removed.
  */
 export async function writeFileStream(
     filePath: string,
@@ -240,29 +337,59 @@ export async function writeFileStream(
     onChunk?: (bytes: number) => void,
     options: WriteOptions = {},
 ): Promise<void> {
-    const stream = createWriteStream(filePath, { flags: options.exclusive === true ? 'wx' : 'w' });
+    if (options.exclusive === true) {
+        if (await lexists(filePath)) throw overwriteRefused(filePath);
+        await streamIntoNewFile(filePath, filePath, chunks, onChunk);
+        return;
+    }
+    const tmp = tempPathFor(filePath);
+    await streamIntoNewFile(tmp, filePath, chunks, onChunk);
+    try {
+        await rename(tmp, filePath);
+    } catch (e) {
+        await unlinkQuiet(tmp);
+        throw e;
+    }
+}
+
+/** Stream into a file created exclusively (`wx`); on failure remove it if we created it. */
+async function streamIntoNewFile(
+    filePath: string,
+    shown: string,
+    chunks: AsyncIterable<Uint8Array>,
+    onChunk?: (bytes: number) => void,
+): Promise<void> {
+    const stream = createWriteStream(filePath, { flags: 'wx' });
+    let opened = false;
     // Settle only on 'close': the file descriptor is opened asynchronously, so
     // rejecting on the first pull failure (before 'open') would let the caller
     // unlink the path and then have the deferred open() recreate an empty file.
     let failure: unknown;
     await new Promise<void>((resolve, reject) => {
-        // Only a file WE created is ours to remove on SIGINT/SIGTERM: register
-        // it once the open succeeded (an EEXIST refusal never gets here).
-        stream.on('open', () => markInFlight(filePath));
+        // Only a file WE created is ours to remove (on SIGINT/SIGTERM, and on
+        // failure below): register it once the open succeeded — an EEXIST
+        // refusal never gets here.
+        stream.on('open', () => { opened = true; markInFlight(filePath); });
         stream.on('error', (e: unknown) => { failure ??= e; });
         stream.on('close', () => {
             clearInFlight(filePath);
-            if (failure !== undefined) {
-                reject(isEexist(failure) ? overwriteRefused(filePath) : failure instanceof Error ? failure : new Error('Write failed', { cause: failure }));
-            } else {
+            if (failure === undefined) {
                 resolve();
+                return;
             }
+            const err = isEexist(failure) ? overwriteRefused(shown) : failure instanceof Error ? failure : new Error('Write failed', { cause: failure });
+            if (!opened) {
+                reject(err);
+                return;
+            }
+            unlinkQuiet(filePath).then(() => { reject(err); }, () => { reject(err); });
         });
         (async () => {
             for await (const chunk of chunks) {
                 // The open is deferred: stop pulling as soon as it failed
                 // (EEXIST under `wx`) instead of decompressing into the void.
                 if (failure !== undefined || stream.destroyed) break;
+                checkAborted();
                 onChunk?.(chunk.length);
                 const ok = stream.write(chunk);
                 if (!ok) {
@@ -277,14 +404,12 @@ export async function writeFileStream(
     });
 }
 
-/** True when a path exists (any type). */
+/**
+ * True when a path exists (any type, a dangling symlink included: lstat).
+ * Used for the overwrite pre-checks, which must see a planted link.
+ */
 export async function pathExists(filePath: string): Promise<boolean> {
-    try {
-        await stat(filePath);
-        return true;
-    } catch {
-        return false;
-    }
+    return lexists(filePath);
 }
 
 /** Best-effort removal of a partially written file; never throws. */
@@ -348,6 +473,8 @@ export async function readJsonInput(filePath: string, what: string): Promise<unk
  */
 export async function* readableToByteSource(stream: Readable): AsyncGenerator<Uint8Array, void, undefined> {
     for await (const chunk of stream) {
+        // The --timeout deadline also bounds the CLI's own input loop.
+        checkAborted();
         yield typeof chunk === 'string' ? new TextEncoder().encode(chunk) : (chunk as Uint8Array);
     }
 }

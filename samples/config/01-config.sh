@@ -1,19 +1,26 @@
 #!/usr/bin/env bash
-# config/01-config.sh — .zipnativerc.json default flags (--config / --no-config)
+# config/01-config.sh — .zipnativerc.json: presentation defaults only
 #
-# A config file supplies DEFAULT flag values; an explicit CLI flag always
-# wins. Top-level keys apply to every command, a key named after a command
-# scopes its object to that command. Discovery walks up from the current
-# directory; --config <file> names one explicitly and --no-config ignores
-# them all. `codec` is refused from config files (it executes user code).
+# A config file supplies DEFAULT values for PRESENTATION flags only — format,
+# fields, json, pretty, quiet, no-color, progress, strict, long, summary — and
+# an explicit CLI flag always wins. Top-level keys apply to every command, a
+# key named after a command scopes its object to that command, and a key
+# applies only where the command declares the flag. Any other key (an input,
+# an output, an opt-out such as overwrite / skip-unsafe, a --max-* bound,
+# codec) is refused with E_USAGE naming the file: a .zipnativerc.json planted
+# in a cloned repository can never relax a guard. Discovery walks up from the
+# current directory; --config <file> names one and --no-config ignores them.
 #
 # samples/input/config/.zipnativerc.json:
-#   { "create": { "deterministic": true, "level": 9 }, "extract": { "overwrite": true } }
+#   { "pretty": true, "list": { "format": "json", "long": true },
+#     "inspect": { "format": "json", "summary": true } }
+# samples/input/config-unsafe/.zipnativerc.json (refused):
+#   { "extract": { "overwrite": true, "skip-unsafe": true } }
 #
 # Usage:
 #   bash samples/config/01-config.sh
 #
-# Output: samples/output/config/01-with-config.zip, 01-no-config.zip
+# Output: samples/output/config/01-archive.zip, 01-list.json
 
 set -euo pipefail
 
@@ -26,27 +33,36 @@ mkdir -p "$OUTPUT_DIR"
 zn() { if command -v zipnative >/dev/null 2>&1; then zipnative "$@"; else node "$ROOT_DIR/dist/cli.cjs" "$@"; fi; }
 
 CONFIG="$INPUT_DIR/config/.zipnativerc.json"
+UNSAFE="$INPUT_DIR/config-unsafe/.zipnativerc.json"
+ARCHIVE="$OUTPUT_DIR/01-archive.zip"
 
+echo "→ Build an archive hermetically (--no-config):"
+zn create "$INPUT_DIR/text" --no-config --deterministic --output "$ARCHIVE" --overwrite --quiet
+
+echo ""
 echo "→ Config file:"
 cat "$CONFIG"
 
 echo ""
-echo "→ create --config … (deterministic + level 9 come from the file):"
-zn create "$INPUT_DIR/text" --config "$CONFIG" --output "$OUTPUT_DIR/01-with-config.zip" --json
+echo "→ list --config … (format json + long come from the file; an info: line names it):"
+zn list "$ARCHIVE" --config "$CONFIG" > "$OUTPUT_DIR/01-list.json"
+head -c 300 "$OUTPUT_DIR/01-list.json"; echo " …"
 
 echo ""
-echo "→ Same build with --no-config (built-in defaults: level 6, node-zlib tier):"
-zn create "$INPUT_DIR/text" --no-config --output "$OUTPUT_DIR/01-no-config.zip" --json
+echo "→ CLI flags win: --format text overrides the file's json:"
+zn list "$ARCHIVE" --config "$CONFIG" --format text
 
 echo ""
-echo "→ Discovery: run from the config's directory and it is picked up automatically:"
-(cd "$INPUT_DIR/config" && zn create "$INPUT_DIR/text" --output "$OUTPUT_DIR/01-discovered.zip" --json)
+echo "→ Discovery: run from the config's directory and it is picked up (inspect → a JSON --summary):"
+(cd "$INPUT_DIR/config" && zn inspect "$ARCHIVE")
 
 echo ""
-echo "→ CLI flags win: --level 1 overrides the file's level 9:"
-zn create "$INPUT_DIR/text" --config "$CONFIG" --level 1 --output "$OUTPUT_DIR/01-override.zip" --json
+echo "→ A planted config that tries to relax a guard is REFUSED (exit 2, E_USAGE, file named):"
+set +e
+zn extract --input "$ARCHIVE" --output-dir "$OUTPUT_DIR/01-extracted" --config "$UNSAFE" --json
+echo "exit code: $? (expected 2)"
+set -e
 
 echo ""
-echo "→ The extract section makes --overwrite the default for this config:"
-zn extract --input "$OUTPUT_DIR/01-with-config.zip" --output-dir "$OUTPUT_DIR/01-extracted" --config "$CONFIG" --quiet
-zn extract --input "$OUTPUT_DIR/01-with-config.zip" --output-dir "$OUTPUT_DIR/01-extracted" --config "$CONFIG" --json
+echo "→ --no-config is the escape hatch (and the posture for unattended runs):"
+zn extract --input "$ARCHIVE" --output-dir "$OUTPUT_DIR/01-extracted" --no-config --overwrite --json

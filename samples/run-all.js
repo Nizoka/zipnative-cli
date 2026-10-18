@@ -233,9 +233,11 @@ const JOBS = [
   { category: 'completion', id: '01-generate-powershell', args: ['completion', 'powershell'] },
 
   // ── config ──────────────────────────────────────────────────────────────
-  { category: 'config', id: '01-with-config', args: ['create', IN('text'), '--config', IN('config', '.zipnativerc.json'), '--output', OUT('config', '01-with-config.zip')] },
-  { category: 'config', id: '01-no-config', args: ['create', IN('text'), '--no-config', '--output', OUT('config', '01-no-config.zip')] },
-  { category: 'config', id: '01-check-deterministic', args: ['inspect', '--input', OUT('config', '01-with-config.zip'), '--check', 'deterministic', '--summary', '--format', 'json'] },
+  // A config is presentation only (1.1.0): format / long / summary / pretty apply; an opt-out is refused.
+  { category: 'config', id: '01-archive', args: ['create', IN('text'), '--no-config', '--deterministic', '--output', OUT('config', '01-archive.zip')] },
+  { category: 'config', id: '01-list-with-config', stdout: OUT('config', '01-list.json'), args: ['list', OUT('config', '01-archive.zip'), '--config', IN('config', '.zipnativerc.json')], after: () => { const doc = JSON.parse(readFileSync(OUT('config', '01-list.json'), 'utf8')); if (doc.entries[0].rawNameHex === undefined) throw new Error('config long / format defaults not applied'); } },
+  { category: 'config', id: '01-unsafe-config-refused', expectExit: 2, expectCode: 'E_USAGE', args: ['extract', '--input', OUT('config', '01-archive.zip'), '--output-dir', OUT('config', '01-extracted'), '--config', IN('config-unsafe', '.zipnativerc.json'), '--json'] },
+  { category: 'config', id: '01-no-config', args: ['extract', '--input', OUT('config', '01-archive.zip'), '--output-dir', OUT('config', '01-extracted'), '--no-config'] },
 
   // ── agent ───────────────────────────────────────────────────────────────
   { category: 'agent', id: '01-dry-run', args: ['create', IN('text'), '--output', OUT('agent', '01-never-written.zip'), '--dry-run', '--json'], after: () => { if (existsSync(OUT('agent', '01-never-written.zip'))) throw new Error('--dry-run wrote output'); } },

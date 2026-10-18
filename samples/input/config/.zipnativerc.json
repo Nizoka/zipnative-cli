@@ -1,9 +1,11 @@
 {
-  "create": {
-    "deterministic": true,
-    "level": 9
+  "pretty": true,
+  "list": {
+    "format": "json",
+    "long": true
   },
-  "extract": {
-    "overwrite": true
+  "inspect": {
+    "format": "json",
+    "summary": true
   }
 }

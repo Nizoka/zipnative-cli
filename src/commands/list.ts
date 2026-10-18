@@ -12,6 +12,7 @@ import { createDiagnosticSink, formatDiagnosticLine } from '../utils/diagnostics
 import { prepareEngine } from '../utils/engine.js';
 import { CliError } from '../utils/error.js';
 import { rowFromEntry, renderTable, type EntryRow } from '../utils/entryfmt.js';
+import { escapeTerminal } from '../utils/sanitize.js';
 import { emitJsonReport, serializeJson } from '../utils/projection.js';
 import { guard } from '../utils/ziperr.js';
 import {
@@ -90,7 +91,7 @@ export async function list(args: ParsedArgs): Promise<void> {
     });
 
     if (format === 'text') {
-        process.stdout.write(renderTable(rows, long));
+        process.stdout.write(escapeTerminal(renderTable(rows, long)));
         return;
     }
 

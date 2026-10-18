@@ -98,16 +98,21 @@ Official CLI for the [`zipnative`](https://github.com/Nizoka/zipnative) engine �
   `govern policy`, and `govern verify-issue <draft.md>` to gate an issue/PR draft (exit 1 /
   `E_POLICY`) before a **human** reviews and submits it.
 - **Agent-native** — a global `--json` status/error envelope, 13 stable `E_*` classes, the exact
-  `ZIP_*` cause carried verbatim as `error.zipCode` (39 frozen codes, plus 11 diagnostic codes),
+  `ZIP_*` cause carried verbatim as `error.zipCode` (39 frozen codes, plus 12 diagnostic codes),
   `--dry-run` on seven commands, `--strict`, and token-economy levers (**`--summary`**,
   **`--fields a,b.c`**, compact JSON under `--json`). See [AGENTS.md](AGENTS.md).
-- **Bounded by default** — the engine's eight CWE-tagged `ZipLimits` are exposed as
+- **Bounded by default** — the engine's CWE-tagged `ZipLimits` are exposed as
   `--max-entries`, `--max-entry-size`, `--max-total-size`, `--max-ratio`, `--max-name-bytes`,
   `--max-extra-bytes`, `--max-comment-bytes` and `--max-cd-bytes`; the CLI adds
-  `--max-input-size` (4 GiB) on every buffered read (`none` disables a bound, with a visible
-  warning).
-- **`.zipnativerc.json`** — optional config file for default flags (global + per-command);
-  precedence is CLI flags > config > built-in. `codec` is refused from config files.
+  `--max-input-size` (4 GiB) on every buffered read, through one descriptor. Every bound is a
+  positive, finite number — there is no "unbounded" form.
+- **Strict invocation** — an unknown flag, a repeated switch, a single-value flag given twice or
+  a stray positional is `E_USAGE` (exit 2): a typo is never a silent no-op.
+- **`.zipnativerc.json`** — optional, **presentation-only** config file (`format`, `fields`,
+  `json`, `pretty`, `quiet`, `no-color`, `progress`, `strict`, `long`, `summary`; global +
+  per-command); precedence is CLI flags > config > built-in. Any other key — an input, an output,
+  an opt-out, a bound, `codec` — is refused with `E_USAGE`, so a file planted in a cloned
+  repository can never relax a guard.
 - **Zero extra dependencies** — `zipnative` is the sole runtime dependency; all ZIP logic lives
   there. No ZIP parsing in the CLI.
 - **Offline, always** — no command can open a socket. There is no network opt-in to forget.
@@ -137,7 +142,7 @@ Official CLI for the [`zipnative`](https://github.com/Nizoka/zipnative) engine �
 | `schema` JSON Schema export | ✅ | 22 subjects incl. `errors`, `limits`, `diagnostics`, `status`, `error` and the capability `manifest` |
 | `completion` shell scripts | ✅ | `bash` / `zsh` / `fish` / `powershell` |
 | `govern` AI-governance / HITL | ✅ | `rules` / `policy` / `verify-issue`; gates drafts with `E_POLICY` |
-| `.zipnativerc.json` config file | ✅ | Global + per-command defaults; flags > config; `codec` refused from config |
+| `.zipnativerc.json` config file | ✅ | Presentation-only defaults (global + per-command); flags > config; every other key refused (`E_USAGE`); the file that applied is named on stderr and in the envelope (`config`) |
 | **Agent & automation** | | |
 | Global `--json` envelope | ✅ | Status on success, `{ ok: false, command, error: { code, message, zipCode?, entryName?, detail?, remedy? } }` on failure — `remedy` names the flag that lifts the refusal |
 | Stable error classes | ✅ | 13 `E_*` codes — `E_USAGE`, `E_INPUT`, `E_PARSE`, `E_IO`, `E_SECURITY`, `E_DATA`, `E_LIMIT`, `E_UNSUPPORTED`, `E_NOT_FOUND`, `E_VERIFY_FAILED`, `E_CHECK_FAILED`, `E_POLICY`, `E_RUNTIME` |
@@ -761,7 +766,7 @@ zipnative inflate [--input <file>] [--output <file>] [--max-output <size>]
 | `--input <file>`, `-i` | stdin | Compressed input |
 | `--output <file>`, `-o` | stdout | Decompressed output |
 | `--overwrite` | false | Replace an existing `--output` file (default: refuse, `E_IO`) |
-| `--max-output <size>` | the effective `--max-entry-size` (1 GiB) | Hard output bound; `none` only for trusted input |
+| `--max-output <size>` | the effective `--max-entry-size` (1 GiB) | Hard output bound, always finite; raise it for trusted input |
 | `--method deflate\|store\|<id>` | `deflate` | Codec (ids via `--codec`); `store` is a bounded pass-through |
 | `--sync` | false | Buffer the input (bounded by `--max-input-size`) and use the codec's `decompressSync` |
 | `--allow-trailing` | false | Silence the warning about bytes after the stream end |
@@ -832,10 +837,11 @@ Checks: `cli`, `node` (≥ 22), `zipnative` (package vs `VERSION` export), `defl
 `--deterministic`), `web-streams` (`CompressionStream` / `DecompressionStream`), `workers`
 (`create --parallel`), `codecs` (registered methods), `limits` (the effective bounds, with
 `--max-*` / `--max-input-size` overrides; under `--format json` the check carries `data { maxEntries,
-maxEntryUncompressedSize, maxTotalUncompressedSize, maxCompressionRatio, maxNameBytes,
-maxExtraFieldBytes, maxCommentBytes, maxCentralDirectoryBytes, maxInputSize }` as numbers, or
-`"none"` when disabled), `commands`. Exit 0 when every check passes, 1 otherwise. Always
-offline.
+maxEntryUncompressedSize, maxEntryCompressedSize, maxTotalUncompressedSize, maxCompressionRatio,
+maxNameBytes, maxExtraFieldBytes, maxCommentBytes, maxCentralDirectoryBytes, maxInputSize }` as
+numbers — `maxEntryCompressedSize` is the zipnative 1.1 bound of the byte-range reader, shown
+with its default and without a flag), `commands`. The `node` check reads the supported range
+from `package.json` `engines.node`. Exit 0 when every check passes, 1 otherwise. Always offline.
 
 ### `zipnative schema`
 
@@ -910,8 +916,8 @@ passing check is **necessary but not sufficient** — the human review gate alwa
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--config <file>` | nearest `.zipnativerc.json` upward from cwd | Use a specific config file |
-| `--no-config` | — | Ignore any `.zipnativerc.json` |
+| `--config <file>` | nearest `.zipnativerc.json` upward from cwd | Use a specific config file (presentation keys only — see the Process contract) |
+| `--no-config` | — | Ignore any `.zipnativerc.json` (recommended for unattended runs) |
 | `--quiet`, `-q` | — | Suppress progress output and text diagnostics on stderr (never envelopes or errors) |
 | `--no-color` | — | Disable ANSI colour on the stderr progress lines (sets `NO_COLOR`). Colour is decided on **stderr**: `NO_COLOR` (any value) off, `FORCE_COLOR` (not `0`/`false`) on, `TERM=dumb` off, otherwise on only when stderr is a TTY |
 | `--json` | — | Agent mode: emit a JSON status/error envelope on stderr (data stays on stdout). Errors carry a stable `E_*` code and zipnative's `ZIP_*` code verbatim. `batch` is the exception: its JSON report is the stdout document |
@@ -928,28 +934,43 @@ passing check is **necessary but not sufficient** — the human review gate alwa
 | `--max-extra-bytes <size>` | `65535` | Maximum extra-field block length in bytes (CWE-400) |
 | `--max-comment-bytes <size>` | `65535` | Maximum comment length in bytes (CWE-400) |
 | `--max-cd-bytes <size>` | `268435456` (256 MiB) | Maximum central-directory size in bytes (CWE-400) |
-| `--max-input-size <size>` | `4294967296` (4 GiB) | CLI-owned bound on every **buffered** read (CWE-400): an archive or payload read from stdin (byte-counted, aborted) or a file (`stat` before reading) into memory — `list`, `inspect`, `verify`, `extract`, `cat`, `modify`, `create --stdin-name`, `inflate --sync`, `govern verify-issue`. Exceeding it is `E_LIMIT` with `detail { limit: "maxInputSize", configured, observed }`; `none` disables it with one warning. Not a `ZipLimits` key (`doctor` reports it under `limits`). The streaming commands (`stream`, `crc32`, `inflate`, `create --stream`) are not bounded by it |
+| `--max-input-size <size>` | `4294967296` (4 GiB) | CLI-owned bound on every **buffered** read (CWE-400): an archive or payload read from stdin (byte-counted, aborted) or a file through **one descriptor** (a regular file is size-checked on that descriptor and read to the checked size only; a pipe, FIFO or device such as `/dev/zero` is byte-counted like stdin) into memory — `list`, `inspect`, `verify`, `extract`, `cat`, `modify`, `create --stdin-name`, `inflate --sync`, `govern verify-issue`. Exceeding it is `E_LIMIT` with `detail { limit: "maxInputSize", configured, observed }`; always finite. Not a `ZipLimits` key (`doctor` reports it under `limits`). The streaming commands (`stream`, `crc32`, `inflate`, `create --stream`) are not bounded by it |
 | `--pure-codecs` | — | Skip `node:zlib` and run the pure-TS codec tier |
 | `--codec <module>` | — | Load an ESM module exporting `{ codecs: ZipCodec[] }` (and optional `inflateImpl` / `deflateImpl`) and register it. A registered codec serves the reader for its method **and the writer** when it registers store (0) or deflate (8) — such a module replaces the built-in compressor for `create`/`modify` even under `--deterministic`; `deflateImpl` replaces the sync deflate tier (`tier: "injected"`) unless `--deterministic` pins the engine's encoder; `create --parallel` refuses either (workers cannot see the module). Executes user code: only accepted on the command line, never from a config file |
 | `--version --json` | — | `{ name, version, zipnative }` — machine-readable version output |
 | `--help`, `-h` | — | Global or per-command usage |
 
-`<size>` accepts `65536`, `512k`, `1m`, `8g`, `1GiB`; `none` disables a bound (a visible warning
-is printed — not recommended for untrusted input). Limits are also flat keys in
-`.zipnativerc.json` (global or command-scoped).
+`<size>` accepts `65536`, `512k`, `1m`, `8g`, `1GiB`. Every bound is a positive, finite integer:
+the 1.0 `none` / `inf` form is refused since 1.1.0 (`E_USAGE`, with a remedy naming an explicit
+value — raise a bound for trusted input instead), and a bound cannot come from a config file.
 
 #### Process contract
 
-- **Config discovery is upward.** `.zipnativerc.json` is looked up from the working directory
-  to the filesystem root; an unattended run should pass `--no-config` (or `--config <file>`).
-  Explicit flags win over the file; the `codec` key is refused from any config file.
+- **Config discovery is upward, and a config is presentation only.** `.zipnativerc.json` (a
+  regular file, at most 1 MiB) is looked up from the working directory to the filesystem root;
+  an unattended run should pass `--no-config` (or `--config <file>`). Explicit flags win over
+  the file. Only `format`, `fields`, `json`, `pretty`, `quiet`, `no-color`, `progress`, `strict`,
+  `long` and `summary` are accepted — globally or in a command section — and a key applies only
+  where the command declares the flag; **every other key** (`overwrite`, `skip-unsafe`,
+  `allow-symlinks`, `max-*`, `codec`, paths, …), the prototype names and a value of the wrong type
+  are `E_USAGE` naming the file (the whole file is validated, whatever the command). The file
+  that supplied defaults is announced on stderr (`info: defaults from <path>: …`, suppressed by
+  `--quiet`) and carried as `config: { path, applied }` in the `--json` envelopes. Before 1.1.0
+  every key but `codec` was accepted — migrate the others to the command line.
 - **stderr is line-oriented.** Under `--json` the envelope is the last line that starts with
   `{`; the other lines are text (progress, NDJSON diagnostics) that `--quiet` removes.
 - **Flags and positionals are order-independent.** A boolean flag never consumes the next
   token, so `zipnative --json list a.zip` and `zipnative list --long a.zip` both work;
-  `--flag=false|0|no|off` is the explicit off form. Combined short flags (`-lq`) are refused
-  (exit 2). Short aliases that take a value: `-i`, `-o`, `-d`, `-e`, `-f`; boolean: `-q`, `-h`,
-  `-V`. There is no `-l`.
+  `--flag=false|0|no|off` is the explicit off form. Combined short flags (`-lq`) and `-o=x` are
+  refused (exit 2). Short aliases that take a value: `-i`, `-o`, `-d`, `-e`, `-f`; boolean: `-q`,
+  `-h`, `-V` — each means its long flag on every command that declares it. There is no `-l`.
+- **The invocation is checked before anything runs** (1.1.0). A flag the command does not
+  declare (`--overwite`), a switch given twice, a single-value flag given twice (`--input a
+  --input b` on `list`), a flag given both bare and with a value, more positionals than the
+  command takes, or an operand together with its flag (`list a.zip --input b.zip`) is `E_USAGE`
+  (exit 2) — the same contract applies to every task of a `batch --manifest`, checked for all
+  tasks before the first one runs. Repeatable flags are documented as such (`--include`,
+  `--entry`, `--remove`, `--codec`, …).
 - **Argv paths are ordinary shell paths.** `zipnative list ../a.zip`, `-o ../out.zip` and
   `--output-dir ../x` are the invoking user's own filesystem authority and are not second-guessed.
   Only values that arrive as *data* — path flags inside a `batch` manifest, `path` values inside a
@@ -958,9 +979,12 @@ is printed — not recommended for untrusted input). Limits are also flat keys i
 - **No input and stdin is a terminal** → `E_USAGE` (exit 2): `No input: pass --input <file> (or
   a positional path), or pipe data on stdin.` An explicit `-` is never guarded.
 - **Overwrite policy** is uniform: `create -o`, `modify -o`, `cat -o`, `inflate -o`, `extract`,
-  `stream --output-dir` and `batch --task create` refuse an existing file with `E_IO`
-  (`Refusing to overwrite existing file <path> (pass --overwrite)`) and leave it intact;
-  `--overwrite` replaces it. Writing to stdout is unaffected.
+  `stream --output-dir` and `batch --task create` refuse an existing path — a dangling symlink
+  included — with `E_IO` (`Refusing to overwrite existing file <path> (pass --overwrite)`) and
+  leave it intact. `--overwrite` writes an exclusively created temp file next to the target and
+  `rename()`s it into place: a reader never sees a half-written file, a symlink planted at the
+  target is **replaced, never followed**, and a failed write leaves the original untouched. A
+  failed write never removes a file the CLI did not create. Writing to stdout is unaffected.
 - **Closed pipe.** `EPIPE` on stdout or stderr (`| head`) ends the process quietly with exit 0.
 - **Interrupts.** On `SIGINT` / `SIGTERM` the CLI removes exactly the files it is writing at
   that moment (never a completed output, never the original of `modify --in-place`) and exits
@@ -1067,9 +1091,16 @@ See [AGENTS.md](AGENTS.md) and the [`samples/agent/`](samples/agent) scripts.
   central/local header disagreement, Zip64 spoofing, duplicate output paths, ambiguous EOCDs and
   > 2^53 sizes are refused by default with their `ZIP_*` code. Opt-outs skip; they never write
   anything unsafe.
-- **Bounded by default** — the engine's eight CWE-tagged limits are always on (`--max-*` to
-  tune; `none` warns), and the CLI bounds every buffered read with `--max-input-size` (4 GiB;
-  `E_LIMIT`). `inflate` has a mandatory output bound.
+- **Bounded by default** — the engine's CWE-tagged limits are always on (`--max-*` to tune;
+  always finite since 1.1.0), and the CLI bounds every buffered read with `--max-input-size`
+  (4 GiB; `E_LIMIT`), through one descriptor (a device such as `/dev/zero` is byte-counted).
+  `inflate` has a mandatory, finite output bound.
+- **Configuration cannot relax a guard** — `.zipnativerc.json` sets presentation defaults only;
+  an opt-out, a bound, a path or `codec` in it is `E_USAGE` (1.1.0).
+- **Archive text cannot drive the terminal** — in text mode every entry name, comment and engine
+  message is printed with C0 / C1 / DEL and Unicode bidi controls made visible (`\x1b`,
+  `\u202e`): a hostile name cannot clear the screen, rewrite earlier lines or disguise
+  `evil\u202etxt.exe` (Trojan Source). JSON keeps the exact text (`rawNameHex` keeps the bytes).
 - **Data remanence** — `modify` without `--compact` keeps removed / replaced bytes recoverable
   in the output. Use `--compact` when deletion matters. Either way `modify` verifies every entry
   it re-emits (CRC-32, sizes, local header) and refuses a lying record — an append-only save
@@ -1077,7 +1108,7 @@ See [AGENTS.md](AGENTS.md) and the [`samples/agent/`](samples/agent) scripts.
 - **No encryption** — read or write, by engine policy in 1.x. Encrypted entries are detected,
   listed and reported as `skipped` by `verify`; reads fail with `ZIP_UNSUPPORTED_ENCRYPTION`.
 - **`--codec` is a trust boundary** — the CLI's only dynamic import of user code (same trust as
-  `node -r`): argv only, refused from `.zipnativerc.json`, refused inside a `batch --manifest`
+  `node -r`): argv only, refused from `.zipnativerc.json` (like every non-presentation key), refused inside a `batch --manifest`
   without `--allow-codec-load`. A module that registers method 0/8 or exports `deflateImpl`
   also shapes what `create`/`modify` write — the envelope's `tier` and a `warning:` line say so,
   and `create --parallel` refuses to run with such a module loaded.
@@ -1088,7 +1119,7 @@ See [AGENTS.md](AGENTS.md) and the [`samples/agent/`](samples/agent) scripts.
   with the engine's `sanitizeEntryPath()`, and every extracted destination goes through the sink
   above.
 - **JSON size cap** — manifests, drafts and JSON inputs are capped at 50 MB before parsing
-  (config files at 1 MB).
+  (config files at 1 MiB, size-checked on the open descriptor).
 - Signed builds with npm provenance (Trusted Publishing / OIDC) and a CycloneDX SBOM per
   release; the SBOM and the tarball are attested with `actions/attest-build-provenance` — verify with
   `npm audit signatures`. CI runs on Ubuntu 22/24, Windows 22/24 (blocking) and macOS 22; the
@@ -1103,7 +1134,9 @@ codes `0`/`1`/`2`/`130`/`143`, the 13 `E_*` classes and the `ZIP_*` → `E_*` ma
 envelope and report keys, the `schema` subjects and `schema manifest` shape, the
 `.zipnativerc.json` keys, the `ZIPNATIVE_*` variables, and the bytes written under
 `--deterministic` (a byte change is semver-major). Message wording, text layout and key order
-are not a contract. A flag is deprecated in a minor release (it keeps working and prints one
+are not a contract. A **security fix** may narrow what the CLI accepts in a minor release —
+1.1.0 refuses unknown flags, the `none` bound and non-presentation config keys — and is always
+recorded in the CHANGELOG under *Security & behaviour changes* with its migration. A flag is deprecated in a minor release (it keeps working and prints one
 `warning:` line) and removed no earlier than the next major. Details in
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-stability-and-deprecation).
 

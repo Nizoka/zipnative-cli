@@ -20,6 +20,7 @@ import { CliError, ErrorCode, type ErrorCodeValue } from '../utils/error.js';
 import { isJsonMode, isDryRun, progress, remedyFor } from '../utils/agent.js';
 import { selectFields, serializeJson, parseFieldList } from '../utils/projection.js';
 import { style } from '../utils/colors.js';
+import { escapeTerminal } from '../utils/sanitize.js';
 import { verifyZip } from '../core-bridge/index.js';
 import { prepareEngine } from '../utils/engine.js';
 import { parseLimitFlags } from '../utils/limits.js';
@@ -32,6 +33,7 @@ import {
     type ManifestPlan,
     type ManifestTaskPlan,
 } from '../utils/manifest.js';
+import { assertInvocation } from './completion.js';
 import { create } from './create.js';
 
 /** Upper bound for `--concurrency` (directory mode): beyond this the pool only burns file descriptors. */
@@ -208,6 +210,17 @@ async function runManifest(manifestPath: string, args: ParsedArgs): Promise<void
     const raw = rawBuf.toString('utf8');
 
     const plan: ManifestPlan = parseManifest(raw, dirname(resolve(manifestPath)));
+    // Every task honours the same invocation contract as argv — declared flags
+    // only, single values unless repeatable — checked for ALL tasks before the
+    // first one runs, so a typo in task 5 never follows tasks 1-4's writes.
+    for (const t of plan.tasks) {
+        try {
+            assertInvocation(t.command, { flags: t.flags, positionals: [] });
+        } catch (e) {
+            if (e instanceof CliError) throw new CliError(`Manifest task "${t.id}": ${e.message}`, e.exitCode, e.code);
+            throw e;
+        }
+    }
     assertCodecPolicy(plan, allowCodecLoad);
     // JSON mode: stdout is ONE batch document; every task's stdout is
     // captured into tasks[i].report, so artefact-to-stdout tasks are refused.
@@ -220,7 +233,7 @@ async function runManifest(manifestPath: string, args: ParsedArgs): Promise<void
         if (format === 'text') {
             plan.tasks.forEach((task: ManifestTaskPlan, i: number) => {
                 const target = task.output !== undefined ? ` → ${task.output}` : task.outputDir !== undefined ? ` → ${task.outputDir}/` : '';
-                process.stdout.write(`plan [${i + 1}/${total}] ${task.command} ${task.id}${target}\n`);
+                process.stdout.write(escapeTerminal(`plan [${i + 1}/${total}] ${task.command} ${task.id}${target}\n`));
             });
         }
         const planned = plan.tasks.map((t): ManifestTaskResult => ({

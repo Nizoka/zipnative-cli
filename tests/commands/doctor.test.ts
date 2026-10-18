@@ -103,10 +103,10 @@ describe('doctor', () => {
         const o = overridden.checks.find((c) => c.name === 'limits');
         expect(o?.value).toBe('1 override(s)');
         expect(o?.detail).toContain('maxEntries=5');
-        const two = JSON.parse(await capture(() => doctor(parseArgs(['--format', 'json', '--max-entries', '5', '--max-ratio', 'none'])))) as DoctorReport;
+        const two = JSON.parse(await capture(() => doctor(parseArgs(['--format', 'json', '--max-entries', '5', '--max-ratio', '4096'])))) as DoctorReport;
         const t = two.checks.find((c) => c.name === 'limits');
         expect(t?.value).toBe('2 override(s)');
-        expect(t?.detail).toContain('maxCompressionRatio=unlimited');
+        expect(t?.detail).toContain('maxCompressionRatio=4096:1');
     });
 
     it('ZIPNATIVE_JSON=1 emits compact JSON; --pretty restores indentation; --json flag also switches', async () => {

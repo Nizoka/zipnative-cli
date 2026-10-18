@@ -175,7 +175,7 @@ export function mapZipError(err: unknown, context: string, entryName?: string): 
             zipCode: err.code,
             ...(name !== undefined ? { entryName: name } : {}),
             ...(detail !== undefined ? { detail } : {}),
-            ...(limitFlag !== undefined ? { remedy: `--${limitFlag.flag} <value> (raise the bound for trusted input only; "none" disables it)` } : {}),
+            ...(limitFlag !== undefined ? { remedy: `--${limitFlag.flag} <value> (raise the bound for trusted input only)` } : {}),
         });
     }
     if (isFsError(err)) {

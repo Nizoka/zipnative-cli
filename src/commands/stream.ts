@@ -26,6 +26,7 @@ import {
 import { createDiagnosticSink, formatDiagnosticLine } from '../utils/diagnostics.js';
 import { prepareEngine } from '../utils/engine.js';
 import { rowFromHeader, renderTable, type EntryRow } from '../utils/entryfmt.js';
+import { escapeTerminal } from '../utils/sanitize.js';
 import { CliError, ErrorCode } from '../utils/error.js';
 import { openInputStream, overwriteRefused, pathExists, readableToByteSource, safeJoin, writeStreamingOutput } from '../utils/io.js';
 import { emitJsonReport, serializeJson } from '../utils/projection.js';
@@ -205,7 +206,7 @@ export async function stream(args: ParsedArgs): Promise<void> {
 
     if (mode === 'list') {
         if (format === 'text') {
-            process.stdout.write(renderTable(rows, long));
+            process.stdout.write(escapeTerminal(renderTable(rows, long)));
         } else if (format === 'json') {
             const report: StreamReport = { mode: 'list', trust: TRUST, entries: rows, diagnostics: sink.diagnostics };
             emitJsonReport(args, report, () => streamSummary(report));

@@ -557,7 +557,7 @@ function doctorSchema(): JsonSchema {
                         status: { enum: ['ok', 'warn', 'error'] },
                         value: { type: 'string' },
                         detail: { type: 'string' },
-                        data: { type: 'object', description: 'Machine-readable payload; `limits` carries the effective bounds (ZipLimits keys + maxInputSize; "none" when disabled).' },
+                        data: { type: 'object', description: 'Machine-readable payload; `limits` carries the effective bounds as numbers (the nine ZipLimits keys + maxInputSize; always finite).' },
                     },
                 },
             },
@@ -693,7 +693,7 @@ function limitsSchema(): JsonSchema {
         const flagged = LIMIT_FLAGS.find((l) => l.key === key);
         const engineOnly = ENGINE_ONLY_LIMITS.find((l) => l.key === key);
         const description = flagged !== undefined
-            ? `${flagged.description} (${flagged.cwe}); flag --${flagged.flag}; "none" disables the bound.`
+            ? `${flagged.description} (${flagged.cwe}); flag --${flagged.flag} (a positive, finite value).`
             : engineOnly !== undefined
                 ? `${engineOnly.description} (${engineOnly.cwe}); no flag: ${engineOnly.reason}.`
                 : `${key} (engine bound)`;

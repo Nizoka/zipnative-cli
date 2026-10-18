@@ -190,4 +190,82 @@ describe.skipIf(!existsSync(BIN))('integration: built binary smoke (dist/cli.cjs
         expect(existsSync(out)).toBe(false);
     });
 
+    // ── 1.1.0 dispatcher hardening: the invocation contract and the
+    // presentation-only configuration (only the real process runs main()).
+
+    it('refuses an unknown flag, a repeated switch, a repeated single-value flag and a stray operand (exit 2, E_USAGE)', () => {
+        for (const argv of [
+            ['list', 'a.zip', '--overwite'],
+            ['list', 'a.zip', '--long', '--long'],
+            ['list', '--input', 'a.zip', '--input', 'b.zip'],
+            ['list', 'a.zip', 'b.zip'],
+            ['list', 'a.zip', '--input', 'b.zip'],
+            ['doctor', 'extra'],
+            ['list', '--constructor', 'x'],
+            ['batch', '-f', 'json', '-f', 'text'],
+        ]) {
+            const r = zipnative([...argv, '--json']);
+            expect(r.status, argv.join(' ')).toBe(2);
+            const env = JSON.parse(r.stderr.trim().split('\n').pop() as string) as { error: { code: string } };
+            expect(env.error.code, argv.join(' ')).toBe('E_USAGE');
+        }
+        // An alias means its flag on every command that declares it.
+        const e = zipnative(['inspect', join(dir, 'missing.zip'), '-e', 'x', '--json']);
+        expect(e.status).toBe(1); // E_IO for the missing archive — the flag itself was accepted
+    });
+
+    it('a text-mode error leads with its class and engine cause', () => {
+        const r = zipnative(['list', '--overwite']);
+        expect(r.status).toBe(2);
+        expect(r.stderr).toMatch(/^error E_USAGE: Unknown flag --overwite for "list"/m);
+    });
+
+    it('a planted .zipnativerc.json can only change presentation: any other key is E_USAGE naming the file', async () => {
+        const repo = join(dir, 'cloned-repo');
+        await mkdir(repo);
+        const zip = join(repo, 'a.zip');
+        expect(zipnative(['create', join(ROOT, 'package.json'), '-o', zip, '--no-config']).status).toBe(0);
+        await writeFile(join(repo, '.zipnativerc.json'), JSON.stringify({ extract: { overwrite: true, 'skip-unsafe': true } }));
+        const refused = zipnative(['list', zip, '--json'], repo);
+        expect(refused.status).toBe(2);
+        const env = JSON.parse(refused.stderr.trim().split('\n').pop() as string) as { error: { code: string; message: string; remedy: string } };
+        expect(env.error.code).toBe('E_USAGE');
+        expect(env.error.message).toContain('.zipnativerc.json');
+        expect(env.error.message).toContain('"overwrite"');
+        expect(env.error.remedy).toContain('--no-config');
+        // --no-config is always the escape hatch.
+        expect(zipnative(['list', zip, '--no-config'], repo).status).toBe(0);
+
+        // A presentation default applies, is announced on stderr and named in the envelope.
+        await writeFile(join(repo, '.zipnativerc.json'), JSON.stringify({ list: { format: 'json' } }));
+        const applied = zipnative(['list', zip], repo);
+        expect(applied.status).toBe(0);
+        expect(JSON.parse(applied.stdout)).toHaveProperty('entries');
+        expect(applied.stderr).toMatch(/^info: defaults from .*\.zipnativerc\.json: format$/m);
+        const out = join(repo, 'b.zip');
+        const created = zipnative(['create', join(ROOT, 'package.json'), '-o', out, '--json'], repo);
+        expect(created.status).toBe(0);
+        // `format` is not a create flag: nothing applied, so no `config` field.
+        expect(JSON.parse(created.stderr.trim().split('\n').pop() as string)).not.toHaveProperty('config');
+        await writeFile(join(repo, '.zipnativerc.json'), JSON.stringify({ pretty: true }));
+        const v = zipnative(['verify', zip, '--json'], repo);
+        expect(v.status).toBe(0);
+        expect(v.stdout).toContain('\n  "ok": true');
+    });
+
+    it('--max-* none is refused with an explicit-value remedy (every bound is finite since 1.1.0)', () => {
+        const r = zipnative(['list', join(ROOT, 'package.json'), '--max-entries', 'none', '--json']);
+        expect(r.status).toBe(2);
+        const env = JSON.parse(r.stderr.trim().split('\n').pop() as string) as { error: { code: string; remedy: string } };
+        expect(env.error.code).toBe('E_USAGE');
+        expect(env.error.remedy).toMatch(/^--max-entries \d+/);
+    });
+
+    it.skipIf(process.platform === 'win32')('a device (/dev/zero) is byte-counted and refused at --max-input-size, never read whole', () => {
+        const r = zipnative(['list', '/dev/zero', '--max-input-size', '1m', '--json']);
+        expect(r.status).toBe(1);
+        const env = JSON.parse(r.stderr.trim().split('\n').pop() as string) as { error: { code: string; detail: { limit: string } } };
+        expect(env.error).toMatchObject({ code: 'E_LIMIT', detail: { limit: 'maxInputSize' } });
+    });
+
 });

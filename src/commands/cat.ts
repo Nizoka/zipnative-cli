@@ -13,7 +13,7 @@ import { METHOD_DEFLATE, METHOD_STORE, getCodec, type ZipEntry } from '../core-b
 import { createDiagnosticSink } from '../utils/diagnostics.js';
 import { prepareEngine } from '../utils/engine.js';
 import { CliError, ErrorCode } from '../utils/error.js';
-import { unlinkQuiet, writeStreamingOutput } from '../utils/io.js';
+import { writeStreamingOutput } from '../utils/io.js';
 import { mapZipError } from '../utils/ziperr.js';
 import { commonOptions, openArchive, readArchiveBytes } from '../utils/zipops.js';
 
@@ -99,8 +99,9 @@ export async function cat(args: ParsedArgs): Promise<void> {
     try {
         written = await writeStreamingOutput(chunks(), outputPath, { exclusive: !hasFlag(args.flags, 'overwrite') });
     } catch (e) {
-        if (e instanceof CliError && e.code === ErrorCode.IO) throw e; // overwrite refusal: the existing file is untouched
-        if (outputPath !== undefined) await unlinkQuiet(outputPath);
+        // The write layer already removed whatever IT created (a partial file
+        // or temp); an existing --output is never truncated or removed here.
+        if (e instanceof CliError && e.code === ErrorCode.IO) throw e;
         throw mapZipError(e, `Failed to read entry "${current}"`, current);
     }
 

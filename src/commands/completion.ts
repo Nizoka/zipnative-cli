@@ -12,7 +12,7 @@
 //     zipnative completion fish > ~/.config/fish/completions/zipnative.fish
 //     zipnative completion powershell >> $PROFILE
 
-import type { ParsedArgs } from '../utils/args.js';
+import { type OperandRule, type ParsedArgs, assertKnownFlags, assertOperands, assertSingleValues } from '../utils/args.js';
 import { CliError } from '../utils/error.js';
 import { isBooleanFlag } from '../utils/flags.js';
 import { LIMIT_FLAG_NAMES } from '../utils/limits.js';
@@ -154,6 +154,75 @@ export const COMMANDS: readonly CommandSpec[] = [
 ];
 
 export const COMMAND_NAMES: readonly string[] = COMMANDS.map((c) => c.name);
+
+/**
+ * Value flags a command accepts more than once (values collected in order);
+ * every other value flag given twice is refused (`assertSingleValues`).
+ * `--codec` is repeatable everywhere (one module per occurrence).
+ */
+export const GLOBAL_REPEATABLE_FLAGS: readonly string[] = ['codec'];
+export const REPEATABLE_FLAGS: Readonly<Record<string, readonly string[]>> = {
+    create: ['input', 'include', 'exclude', 'entry-comment'],
+    modify: ['add', 'add-dir', 'remove', 'rename', 'replace'],
+    list: ['include', 'exclude'],
+    inspect: ['entry', 'check'],
+    cat: ['entry'],
+    extract: ['include', 'exclude', 'entry'],
+    stream: ['include', 'exclude', 'cat'],
+    verify: ['entry'],
+    crc32: ['input'],
+    inflate: [],
+    batch: [],
+    doctor: [],
+    schema: [],
+    completion: [],
+    govern: [],
+};
+
+/**
+ * How many positionals each command takes, and the flag that stands for the
+ * first one (giving both is refused). `Infinity` = any number (inputs, entry
+ * names).
+ */
+export const OPERANDS: Readonly<Record<string, OperandRule>> = {
+    create: { max: Infinity },
+    modify: { max: 1, for: 'input' },
+    list: { max: 1, for: 'input' },
+    inspect: { max: 1, for: 'input' },
+    cat: { max: Infinity },
+    extract: { max: 1, for: 'input' },
+    stream: { max: 1, for: 'input' },
+    verify: { max: 1, for: 'input' },
+    crc32: { max: Infinity },
+    inflate: { max: 1, for: 'input' },
+    batch: { max: 0 },
+    doctor: { max: 0 },
+    schema: { max: 1 },
+    completion: { max: 1 },
+    govern: { max: 2 },
+};
+
+/** Bare flag names `command` accepts: its own and the global ones. */
+export function knownFlags(command: string): ReadonlySet<string> {
+    const spec = COMMANDS.find((c) => c.name === command);
+    return new Set([...GLOBAL_FLAGS, ...(spec?.flags ?? [])].map((f) => f.replace(/^--/, '')));
+}
+
+/** Bare flag names `command` accepts more than once. */
+export function repeatableFlags(command: string): ReadonlySet<string> {
+    return new Set([...GLOBAL_REPEATABLE_FLAGS, ...(REPEATABLE_FLAGS[command] ?? [])]);
+}
+
+/**
+ * The invocation contract every command gets before it runs (dispatcher and
+ * `batch` manifest tasks): only declared flags, each value flag once unless
+ * repeatable, no stray positionals. All refusals are E_USAGE, exit 2.
+ */
+export function assertInvocation(command: string, args: ParsedArgs): void {
+    assertKnownFlags(args.flags, knownFlags(command), command);
+    assertSingleValues(args.flags, repeatableFlags(command), command);
+    assertOperands(args, OPERANDS[command] ?? { max: Infinity }, command);
+}
 
 /**
  * Value flags whose argument is a filesystem path — the shells complete

@@ -38,12 +38,12 @@ import {
     readJsonInput,
     readStdin,
     readableToByteSource,
-    unlinkQuiet,
     validatePath,
     writeOutput,
     writeStreamingOutput,
 } from '../utils/io.js';
 import { parseInputSizeFlag } from '../utils/limits.js';
+import { escapeTerminal } from '../utils/sanitize.js';
 import { parseByteSize } from '../utils/sizes.js';
 import { walkPaths, type SkippedPath } from '../utils/walk.js';
 import { mapZipError } from '../utils/ziperr.js';
@@ -468,7 +468,7 @@ export async function create(args: ParsedArgs): Promise<void> {
                 return `plan  ${e.name}  ${size}  ${m}`;
             });
             for (const s of skipped) lines.push(`skip  ${s.name}  (${s.reason})`);
-            process.stdout.write(lines.join('\n') + (lines.length > 0 ? '\n' : ''));
+            process.stdout.write(escapeTerminal(lines.join('\n') + (lines.length > 0 ? '\n' : '')));
         }
         emitStatus({ ...summary, dryRun: true, ...sink.field() });
         return;
@@ -553,8 +553,9 @@ export async function create(args: ParsedArgs): Promise<void> {
             bytes = out.length;
         }
     } catch (e) {
+        // The write layer removed whatever IT created (a partial archive or
+        // the --overwrite temp); an existing output is never removed here.
         if (e instanceof CliError && e.code === ErrorCode.IO) throw e;
-        if (outputPath !== undefined && outputPath !== '-') await unlinkQuiet(outputPath);
         throw mapZipError(e, 'Failed to write archive');
     }
 

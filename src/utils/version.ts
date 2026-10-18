@@ -10,26 +10,43 @@ import { createRequire } from 'node:module';
 
 let cached: string | null = null;
 let cachedEngine: string | null = null;
+let cachedRange: string | null = null;
 
 const CANDIDATES = ['../package.json', '../../package.json', '../../../package.json'];
 
-export function cliVersion(): string {
-    if (cached !== null) return cached;
+interface OwnPackage {
+    readonly name?: string;
+    readonly version?: string;
+    readonly engines?: { readonly node?: string };
+}
+
+function ownPackage(): OwnPackage | null {
     const require = createRequire(import.meta.url);
     for (const candidate of CANDIDATES) {
         try {
-            const pkg = require(candidate) as { name?: string; version?: string };
-            if (pkg.name === 'zipnative-cli' && typeof pkg.version === 'string') {
-                cached = pkg.version;
-                return cached;
-            }
+            const pkg = require(candidate) as OwnPackage;
+            if (pkg.name === 'zipnative-cli') return pkg;
         } catch {
             // Not at this relative location — try the next candidate.
         }
     }
-    // Should never happen in a correctly packaged install; fail soft.
-    cached = '0.0.0';
+    return null;
+}
+
+export function cliVersion(): string {
+    if (cached !== null) return cached;
+    const pkg = ownPackage();
+    // Should never fall back in a correctly packaged install; fail soft.
+    cached = typeof pkg?.version === 'string' ? pkg.version : '0.0.0';
     return cached;
+}
+
+/** The supported Node.js range — package.json `engines.node`, the one source `doctor` checks against. */
+export function nodeRange(): string {
+    if (cachedRange !== null) return cachedRange;
+    const pkg = ownPackage();
+    cachedRange = typeof pkg?.engines?.node === 'string' ? pkg.engines.node : '>=22';
+    return cachedRange;
 }
 
 /**

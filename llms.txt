@@ -22,15 +22,23 @@ machine-readable JSON manifest run `zipnative schema manifest`.
   command, a refused combination), `130` / `143` interrupted by SIGINT /
   SIGTERM (the files being written at that moment are removed).
 - **Hermetic**: `.zipnativerc.json` is discovered cwd-upward to the root; pass
-  `--no-config` (or `--config <file>`) in unattended runs. Flags win over config;
-  `codec` is refused from config.
+  `--no-config` (or `--config <file>`) in unattended runs. A config is
+  PRESENTATION ONLY (format, fields, json, pretty, quiet, no-color, progress,
+  strict, long, summary); any other key is `E_USAGE` naming the file. Flags win;
+  an applied file is named in the envelope as `config: { path, applied }`.
 - **stderr, line by line**: under `--json` the envelope is the last line that
-  starts with `{`; other lines are text (progress, NDJSON diagnostics) and
+  starts with `{` and has an `ok` key; other lines are text (progress, NDJSON
+  diagnostics) or, with `--progress`, `{"type":"progress",…}` objects;
   `--quiet` removes them, never an envelope.
 - **Flags and positionals are order-independent**: a boolean flag never
   consumes the next token (`zipnative --json list a.zip` works);
   `--flag=false` is the explicit off form; combined short flags (`-lq`) are
   refused. Value short aliases: `-i -o -d -e -f`; boolean: `-q -h -V`.
+- **Strict invocation** (1.1.0): an undeclared flag, a repeated switch or
+  single-value flag, surplus positionals, or an operand plus its flag →
+  `E_USAGE` (exit 2), checked before any input is read (also per batch task).
+- **Text output is terminal-safe**: control / bidi characters in names are
+  escaped (`\x1b`, `\u202e`) in text mode; JSON is exact.
 - **No input and stdin is a terminal** → `E_USAGE` (exit 2); an explicit `-`
   is never guarded.
 - **`--json`** (agent mode): success emits `{ "ok": true, "command", … }` on
@@ -70,14 +78,16 @@ machine-readable JSON manifest run `zipnative schema manifest`.
 - **Limits** (always on, CWE-tagged): `--max-entries 100000`,
   `--max-entry-size 1g`, `--max-total-size 8g`, `--max-ratio 1024`,
   `--max-name-bytes 4096`, `--max-extra-bytes 65535`,
-  `--max-comment-bytes 65535`, `--max-cd-bytes 256m`; `none` disables a bound
-  (warns). Exceeding one is `E_LIMIT` / `ZIP_LIMIT_EXCEEDED`. The CLI adds
+  `--max-comment-bytes 65535`, `--max-cd-bytes 256m`; every bound is finite
+  (`none` is refused since 1.1.0). Exceeding one is `E_LIMIT` /
+  `ZIP_LIMIT_EXCEEDED`. `--timeout <duration>` bounds the run →
+  `E_LIMIT` with `detail.limit = "timeout"`. The CLI adds
   `--max-input-size 4g` on every BUFFERED read (list, inspect, verify,
   extract, cat, modify, `create --stdin-name`, `inflate --sync`) →
   `E_LIMIT` with `detail.limit = "maxInputSize"`; `stream`, `crc32`, `inflate`
   and `create --stream` are constant-memory and not bounded by it.
 - **Environment**: `ZIPNATIVE_JSON`, `ZIPNATIVE_DRY_RUN`, `ZIPNATIVE_QUIET`,
-  `ZIPNATIVE_STRICT`, `ZIPNATIVE_PURE_CODECS` (set by the global flags; also
+  `ZIPNATIVE_STRICT`, `ZIPNATIVE_PURE_CODECS`, `ZIPNATIVE_PROGRESS` (set by the global flags; also
   honoured when the caller sets them), `NO_COLOR` (off), `FORCE_COLOR` (on),
   `TERM=dumb` (off) — colour is decided on stderr; `ZIPNATIVE_DEBUG=1` adds
   stack traces.
