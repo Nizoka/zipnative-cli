@@ -65,9 +65,9 @@ npm run validate:zip   # build + corpus + veraZIP validation (see below)
 
 All new code must include tests. Coverage thresholds (enforced by `vitest.config.ts`, the single
 source of truth): **statements 95 %, branches 91 %, functions 97 %, lines 96 %** — ratcheted for
-1.1.0 from the measured 96.28 / 92.20 / 98.19 / 97.03 (2026-10-18), one point below the actuals
+1.1.0 from the measured 96.13 / 92.11 / 98.21 / 96.88 (2026-10-18), one point below the actuals
 (1.0.0 kept three). Never lower them to make a
-change pass — add tests. The suite is 69 files / 1311 tests (8 are platform- or checkout-conditional
+change pass — add tests. The suite is 70 files / 1327 tests (9 are platform- or checkout-conditional
 and skip with a stated reason).
 
 Tests run the command functions **in-process** with `process.stdout` / `process.stderr` captured
@@ -280,8 +280,9 @@ Every release:
    runs `guard` (the tag must equal `v<package.json version>`), `build and pack` (the whole
    publish gate, one tarball, its SHA-256 / SHA-512), waits for the `npm-publish` approval,
    publishes exactly that tarball with provenance, then `attest and attach` fetches it back
-   from the registry, checks both digests and `npm audit signatures`, and attaches the tarball,
-   the CycloneDX / SPDX / toolchain SBOMs and the Sigstore bundle to the release.
+   from the registry, checks both digests and attaches the tarball, the CycloneDX / SPDX /
+   toolchain SBOMs and the Sigstore bundle to the release; `verify as a consumer` (read-only)
+   installs the published version and runs `npm audit signatures`.
 3. Verify like a consumer: `npm install zipnative-cli@X.Y.Z && npm audit signatures`, and
    `gh attestation verify zipnative-cli-X.Y.Z.tgz -R Nizoka/zipnative-cli`.
 

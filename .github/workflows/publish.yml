@@ -18,7 +18,7 @@ on:
 #   the `npm-publish` environment (a protected environment with a required
 #   reviewer — CONTRIBUTING.md §Release).
 #
-# Job graph: guard → build → publish → attest.
+# Job graph: guard → build → publish → attest → consumer.
 #   guard    reads package.json; no token, no environment, nothing installed,
 #            so a refusal ends the run BEFORE any approval is asked.
 #   build    runs the whole publish gate over the dev toolchain, packs the
@@ -31,10 +31,14 @@ on:
 #            it verifies the handed-on tarball against the build job's
 #            digests and uploads exactly it.
 #   attest   fetches the published tarball back from the registry, checks it
-#            against the same digests and the registry signatures, writes the
-#            SBOMs, attests them and attaches them to the release. Its
-#            id-token signs that attestation (Sigstore) outside the
-#            `npm-publish` environment, so it cannot publish.
+#            against the same digests, writes the SBOMs, attests them and
+#            attaches them to the release. Its id-token signs that attestation
+#            (Sigstore) outside the `npm-publish` environment, so it cannot
+#            publish; it runs no code fetched from the registry.
+#   consumer read-only: installs the published version into an empty project,
+#            runs `npm audit signatures` and the installed bin. The install
+#            resolves zipnative afresh, so it never holds a signing or write
+#            permission.
 #
 # No job restores a dependency cache: a cache is written by other workflows,
 # and a release job must not build from what they left behind
@@ -314,7 +318,7 @@ jobs:
 
   # Attests the tarball npm published — fetched back from the registry, so the
   # attested bytes ARE the published ones — checks it against the build job's
-  # digests and the registry signatures, writes the SBOMs from the same
+  # digests, writes the SBOMs from the same
   # commit's lockfile, and attaches everything to the release. Kept apart from
   # `publish`: the release-write and attestation permissions are never held
   # next to the npm token.
@@ -386,20 +390,6 @@ jobs:
           echo "${SHA256}  zipnative-cli-${VERSION}.tgz" | sha256sum --check --strict
           test "$(npm view "zipnative-cli@${VERSION}" dist.integrity)" = "${INTEGRITY}"
 
-      # The registry's signature and npm's provenance attestation, checked the
-      # way a consumer checks them: installed into an empty project, and the
-      # installed bin run once.
-      - name: Verify the registry signatures and provenance
-        working-directory: ${{ runner.temp }}
-        run: | # zizmor: ignore[adhoc-packages]
-          set -euo pipefail
-          mkdir signatures
-          cd signatures
-          echo '{ "name": "signatures", "private": true }' > package.json
-          npm install "zipnative-cli@${VERSION}" --ignore-scripts --no-audit --no-fund
-          npm audit signatures
-          test "$(npm exec --offline --no -- zipnative --version)" = "${VERSION}"
-
       - name: Attest build provenance
         id: attest
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
@@ -433,3 +423,50 @@ jobs:
           else
             echo "::notice::No GitHub release v${VERSION} exists; the files are attested but not attached."
           fi
+
+  # The registry's signature and npm's provenance, checked the way a consumer
+  # checks them: installed into an empty project, and the installed bin run
+  # once. A job of its own, with read-only permissions: the install resolves
+  # zipnative afresh from the registry and runs it, so it never shares a job
+  # with the attestation identity (id-token) or the release-write token.
+  consumer:
+    name: verify as a consumer
+    needs: [publish, attest]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ needs.publish.outputs.version }}
+
+    steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            registry.npmjs.org:443
+            nodejs.org:443
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+
+      - name: Verify the registry signatures and provenance
+        working-directory: ${{ runner.temp }}
+        run: | # zizmor: ignore[adhoc-packages]
+          set -euo pipefail
+          mkdir signatures
+          cd signatures
+          echo '{ "name": "signatures", "private": true }' > package.json
+          npm install "zipnative-cli@${VERSION}" --ignore-scripts --no-audit --no-fund
+          npm audit signatures
+          test "$(npm exec --offline --no -- zipnative --version)" = "${VERSION}"

@@ -36,9 +36,10 @@ Upstream: closes the CLI's engine asks answered by zipnative 1.1.0
 | `ci(deps)` | `codeql-action` v4.37.9 on all four steps, `scorecard-action` v2.4.4 |
 | `feat(core)` | 106-export bridge, `--zip64`, `--name-encoding`, `--timeout`, `--progress`, `analyzeDeterminism`, `--long` timestamps / unix ids, `stream --codec` via `createDecompressor`, compensations removed, `scripts/sync-engine-data.mjs` |
 | `fix(security)` | presentation-only config, strict invocation, finite bounds, one-descriptor reads, `lstat` + `wx` / temp + rename writes, terminal-safe text, the early-error unlink fix, ADRs 0001–0008 |
-| `ci(supply-chain)` | four-job publish, `scripts/gate.mjs`, harden-runner / `--ignore-scripts` everywhere, zizmor / actionlint / reuse, audit + OSV, dependency review, rulesets, SECURITY-INSIGHTS, security.txt, ADR 0009 |
+| `ci(supply-chain)` | four-job publish (five after the review fixes), `scripts/gate.mjs`, harden-runner / `--ignore-scripts` everywhere, zizmor / actionlint / reuse, audit + OSV, dependency review, rulesets, SECURITY-INSIGHTS, security.txt, ADR 0009 |
 | `test(fuzz)` | seeded parser fuzzing (one bug found and fixed), stricter `tsconfig` / ESLint, veraZIP re-port (`WF/DESCRIPTOR-WIDTH`), corpus 39, docs link / anchor / EOL tests, ADR 0010 |
 | `chore(release)` | 1.1.0: CHANGELOG, ROADMAP, release notes, docs refresh, four new samples, `typescript-eslint` 8.71.1 |
+| `fix(review)` | findings of two independent pre-PR reviews (correctness, security), each reproduced first: `stream --timeout` no longer exits 0 with a truncated file, a timeout in a decompressor is `E_LIMIT`, config `false` never turns a switch on, `batch` accepts the create flags it forwards, one deadline per process, FIFO reads bounded in memory, per-field terminal escaping (LF, invisible characters, remedies), the consumer check moved to a read-only fifth publish job, manifest `comment-file` anchored |
 
 ## Behaviour changes (reviewer attention)
 
@@ -49,6 +50,8 @@ Upstream: closes the CLI's engine asks answered by zipnative 1.1.0
    read, including for every `batch` task (ADR 0003).
 3. `none` / `inf` on a bound is `E_USAGE` (ADR 0002).
 4. Text errors read `error E_X (ZIP_Y): message` (was `Error: message`).
+5. A manifest `comment-file` resolves against the manifest directory (was the current
+   directory) and is refused on `..`; a manifest task cannot carry `timeout`.
 
 No security default was loosened. `dosTimeMode` is deliberately not adopted (ADR 0008).
 `maxEntryCompressedSize` is reported without a flag (ADR 0007).
@@ -56,7 +59,7 @@ No security default was loosened. `dosTimeMode` is deliberately not adopted (ADR
 ## Test plan
 
 - [x] `npm run typecheck:all` clean; `npm run lint` 0 errors
-- [x] `npm run test:coverage` — 1303 passed, 8 skipped, 69 files; 96.28 / 92.20 / 98.19 / 97.03
+- [x] `npm run test:coverage` — 1318 passed, 9 skipped, 70 files; 96.13 / 92.11 / 98.21 / 96.88
       (thresholds 95 / 91 / 97 / 96)
 - [x] `npm run validate:zip` — 35 PASS + 4 XFAIL; the 37 inherited archives are byte-identical
       to the 1.0.0 build (SHA-256 compared)
@@ -68,6 +71,8 @@ No security default was loosened. `dosTimeMode` is deliberately not adopted (ADR
     limits), `schema diagnostics` (12 codes), `create --stdin-name --zip64`,
     `list --name-encoding shift_jis`;
   - `inspect --check canonical-form` (pass and fail), `--timeout 1ms` → `E_LIMIT`, `--progress`;
+  - `--timeout 60ms` mid-entry on a 64 MiB entry: `stream -d`, `stream --cat`, `extract` → `E_LIMIT`,
+    exit 1, no partial file (1.1.0-dev exited 0 with a truncated file);
   - refusals: `--overwite` / `--constructor x` → `E_USAGE`, `--max-entries none` → `E_USAGE`,
     a planted config → `E_USAGE`, `--overwrite` over a symlink replaces the link.
 - [ ] CI green on the PR (all required contexts in `.github/rulesets/main.json`)
@@ -111,5 +116,11 @@ deviation from the plan is recorded in an ADR or in ROADMAP:
 - no `stream --codec` sample: the CLI cannot write a custom-method archive, so the case is
   covered by tests;
 - runner labels stay `-latest`, as in the sibling repositories.
+
+Before this draft, two independent review agents (correctness and security) read the branch
+diff. Every finding was reproduced on the built binary, fixed, and pinned by a test
+(`tests/integration/review-fixes-1-1.test.ts`, `built-binary-smoke.test.ts`). The engine-side
+cause of the `stream --timeout` hang is a local draft for zipnative
+(`.github/drafts/upstream-forward-reader-abort-hang.md`).
 
 Human review gate applies.

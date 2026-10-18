@@ -97,7 +97,7 @@ scripts/
 ├── sync-engine-data.mjs      # the engine-bump step: re-derives docs/data/{errors,core-exports}.json (--check for CI)
 └── helpers/interop-tools.mjs # level-1 foreign integrity tools (bsdtar, unzip, 7z, python-zipfile, jar)
 
-tests/                                   # 69 vitest files (in-process; stdout/stderr captured via helpers/capture.ts)
+tests/                                   # 70 vitest files (in-process; stdout/stderr captured via helpers/capture.ts)
 ├── commands/, utils/, docs/, scripts/   # per-command suites, util suites, tests/docs/consistency.test.ts, vendored-validator drift
 ├── integration/                         # round trips, modify incremental, parallel identity, refusal posture, forward read,
 │                                        #   one spawn smoke test against dist/cli.cjs (exit codes, EPIPE, signals)
@@ -569,7 +569,7 @@ zipnative batch --manifest <tasks.json> [--continue-on-error] [--allow-codec-loa
 | `--method` / `--level` / `--deterministic` / `--order` / `--date` / `--comment` + every other `create` flag | — | — | Forwarded to each directory-mode `create` |
 | `--dry-run` | boolean | false | Validate and print the plan; execute nothing |
 
-**Directory mode:** `--task create` runs the full `create` command per immediate subdirectory (`--input <dir> --base <dir> --output <output-dir>/<name>.zip`, every other flag forwarded), `--task verify` runs `verifyZip` per `*.zip`. JSON: `{ ok, command: 'batch', mode: 'directory', task, dryRun?, total, succeeded, failed, results: [{ input, output?, ok, error, code? }] }`.
+**Directory mode:** `--task create` runs the full `create` command per immediate subdirectory (`--input <dir> --base <dir> --output <output-dir>/<name>.zip`; every other `create` flag is declared on `batch` and forwarded: `--method`, `--level`, `--deterministic`, `--order`, `--date`, `--comment`, `--overwrite`, `--prefix`, `--dir-entries`, `--include`, `--exclude`, `--follow-symlinks`, `--mtime`, `--comment-file`, `--entry-comment`, `--preserve-mode`, `--store-ext`, `--stream`, `--zip64`, `--chunk-size`, `--parallel`, `--workers`, `--min-job-size`, `--job-timeout`), `--task verify` runs `verifyZip` per `*.zip`. JSON: `{ ok, command: 'batch', mode: 'directory', task, dryRun?, total, succeeded, failed, results: [{ input, output?, ok, error, code? }] }`.
 
 **Manifest mode** (`--manifest`): [`src/utils/manifest.ts`](../src/utils/manifest.ts) parses `{ version: 1, tasks: [{ id, command, flags }] }` **strictly before anything runs** — structural violations exit 2 / `E_USAGE`, value violations (bad or duplicate id, non-whitelisted command, bad `@ref`) exit 1 / `E_INPUT`, a `codec` flag without `--allow-codec-load` exit 2 / `E_USAGE`. Path flags (`input`, `output`, `output-dir`, `from-manifest`, `base`, and the path half of `add` / `replace`) get `validatePath()` (the `..` refusal that argv paths no longer get) and resolve against the manifest's directory; `"@<id>"` substitutes an earlier task's resolved output (or output-dir). Tasks run sequentially, fail-fast unless `--continue-on-error`. Each task's command function is loaded lazily and called in-process with the resolved flags. The 10 manifest commands are `create`, `list`, `inspect`, `extract`, `cat`, `verify`, `stream`, `modify`, `crc32`, `inflate`; `batch`, `govern`, `schema`, `completion`, `doctor` are explicitly forbidden. Manifests are size-capped (50 MB) and bounded to 1 000 tasks. Exit 1 carries the first failing task's `E_*` code and `zipCode`.
 
@@ -808,7 +808,7 @@ See [AGENTS.md](../AGENTS.md) for the agent-facing summary.
 | Terminal escape / bidi injection through archive names | `escapeTerminal()` on every text sink (reports, progress lines, text diagnostics, text errors); JSON exact; `rawNameHex` (docs/adr/0004); `tests/docs/source-hygiene.test.ts` keeps the sources free of raw controls |
 | Data remanence in `modify` | Documented on `--help` and printed as an `info:` line; `--compact` is the deletion path |
 | Forward-reader trust (`stream`) | Attribute-dependent flags refused; `trust: "local-headers-only"` in every JSON output; a `warning:` line at start; descriptor rows carry zero sizes (`bytesKnown: false` in the summary) |
-| Supply-chain risk | Zero extra runtime dependencies; a four-job release (guard → build → publish → attest, docs/adr/0009): no token where dev code runs, the `npm-publish` environment, Trusted Publishing (OIDC) with provenance, the published tarball re-verified against the gated one, CycloneDX + SPDX SBOMs and the tarball attested (Sigstore); every job hardened (`harden-runner`) and installing with `--ignore-scripts`; one SHA per action; zizmor, actionlint, CodeQL (TypeScript + workflows), Scorecard, dependency review, weekly npm audit + OSV-Scanner; rulesets as code; `tests/tools/workflows.test.ts` holds it all |
+| Supply-chain risk | Zero extra runtime dependencies; a five-job release (guard → build → publish → attest → consumer, docs/adr/0009): no token where dev code runs, the `npm-publish` environment, Trusted Publishing (OIDC) with provenance, the published tarball re-verified against the gated one, CycloneDX + SPDX SBOMs and the tarball attested (Sigstore); every job hardened (`harden-runner`) and installing with `--ignore-scripts`; one SHA per action; zizmor, actionlint, CodeQL (TypeScript + workflows), Scorecard, dependency review, weekly npm audit + OSV-Scanner; rulesets as code; `tests/tools/workflows.test.ts` holds it all |
 | False conformance claims | Blocking veraZIP gate (`verazip.yml` on Linux + Windows on every PR, and pre-publish in `publish.yml`): a 39-archive corpus — 35 conformant (32 CLI-produced or crafted + 3 hostile-but-conformant archives `extract` must refuse) and 4 raw-crafted negative canaries — validated by an engine-independent ISO/IEC 21320-1 parser (`35 PASS, 4 XFAIL, 0 FAIL`) |
 
 **Network:** none. No command opens a socket in any mode.
@@ -1042,7 +1042,7 @@ node scripts/gate.mjs --publish --require-all   # + samples, veraZIP (fail-close
 # Build (outputs dist/cli.cjs — the bin; CJS only, no ESM build, no .d.ts, no source maps)
 npm run build
 
-# Test (69 vitest files, in-process; one spawn smoke test against the built binary)
+# Test (70 vitest files, in-process; one spawn smoke test against the built binary)
 npm test
 npm run test:coverage       # thresholds: statements 95 / branches 91 / functions 97 / lines 96
                             # (measured 96.32 / 92.52 / 97.93 / 96.91 on 2026-09-05; never lower them — add tests)

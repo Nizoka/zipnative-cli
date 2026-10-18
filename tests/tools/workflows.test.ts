@@ -216,11 +216,12 @@ describe('publish.yml', () => {
         expect(code(text)).not.toMatch(/NPM_TOKEN|NODE_AUTH_TOKEN|secrets\./);
     });
 
-    it('runs guard → build → publish → attest, the npm-publish environment on one job, one release at a time', () => {
-        expect([...steps.keys()]).toEqual(['guard', 'build', 'publish', 'attest']);
+    it('runs guard → build → publish → attest → consumer, the npm-publish environment on one job, one release at a time', () => {
+        expect([...steps.keys()]).toEqual(['guard', 'build', 'publish', 'attest', 'consumer']);
         expect(jobBody(text, 'build')).toMatch(/needs: guard/);
         expect(jobBody(text, 'publish')).toMatch(/needs: build/);
         expect(jobBody(text, 'attest')).toMatch(/needs: \[build, publish\]/);
+        expect(jobBody(text, 'consumer')).toMatch(/needs: \[publish, attest\]/);
         expect(text.match(/environment: npm-publish/g)).toHaveLength(1);
         expect(jobBody(text, 'publish')).toContain('environment: npm-publish');
         expect(text).toMatch(/concurrency:\n {2}group: publish\n {2}cancel-in-progress: false/);
@@ -269,9 +270,17 @@ describe('publish.yml', () => {
         const attest = jobBody(text, 'attest');
         expect(attest).toContain('npm pack "zipnative-cli@${VERSION}"');
         expect(attest).toContain('dist.integrity');
-        expect(attest).toContain('npm audit signatures');
+        // No registry code runs where the attestation identity can be minted.
+        expect(code(attest)).not.toMatch(/npm install|npm exec|npx /);
         for (const f of ['.cdx.json', '.spdx.json', '.toolchain.cdx.json', '.sigstore.json']) expect(attest, f).toContain(f);
         expect(attest).toContain('actions/attest-build-provenance@');
+    });
+
+    it('installs and runs the published package only in the read-only consumer job', () => {
+        const consumer = jobBody(text, 'consumer');
+        expect(consumer).toContain('npm audit signatures');
+        expect(consumer).toMatch(/permissions:\n {6}contents: read\n/);
+        expect(code(consumer)).not.toMatch(/id-token|attestations:|contents: write/);
     });
 });
 

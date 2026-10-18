@@ -43,7 +43,7 @@ import { createDiagnosticSink } from '../utils/diagnostics.js';
 import { prepareEngine } from '../utils/engine.js';
 import { CliError, ErrorCode } from '../utils/error.js';
 import { overwriteRefused, safeJoin } from '../utils/io.js';
-import { escapeTerminal } from '../utils/sanitize.js';
+import { escapeTerminal, escapeLine } from '../utils/sanitize.js';
 import {
     duplicatePolicy,
     ensureSinkDir,
@@ -240,7 +240,7 @@ export async function extract(args: ParsedArgs): Promise<void> {
     if (dryRun) {
         if (!isJsonMode()) {
             const lines = planned.map((p) => `plan  ${p.relPath}  ${p.entry.uncompressedSize}`);
-            for (const s of skipped) lines.push(`skip  ${s.name}  (${s.reason})`);
+            for (const s of skipped) lines.push(`skip  ${escapeLine(s.name)}  (${s.reason})`);
             process.stdout.write(escapeTerminal(lines.join('\n') + (lines.length > 0 ? '\n' : '')));
         }
         emitStatus({ ...summary, dryRun: true, ...sink.field() });

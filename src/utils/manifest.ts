@@ -37,7 +37,7 @@ const ID_RE = /^[A-Za-z0-9_-]+$/;
 
 /** Flags whose relative values resolve against the manifest directory. */
 const PATH_FLAGS: ReadonlySet<string> = new Set([
-    'input', 'i', 'output', 'o', 'output-dir', 'd', 'from-manifest', 'base',
+    'input', 'i', 'output', 'o', 'output-dir', 'd', 'from-manifest', 'base', 'comment-file',
 ]);
 
 /** Flags whose values are `<name>=<path>` — only the path half resolves. */
@@ -260,6 +260,12 @@ export function parseManifest(raw: string, manifestDir: string): ManifestPlan {
         }
 
         const { flags, dependsOn } = resolveFlags(id, flagsRaw, manifestDir, priorOutputs);
+        // The deadline is one per process (utils/control.ts): a task-level
+        // `timeout` would bound every later task too. Bound the pipeline on
+        // the batch invocation instead.
+        if (flags['timeout'] !== undefined) {
+            throw usageError(`Manifest task "${id}": "timeout" is not a task flag — the deadline bounds the whole run; pass --timeout to batch itself.`);
+        }
 
         const outputValue = flags['output'];
         const output = typeof outputValue === 'string' && outputValue !== '-' ? outputValue : undefined;

@@ -125,16 +125,28 @@ export async function readFileOrStdin(filePath: string | undefined, maxBytes: nu
             return buf.subarray(0, total);
         }
         // Not a regular file: no trustworthy size — count every byte.
+        // Reads fill one block at a time and only full blocks are kept, so a
+        // peer that trickles 1-byte reads cannot pin a 64 KiB allocation per
+        // byte: memory stays the byte count plus one block (the bound counts
+        // bytes, so it bounds memory too).
         const chunks: Buffer[] = [];
+        let block = Buffer.allocUnsafe(STREAM_READ_CHUNK);
+        let used = 0;
         let total = 0;
         for (;;) {
-            const chunk = Buffer.allocUnsafe(STREAM_READ_CHUNK);
-            const { bytesRead } = await handle.read(chunk, 0, STREAM_READ_CHUNK, null);
+            const { bytesRead } = await handle.read(block, used, STREAM_READ_CHUNK - used, null);
             if (bytesRead === 0) break;
             total += bytesRead;
             if (total > maxBytes) throw inputTooLarge(total, maxBytes, `"${filePath}"`);
-            chunks.push(chunk.subarray(0, bytesRead));
+            used += bytesRead;
+            if (used === STREAM_READ_CHUNK) {
+                chunks.push(block);
+                block = Buffer.allocUnsafe(STREAM_READ_CHUNK);
+                used = 0;
+            }
+            checkAborted();
         }
+        if (used > 0) chunks.push(block.subarray(0, used));
         return Buffer.concat(chunks, total);
     } finally {
         await handle.close();
@@ -393,7 +405,13 @@ async function streamIntoNewFile(
                 onChunk?.(chunk.length);
                 const ok = stream.write(chunk);
                 if (!ok) {
-                    await new Promise<void>((r) => { stream.once('drain', r); stream.once('close', r); });
+                    await new Promise<void>((r) => {
+                        // One waiter per backpressure pause: detach the other
+                        // listener, or 'close' listeners pile up per chunk.
+                        const done = (): void => { stream.off('drain', done); stream.off('close', done); r(); };
+                        stream.once('drain', done);
+                        stream.once('close', done);
+                    });
                 }
             }
             if (!stream.destroyed) stream.end();

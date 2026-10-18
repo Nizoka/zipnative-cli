@@ -2,9 +2,9 @@ import { parseArgs, hasFlag, getStringFlag } from './utils/args.js';
 import { CliError, ErrorCode } from './utils/error.js';
 import { isJsonMode, emitJsonError, remedyFor } from './utils/agent.js';
 import { loadConfig, applyConfigDefaults, setActiveConfig } from './utils/config.js';
-import { armTimeout } from './utils/control.js';
-import { escapeTerminal } from './utils/sanitize.js';
-import { installSignalCleanup } from './utils/inflight.js';
+import { armTimeout, runSignal } from './utils/control.js';
+import { escapeLine } from './utils/sanitize.js';
+import { installSignalCleanup, removeInFlight } from './utils/inflight.js';
 import { installEpipeGuard } from './utils/io.js';
 import { cliVersion, engineVersion } from './utils/version.js';
 
@@ -493,8 +493,13 @@ Directory mode:
   --concurrency <n>   Parallel workers (default 4, max 64)
   --fail-fast         Stop scheduling after the first failure
   --method/--level/--deterministic/--order/--date/--comment
-                      Forwarded to every create task (see create --help);
-                      any other create flag is forwarded too
+                      Forwarded to every create task (see create --help),
+                      like every other create flag that names no input or
+                      output: --prefix --dir-entries --include --exclude
+                      --follow-symlinks --mtime --comment-file --entry-comment
+                      --preserve-mode --store-ext --stream --zip64
+                      --chunk-size --parallel --workers --min-job-size
+                      --job-timeout
 
 Manifest mode:
   --manifest <file>   Ordered pipeline of whitelisted commands (create, list,
@@ -664,8 +669,10 @@ async function main(): Promise<void> {
     const argv = process.argv.slice(2);
     // Agent mode must hold for a refusal raised BY the parse itself (a repeated
     // switch, a prototype name): `--json` is never a flag's value (a token
-    // starting with "-" is not consumed), so the bare token decides.
-    if (argv.includes('--json')) process.env['ZIPNATIVE_JSON'] = '1';
+    // starting with "-" is not consumed), so the bare token decides — before
+    // `--`, after which every token is an operand.
+    const endOfFlags = argv.indexOf('--');
+    if ((endOfFlags === -1 ? argv : argv.slice(0, endOfFlags)).includes('--json')) process.env['ZIPNATIVE_JSON'] = '1';
     const args = parseArgs(argv);
 
     // Global output flags (recognised anywhere in argv).
@@ -752,7 +759,7 @@ async function main(): Promise<void> {
         // progress, strict) take effect like their flags.
         applyGlobalEnv(effectiveArgs);
         if (loaded.path !== undefined && merged.applied.length > 0 && !isJsonMode() && process.env['ZIPNATIVE_QUIET'] !== '1') {
-            process.stderr.write(`info: defaults from ${loaded.path}: ${merged.applied.join(', ')}\n`);
+            process.stderr.write(`info: defaults from ${escapeLine(loaded.path)}: ${escapeLine(merged.applied.join(', '))}\n`);
         }
     }
 
@@ -777,7 +784,7 @@ function exitAfterFlush(code: number): void {
     process.stderr.write('', done);
 }
 
-main().catch((e: unknown) => {
+function fail(e: unknown): void {
     // Agent mode: a single JSON error envelope on stderr, with a stable code.
     if (isJsonMode()) {
         emitJsonError(activeCommand, e);
@@ -793,12 +800,12 @@ main().catch((e: unknown) => {
             // quote archive bytes (display-escaped; the --json envelope keeps
             // the raw text).
             const cause = e.zipCode !== undefined ? ` (${e.zipCode})` : '';
-            process.stderr.write(`error ${e.code}${cause}: ${escapeTerminal(e.message)}\n`);
+            process.stderr.write(`error ${e.code}${cause}: ${escapeLine(e.message)}\n`);
         }
         // The machine-actionable counterpart of the message (same text as the
         // --json envelope's error.remedy); part of the error, never suppressed.
         const remedy = remedyFor(e);
-        if (remedy !== undefined) process.stderr.write(`remedy: ${remedy}\n`);
+        if (remedy !== undefined) process.stderr.write(`remedy: ${escapeLine(remedy)}\n`);
         exitAfterFlush(e.exitCode);
         return;
     }
@@ -806,6 +813,27 @@ main().catch((e: unknown) => {
     if (process.env['ZIPNATIVE_DEBUG'] === '1' && e instanceof Error) {
         process.stderr.write((e.stack ?? e.message) + '\n');
     }
-    process.stderr.write(`error ${ErrorCode.RUNTIME}: ${escapeTerminal(message)}\n`);
+    process.stderr.write(`error ${ErrorCode.RUNTIME}: ${escapeLine(message)}\n`);
     exitAfterFlush(1);
+}
+
+// A run must never end with exit 0 while main() is still pending: if an
+// engine promise never settles and nothing else keeps the loop alive (the
+// --timeout timer is unref'd), Node drains the loop and would exit 0 with no
+// result. beforeExit catches that: the deadline's reason if the run was
+// aborted, E_RUNTIME otherwise; the files being written are removed.
+let settled = false;
+process.once('beforeExit', () => {
+    if (settled) return;
+    settled = true;
+    removeInFlight();
+    const signal = runSignal();
+    fail(signal?.aborted === true
+        ? signal.reason
+        : new CliError('The run ended with an operation still pending (an engine promise never settled); no result was produced.', 1, ErrorCode.RUNTIME));
 });
+
+main().then(
+    () => { settled = true; },
+    (e: unknown) => { settled = true; fail(e); },
+);

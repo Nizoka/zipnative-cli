@@ -37,8 +37,9 @@ machine-readable JSON manifest run `zipnative schema manifest`.
 - **Strict invocation** (1.1.0): an undeclared flag, a repeated switch or
   single-value flag, surplus positionals, or an operand plus its flag →
   `E_USAGE` (exit 2), checked before any input is read (also per batch task).
-- **Text output is terminal-safe**: control / bidi characters in names are
-  escaped (`\x1b`, `\u202e`) in text mode; JSON is exact.
+- **Text output is terminal-safe**: control / bidi / invisible characters in
+  names are escaped (`\x1b`, `\u202e`) in text mode, a name's LF too (one
+  entry, one row); JSON is exact.
 - **No input and stdin is a terminal** → `E_USAGE` (exit 2); an explicit `-`
   is never guarded.
 - **`--json`** (agent mode): success emits `{ "ok": true, "command", … }` on

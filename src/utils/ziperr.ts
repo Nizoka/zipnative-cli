@@ -22,6 +22,7 @@ import {
 } from '../core-bridge/index.js';
 import { CliError, ErrorCode, type ErrorCodeValue, type ErrorDetail } from './error.js';
 import { LIMIT_FLAGS } from './limits.js';
+import { runSignal } from './control.js';
 
 type Mapping = readonly [code: ErrorCodeValue, exitCode: number];
 
@@ -162,6 +163,12 @@ function entryNameOf(err: ZipError): string | undefined {
  */
 export function mapZipError(err: unknown, context: string, entryName?: string): CliError {
     if (err instanceof CliError) return err;
+    // Past the --timeout deadline every failure IS the deadline: the engine
+    // wraps an abort that reaches a decompressor as ZIP_DECOMPRESSION_FAILED
+    // (it passes through only ZipErrors and errors named AbortError), which
+    // would misreport a timeout as corrupt data.
+    const signal = runSignal();
+    if (signal?.aborted === true && signal.reason instanceof CliError) return signal.reason;
     if (err instanceof ZipError) {
         // `satisfies Record<ZipErrorCode, …>` makes the fallback unreachable for a
         // 1.0.0 engine; it stays for a code a NEWER engine may add at runtime.

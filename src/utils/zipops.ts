@@ -30,15 +30,18 @@ import { guard } from './ziperr.js';
  *   • `strict`, `onDiagnostic`, `limits` — the 1.0 contract;
  *   • no `dosTimeMode`: the engine default `'local'` is kept on purpose (see
  *     {@link parseIsoDateUtc} — the CLI's date convention is per entry);
- *   • `signal` — the `--timeout` deadline (utils/control.ts);
+ *   • `signal` — the `--timeout` deadline (utils/control.ts), unless the
+ *     caller opts out with `{ signal: false }` (`stream`: zipnative 1.1's
+ *     forward reader leaves a pending entry read unsettled when aborted, so
+ *     the CLI bounds that path in its own input and write loops instead);
  *   • `onProgress` — `--progress` snapshots on stderr;
  *   • `nameDecoder` — `--name-encoding <label>` (read commands only: the
  *     engine applies it to names without the UTF-8 flag, before sanitising).
  */
-export function commonOptions(args: ParsedArgs, sink: DiagnosticSink, command: string): ZipCommonOptions {
+export function commonOptions(args: ParsedArgs, sink: DiagnosticSink, command: string, opts: { readonly signal?: boolean } = {}): ZipCommonOptions {
     const limits = parseLimitFlags(args);
     armTimeout(args);
-    const signal = runSignal();
+    const signal = opts.signal === false ? undefined : runSignal();
     const onProgress = progressHandler(command, args);
     const nameDecoder = parseNameEncoding(args);
     return {

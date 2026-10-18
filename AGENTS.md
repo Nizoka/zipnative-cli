@@ -84,7 +84,8 @@ line that starts with `{` and has an `ok` key*. Never `JSON.parse` the whole str
 `--quiet` removes the text and progress lines, never an envelope.
 
 **Text mode is terminal-safe.** In text output entry names, comments and messages are
-printed with control and bidi characters escaped (`\x1b`, `\u202e`); JSON carries the
+printed with control, bidi and invisible characters escaped (`\x1b`, `\u202e`), and a
+name's own TAB / LF escaped too (one entry, one row); JSON carries the
 exact text and `--long` the bytes (`rawNameHex`). A text-mode error leads with its class
 and cause — `error E_DATA (ZIP_CRC_MISMATCH): …`, `error E_USAGE: …` — then `remedy: …`
 when one exists.

@@ -55,9 +55,12 @@ writes them. Design decisions are recorded as ADRs in [docs/adr/](docs/adr/READM
   into place, so a planted symlink is **replaced, never followed**. This covers `create`,
   `modify`, `cat`, `inflate`, `extract` and `stream`.
 - **Terminal-safe text** ([ADR 0004](docs/adr/0004-terminal-safe-text.md)). C0 / C1 controls,
-  DEL and the Unicode bidi controls in attacker-controlled text (entry names, comments, engine
+  DEL, the Unicode bidi controls and the invisible look-alike characters (zero-width space,
+  line separators, BOM, soft hyphen, Hangul fillers, tag characters) in attacker-controlled text (entry names, comments, engine
   messages) are escaped as `\xNN` / `\uXXXX` in every text sink — tables, progress lines,
-  diagnostics, errors. JSON output stays exact (`rawNameHex` keeps the bytes).
+  diagnostics, errors, remedies; a single field (a name, a message) has its TAB and LF escaped
+  too, so it cannot forge a row or a `remedy:` line. JSON output stays exact (`rawNameHex`
+  keeps the bytes).
 - **Text errors lead with the class and the engine code**: `error E_X (ZIP_Y): message`, then
   the `remedy:` line. Scripts that matched the 1.0.0 `Error: ` prefix should match
   `^error ` or, better, use `--json`.
@@ -80,7 +83,10 @@ writes them. Design decisions are recorded as ADRs in [docs/adr/](docs/adr/READM
 - **`--timeout <duration>`** (global: `500`, `500ms`, `30s`, `5m`, `1h`): one `AbortSignal`
   deadline for the run. Past it the run stops at the next chunk or entry boundary with
   **`E_LIMIT`** (`detail.limit: "timeout"`, `configured`, `observed`) and the file being written
-  is removed; no new `E_*` code ([ADR 0006](docs/adr/0006-timeout-is-a-limit.md)).
+  is removed; no new `E_*` code ([ADR 0006](docs/adr/0006-timeout-is-a-limit.md)). An abort
+  that reaches a decompressor is reported as the deadline, never as corrupt data. The deadline
+  is one per process: a `batch` manifest task cannot carry `timeout` (`E_USAGE`) — pass it to
+  `batch` itself.
 - **`--progress`** (global, or `ZIPNATIVE_PROGRESS=1`): the engine's `onProgress` snapshots on
   stderr where the engine measures them (`create --stream` / `--stdin-name` / `--parallel`,
   `extract` without `--buffered`, `stream`, `cat`) — one throttled text line, or NDJSON
@@ -116,6 +122,12 @@ writes them. Design decisions are recorded as ADRs in [docs/adr/](docs/adr/READM
 
 ### Changed
 
+- **`batch` directory mode declares every `create` flag it forwards** (`--include`,
+  `--exclude`, `--dir-entries`, `--store-ext`, `--mtime`, `--stream`, `--zip64`, `--parallel`,
+  …), so strict invocation accepts them and the shells complete them.
+- **A manifest `comment-file`** resolves against the manifest directory and is refused on
+  `..`, like the other path flags of a manifest task (1.0.0 resolved it against the current
+  directory).
 - **Engine compensations removed** now that 1.1.0 answers them: the zlib-error translation
   (`ZLIB_TO_ZIP` — every inflate tier raises `ZIP_DEFLATE_CORRUPT` / `ZIP_DEFLATE_TRUNCATED`),
   the hand-rolled skip re-derivation in `verify --entry` and `modify`
@@ -139,7 +151,7 @@ writes them. Design decisions are recorded as ADRs in [docs/adr/](docs/adr/READM
   `noPropertyAccessFromIndexSignature`, `lib` without `dom`; ESLint adds
   `no-non-null-assertion`, `no-console` and a rule forbidding a `zipnative` import outside the
   core bridge. Coverage thresholds ratcheted to 95 / 91 / 97 / 96 (measured
-  96.28 / 92.20 / 98.19 / 97.03).
+  96.13 / 92.11 / 98.21 / 96.88).
 - **veraZIP** re-ported from zipnative 1.1.0 (`scripts/validate-zip.ts`, commit `1e2ab42`, blob
   `604321f`): the new `WF/DESCRIPTOR-WIDTH` check keys the data-descriptor width on the local
   header's Zip64 extra (APPNOTE 4.3.9.2), a 23-id vocabulary. The corpus gains `create --stream
@@ -151,6 +163,21 @@ writes them. Design decisions are recorded as ADRs in [docs/adr/](docs/adr/READM
 
 ### Fixed
 
+- **A run never ends with exit 0 while an engine call is still pending.** If the event loop
+  drains with the command unfinished, the run fails (the deadline's `E_LIMIT` when it fired,
+  `E_RUNTIME` otherwise) and the files being written are removed. `stream` does not hand the
+  deadline to the engine's forward reader, whose pending entry read did not settle on abort;
+  the CLI's own input and write loops enforce it there.
+- **`MaxListenersExceededWarning` on large entries** (1.0.0): every backpressure wait of the
+  file writer left a `close` listener behind; one listener pair now lives per wait, so
+  stderr carries envelopes only.
+- **A pipe, FIFO or device read is bounded in memory, not only in bytes**: reads fill 64 KiB
+  blocks, so a peer trickling 1-byte reads cannot pin 64 KiB per byte below
+  `--max-input-size`.
+- **`false` in `.zipnativerc.json` never turns a switch on** (`{"json": false}` printed
+  JSON; `{"quiet": false}` silenced the warnings): it only turns off what a broader section
+  turned on.
+- `--json` after `--` is an operand, not agent mode.
 - **Data loss on an early error** (1.0.0): when the engine failed before the deferred exclusive
   open, `cat`, `inflate` and `create` unlinked the output path — which could be a pre-existing
   file the run had refused to overwrite. The write layer now removes only what it created.
@@ -166,13 +193,14 @@ writes them. Design decisions are recorded as ADRs in [docs/adr/](docs/adr/READM
 
 ### Supply chain
 
-- **Four-job release** ([ADR 0009](docs/adr/0009-release-integrity.md)): `guard` (the tag must
+- **Five-job release** ([ADR 0009](docs/adr/0009-release-integrity.md)): `guard` (the tag must
   equal `v<version>`) → `build` (no `id-token`, no cache, the publish gate, pack + SHA-256 /
   SHA-512) → `publish` (behind the `npm-publish` environment, `.nvmrc` only, both digests
   re-checked, an npm client pinned by SHA-512, `npm publish --provenance` through Trusted
-  Publishing) → `attest` (the tarball fetched back from the registry and compared,
-  `npm audit signatures`, CycloneDX + SPDX SBOMs from `npm sbom`, attested and attached to the
-  release). `@cyclonedx/cyclonedx-npm` is dropped.
+  Publishing) → `attest` (the tarball fetched back from the registry and compared, CycloneDX +
+  SPDX SBOMs from `npm sbom`, attested and attached to the release; no registry code runs
+  next to its signing identity) → `consumer` (read-only: install, `npm audit signatures`, the
+  installed bin). `@cyclonedx/cyclonedx-npm` is dropped.
 - **One definition of green**: `scripts/gate.mjs` (`--fast`, `--ci`, `--publish`,
   `--require-all`) is what `ci.yml`, `node-current.yml`, `sample-regression.yml` and
   `publish.yml` run, instead of hand-copied steps. It adds a reproducible-build step, a bundle

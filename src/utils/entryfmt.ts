@@ -22,6 +22,7 @@ import {
 } from '../core-bridge/index.js';
 import { bytesToHex, decodeComment } from './zipops.js';
 import { formatRatio } from './sizes.js';
+import { escapeLine } from './sanitize.js';
 
 export interface DecodedFlags {
     readonly raw: number;
@@ -266,9 +267,9 @@ export function renderTable(rows: readonly EntryRow[], long: boolean): string {
         if (long) {
             const flags = r.flags ?? decodeFlags(0);
             const f = `${flags.utf8 ? 'U' : '-'}${flags.dataDescriptor ? 'D' : '-'}${flags.encrypted ? 'E' : '-'}${r.usesZip64 === true ? 'Z' : '-'}`;
-            lines.push(`${common}  ${pad(r.unixMode ?? '-', 6, true)}  ${pad(f, 5, true)}  ${r.name}${mark}`);
+            lines.push(`${common}  ${pad(r.unixMode ?? '-', 6, true)}  ${pad(f, 5, true)}  ${escapeLine(r.name)}${mark}`);
         } else {
-            lines.push(`${common}  ${r.name}${mark}`);
+            lines.push(`${common}  ${escapeLine(r.name)}${mark}`);
         }
     }
     lines.push('-'.repeat(head.length));

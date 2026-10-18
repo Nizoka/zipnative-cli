@@ -20,7 +20,7 @@ import { CliError, ErrorCode, type ErrorCodeValue } from '../utils/error.js';
 import { isJsonMode, isDryRun, progress, remedyFor } from '../utils/agent.js';
 import { selectFields, serializeJson, parseFieldList } from '../utils/projection.js';
 import { style } from '../utils/colors.js';
-import { escapeTerminal } from '../utils/sanitize.js';
+import { escapeTerminal, escapeLine } from '../utils/sanitize.js';
 import { verifyZip } from '../core-bridge/index.js';
 import { prepareEngine } from '../utils/engine.js';
 import { parseLimitFlags } from '../utils/limits.js';
@@ -233,7 +233,7 @@ async function runManifest(manifestPath: string, args: ParsedArgs): Promise<void
         if (format === 'text') {
             plan.tasks.forEach((task: ManifestTaskPlan, i: number) => {
                 const target = task.output !== undefined ? ` → ${task.output}` : task.outputDir !== undefined ? ` → ${task.outputDir}/` : '';
-                process.stdout.write(escapeTerminal(`plan [${i + 1}/${total}] ${task.command} ${task.id}${target}\n`));
+                process.stdout.write(escapeTerminal(`plan [${i + 1}/${total}] ${task.command} ${escapeLine(task.id)}${escapeLine(target)}\n`));
             });
         }
         const planned = plan.tasks.map((t): ManifestTaskResult => ({

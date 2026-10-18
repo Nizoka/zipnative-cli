@@ -39,18 +39,19 @@ export const DRY_RUN_COMMANDS: readonly string[] = ['create', 'extract', 'modify
 const COMPRESSION_FLAGS = ['--method', '--level', '--deterministic'];
 const PROJECTION_FLAGS = ['--summary', '--fields'];
 const FILTER_FLAGS = ['--include', '--exclude'];
+/** `create`'s flags other than its inputs and output — also `batch` directory mode's (forwarded). */
+const CREATE_TREE_FLAGS = [
+    '--prefix', '--dir-entries', ...FILTER_FLAGS, '--follow-symlinks', ...COMPRESSION_FLAGS, '--order', '--date', '--mtime',
+    '--comment', '--comment-file', '--entry-comment', '--preserve-mode', '--store-ext', '--stream', '--zip64', '--chunk-size',
+    '--parallel', '--workers', '--min-job-size', '--job-timeout', '--overwrite',
+];
 
 export const COMMANDS: readonly CommandSpec[] = [
     {
         name: 'create',
         group: 'Create & modify',
         summary: 'Build a deterministic ZIP from files, directories, stdin or a manifest',
-        flags: [
-            '--input', '--output', '--stdin-name', '--from-manifest', '--base', '--prefix', '--dir-entries',
-            ...FILTER_FLAGS, '--follow-symlinks', ...COMPRESSION_FLAGS, '--order', '--date', '--mtime',
-            '--comment', '--comment-file', '--entry-comment', '--preserve-mode', '--store-ext', '--stream', '--zip64', '--chunk-size',
-            '--parallel', '--workers', '--min-job-size', '--job-timeout', '--overwrite',
-        ],
+        flags: ['--input', '--output', '--stdin-name', '--from-manifest', '--base', ...CREATE_TREE_FLAGS],
     },
     {
         name: 'modify',
@@ -124,7 +125,9 @@ export const COMMANDS: readonly CommandSpec[] = [
         flags: [
             '--input-dir', '--output-dir', '--task', '--concurrency', '--fail-fast', '--manifest',
             '--continue-on-error', '--allow-codec-load', '--format', ...PROJECTION_FLAGS,
-            ...COMPRESSION_FLAGS, '--order', '--date', '--comment', '--overwrite',
+            // Directory mode runs the full create per subfolder: every create
+            // flag that does not name an input or an output is forwarded.
+            ...CREATE_TREE_FLAGS,
         ],
     },
     {
@@ -172,7 +175,7 @@ export const REPEATABLE_FLAGS: Readonly<Record<string, readonly string[]>> = {
     verify: ['entry'],
     crc32: ['input'],
     inflate: [],
-    batch: [],
+    batch: ['include', 'exclude', 'entry-comment'],
     doctor: [],
     schema: [],
     completion: [],

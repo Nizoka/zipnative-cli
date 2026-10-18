@@ -43,7 +43,7 @@ import {
     writeStreamingOutput,
 } from '../utils/io.js';
 import { parseInputSizeFlag } from '../utils/limits.js';
-import { escapeTerminal } from '../utils/sanitize.js';
+import { escapeTerminal, escapeLine } from '../utils/sanitize.js';
 import { parseByteSize } from '../utils/sizes.js';
 import { walkPaths, type SkippedPath } from '../utils/walk.js';
 import { mapZipError } from '../utils/ziperr.js';
@@ -468,9 +468,9 @@ export async function create(args: ParsedArgs): Promise<void> {
             const lines = plan.entries.map((e) => {
                 const size = e.source.kind === 'file' ? e.source.size : e.source.kind === 'bytes' ? e.source.data.length : '?';
                 const m = e.isDirectory ? 'dir' : (e.options.compression?.method ?? method);
-                return `plan  ${e.name}  ${size}  ${m}`;
+                return `plan  ${escapeLine(e.name)}  ${size}  ${m}`;
             });
-            for (const s of skipped) lines.push(`skip  ${s.name}  (${s.reason})`);
+            for (const s of skipped) lines.push(`skip  ${escapeLine(s.name)}  (${s.reason})`);
             process.stdout.write(escapeTerminal(lines.join('\n') + (lines.length > 0 ? '\n' : '')));
         }
         emitStatus({ ...summary, dryRun: true, ...sink.field() });

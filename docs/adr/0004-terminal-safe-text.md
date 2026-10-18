@@ -23,8 +23,18 @@ names come straight from the attacker.
   every C1 control (U+0080–U+009F, honoured as 8-bit escapes by some terminals) and the bidi
   embedding / override / isolate controls (U+061C, U+200E/F, U+202A–E, U+2066–9) with a visible
   escape (`\x1b`, `\u202e`).
+- It also escapes the invisible characters that make two names look alike or hide text: U+00AD, U+115F, U+1160, U+200B, U+2028, U+2029, U+2060–U+2064, U+3164, U+FEFF, U+FFA0 and the tag characters U+E0000–U+E007F
+  (`\u{e0041}`). ZWNJ / ZWJ and the variation selectors stay: they compose ordinary
+  Persian, Indic and emoji text.
+- `escapeTerminal()` keeps TAB and LF because a report is several lines. Every FIELD that comes
+  from an archive (an entry name, an extra-field name, an engine message) and every one-line
+  message (progress, diagnostics, errors, the `remedy:` and `info:` lines) goes through
+  `escapeLine()`, which escapes TAB and LF too — otherwise an entry named
+  `a.txt<LF>   5  safe.txt` prints as two rows and an error message can grow a forged
+  `remedy:` line (both found by the 1.1.0 security review, before release).
 - It is applied at the text sinks: the commands' text reports on stdout, `progress()` lines,
-  text diagnostics (`formatDiagnosticLine`), and text-mode error messages.
+  text diagnostics (`formatDiagnosticLine`), text-mode error messages and remedies, and the
+  configuration `info:` line (a planted `.zipnativerc.json` key or path is attacker text too).
 - JSON is not escaped: `JSON.stringify` already escapes C0 controls, agents need the exact text,
   and `--long` carries the bytes in `rawNameHex`. Entry DATA (`cat`, `stream --cat`, `inflate`)
   is never touched.

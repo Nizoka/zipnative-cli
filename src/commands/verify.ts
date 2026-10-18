@@ -24,7 +24,7 @@ import { prepareEngine } from '../utils/engine.js';
 import { CliError, ErrorCode } from '../utils/error.js';
 import { parseLimitFlags } from '../utils/limits.js';
 import { emitJsonReport } from '../utils/projection.js';
-import { escapeTerminal } from '../utils/sanitize.js';
+import { escapeTerminal, escapeLine } from '../utils/sanitize.js';
 import { guard, mapZipError } from '../utils/ziperr.js';
 import { commonOptions, entryPasses, openArchive, parseFormat, readArchiveBytes, resolveInputPath } from '../utils/zipops.js';
 
@@ -70,24 +70,24 @@ function renderText(report: VerifyReport, source: string): string {
     }
     for (const e of report.entries) {
         if (e.ok) {
-            lines.push(`  ok    ${e.name}`);
+            lines.push(`  ok    ${escapeLine(e.name)}`);
         } else if (e.skipped !== undefined && entryPasses(e)) {
-            lines.push(`  skip  ${e.name}  (${e.skipped})`);
+            lines.push(`  skip  ${escapeLine(e.name)}  (${e.skipped})`);
         } else if (e.skipped !== undefined) {
             // A skip that fails the archive: no codec for the method, or a
             // design-time skip whose local header disagrees.
-            lines.push(`  FAIL  ${e.name}  (${e.skipped}${e.localHeaderMatch ? '' : ',local-header'})`);
+            lines.push(`  FAIL  ${escapeLine(e.name)}  (${e.skipped}${e.localHeaderMatch ? '' : ',local-header'})`);
         } else {
             const why = [
                 !e.crcMatch ? 'crc' : null,
                 !e.sizeMatch ? 'size' : null,
                 !e.localHeaderMatch ? 'local-header' : null,
             ].filter((x) => x !== null).join(',');
-            lines.push(`  FAIL  ${e.name}  (${why})`);
+            lines.push(`  FAIL  ${escapeLine(e.name)}  (${why})`);
         }
     }
     for (const d of report.diagnostics) {
-        lines.push(`  ${d.severity} [${d.code}]${d.entryName !== undefined ? ` ${d.entryName}:` : ''} ${d.message}`);
+        lines.push(`  ${d.severity} [${d.code}]${d.entryName !== undefined ? ` ${escapeLine(d.entryName)}:` : ''} ${escapeLine(d.message)}`);
     }
     lines.push('');
     const verified = report.selected !== undefined ? report.selected.length : report.entryCount;

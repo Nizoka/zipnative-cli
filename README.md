@@ -27,7 +27,7 @@ Official CLI for the [`zipnative`](https://github.com/Nizoka/zipnative) engine �
 > (an opt-out or a limit in it is `E_USAGE`), an **undeclared, repeated or surplus flag is
 > `E_USAGE`** (a typo is no longer ignored), and **`--max-* none` is refused** (every bound is
 > finite). `--overwrite` now replaces a planted symlink instead of following it, text output
-> escapes terminal control characters, and the release ships through a four-job attested
+> escapes terminal control characters, and the release ships through a five-job attested
 > pipeline. Migration notes: [CHANGELOG](CHANGELOG.md#security-and-behaviour-changes-migration),
 > decisions: [docs/adr/](docs/adr/README.md), [release notes](release-notes/v1.1.0.md).
 >
@@ -119,7 +119,7 @@ Official CLI for the [`zipnative`](https://github.com/Nizoka/zipnative) engine �
 - **Stdin / stdout by default** — every command is shell-pipeline friendly.
 - **TypeScript strict, ESM source** — bundled by tsup into one CommonJS bin (`dist/cli.cjs`).
   The package is a command-line tool only: no programmatic entry point, no type declarations.
-- **Verifiable releases** — Trusted Publishing (OIDC) with npm provenance, from a four-job
+- **Verifiable releases** — Trusted Publishing (OIDC) with npm provenance, from a five-job
   pipeline where dev-dependency code never runs next to the publishing token; the published
   tarball is fetched back and checked against the gated one, and the tarball plus CycloneDX /
   SPDX SBOMs are attested (Sigstore) and attached to the GitHub Release.
@@ -800,6 +800,7 @@ zipnative batch --manifest <tasks.json> [--continue-on-error] [--allow-codec-loa
 | `--concurrency <n>` | `4` | Parallel workers, 1–64 (exit 2 outside) |
 | `--fail-fast` | false | Stop scheduling after the first failure |
 | `--method` / `--level` / `--deterministic`, `--order`, `--date`, `--comment` | `create` defaults | Directory mode forwards every `create` flag to each archive |
+| `--prefix`, `--dir-entries`, `--include`, `--exclude`, `--follow-symlinks`, `--mtime`, `--comment-file`, `--entry-comment`, `--preserve-mode`, `--store-ext`, `--stream`, `--zip64`, `--chunk-size`, `--parallel`, `--workers`, `--min-job-size`, `--job-timeout` | `create` defaults | The other `create` flags, forwarded the same way (inputs and outputs are batch's own) |
 | `--manifest <file>` | — | Ordered pipeline of whitelisted commands with `"@<id>"` output references; tasks run sequentially, fail-fast by default — see `zipnative schema batch-manifest` |
 | `--continue-on-error` | false | Keep running independent tasks after a failure (tasks depending on a failed task are skipped) |
 | `--allow-codec-load` | false | Permit a `codec` flag inside tasks (executes user code) |
@@ -1101,7 +1102,8 @@ See [AGENTS.md](AGENTS.md) and the [`samples/agent/`](samples/agent) scripts.
 - **Configuration cannot relax a guard** — `.zipnativerc.json` sets presentation defaults only;
   an opt-out, a bound, a path or `codec` in it is `E_USAGE` (1.1.0).
 - **Archive text cannot drive the terminal** — in text mode every entry name, comment and engine
-  message is printed with C0 / C1 / DEL and Unicode bidi controls made visible (`\x1b`,
+  message is printed with C0 / C1 / DEL, the Unicode bidi controls and the invisible look-alike
+  characters made visible — a name's own LF too, so one entry is one row (`\x1b`,
   `\u202e`): a hostile name cannot clear the screen, rewrite earlier lines or disguise
   `evil\u202etxt.exe` (Trojan Source). JSON keeps the exact text (`rawNameHex` keeps the bytes).
 - **Data remanence** — `modify` without `--compact` keeps removed / replaced bytes recoverable
@@ -1124,12 +1126,13 @@ See [AGENTS.md](AGENTS.md) and the [`samples/agent/`](samples/agent) scripts.
 - **JSON size cap** — manifests, drafts and JSON inputs are capped at 50 MB before parsing
   (config files at 1 MiB, size-checked on the open descriptor).
 - **Release integrity** ([ADR 0009](docs/adr/0009-release-integrity.md)) — published by
-  `publish.yml` in four jobs (guard → build → publish → attest): the tag must match the version,
+  `publish.yml` in five jobs (guard → build → publish → attest → consumer): the tag must match the version,
   the publish gate (`scripts/gate.mjs --publish --require-all`) runs where no token can be
   minted, the `npm-publish` environment gates the one job that publishes the handed-on tarball
   (both digests re-checked, npm client pinned by SHA-512) through Trusted Publishing with
-  provenance, and the last job re-downloads it from the registry, runs `npm audit signatures`
-  and attests the tarball and its CycloneDX / SPDX SBOMs. Verify with
+  provenance; `attest` re-downloads it from the registry and attests the tarball and its
+  CycloneDX / SPDX SBOMs, and a read-only `consumer` job installs it and runs
+  `npm audit signatures` (no registry code ever runs next to the signing identity). Verify with
   `npm audit signatures` and `gh attestation verify zipnative-cli-<version>.tgz -R
   Nizoka/zipnative-cli`. Every CI job starts with `harden-runner` and installs with
   `--ignore-scripts`; every action is SHA-pinned; zizmor, actionlint, CodeQL (TypeScript and

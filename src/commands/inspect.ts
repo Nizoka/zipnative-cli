@@ -31,7 +31,7 @@ import { prepareEngine } from '../utils/engine.js';
 import { CliError, ErrorCode } from '../utils/error.js';
 import { methodName, rowFromEntry, type EntryRow } from '../utils/entryfmt.js';
 import { emitJsonReport } from '../utils/projection.js';
-import { escapeTerminal } from '../utils/sanitize.js';
+import { escapeTerminal, escapeLine } from '../utils/sanitize.js';
 import { formatBytes, parseByteSize, parseCount } from '../utils/sizes.js';
 import { guard } from '../utils/ziperr.js';
 import { runSignal } from '../utils/control.js';
@@ -253,7 +253,7 @@ function evaluateChecks(checks: readonly string[], report: Omit<InspectReport, '
                 const breaking = d.offenders.filter((o) => o.concern !== 'data-descriptor');
                 detail = ok
                     ? 'every entry is in the canonical form zipnative writes'
-                    : `${breaking.length} offence(s): ${breaking.slice(0, 5).map((o) => `${o.name} (${o.concern})`).join(', ')}${breaking.length > 5 ? ', …' : ''}`;
+                    : `${breaking.length} offence(s): ${breaking.slice(0, 5).map((o) => `${escapeLine(o.name)} (${o.concern})`).join(', ')}${breaking.length > 5 ? ', …' : ''}`;
                 break;
             }
             case 'epoch-timestamps': ok = d.epochTimestamps; detail = ok ? 'all entries at the DOS epoch' : 'non-epoch timestamps present'; break;
@@ -329,27 +329,27 @@ function renderText(report: InspectReport, source: string): string {
     lines.push(`  canonical form      ${d.canonicalForm}`);
     const breaking = d.offenders.filter((o) => o.concern !== 'data-descriptor');
     if (breaking.length > 0) {
-        const shown = breaking.slice(0, 10).map((o) => `${o.name} (${o.concern})`).join(', ');
+        const shown = breaking.slice(0, 10).map((o) => `${escapeLine(o.name)} (${o.concern})`).join(', ');
         lines.push(`  offenders           ${shown}${breaking.length > 10 ? `, … (${breaking.length} in all)` : ''}`);
     }
     if (report.diagnostics.length > 0) {
         lines.push('');
         lines.push(`Diagnostics (${report.diagnostics.length}):`);
         for (const diag of report.diagnostics) {
-            lines.push(`  ${diag.severity} [${diag.code}]${diag.entryName !== undefined ? ` ${diag.entryName}:` : ''} ${diag.message}`);
+            lines.push(`  ${diag.severity} [${diag.code}]${diag.entryName !== undefined ? ` ${escapeLine(diag.entryName)}:` : ''} ${escapeLine(diag.message)}`);
         }
     }
     if (report.entries !== undefined) {
         lines.push('');
         lines.push(`Entries (${report.entries.length}):`);
         for (const e of report.entries) {
-            lines.push(`  ${e.name}`);
+            lines.push(`  ${escapeLine(e.name)}`);
             lines.push(`    ${e.methodName} ${e.compressedSize} -> ${e.uncompressedSize} bytes, crc ${e.crc32}, ${e.lastModified}${e.unixMode !== null ? `, mode ${e.unixMode}` : ''}${e.isSymlink ? ', symlink' : ''}${e.isEncrypted ? ', ENCRYPTED' : ''}`);
             if (e.flags !== undefined) {
                 lines.push(`    flags 0x${e.flags.raw.toString(16).padStart(4, '0')} (utf8=${e.flags.utf8} descriptor=${e.flags.dataDescriptor} encrypted=${e.flags.encrypted}), made-by ${e.versionMadeBy}, needed ${e.versionNeeded}, offset ${e.localHeaderOffset}`);
             }
             if (e.extraFields !== undefined && e.extraFields.length > 0) {
-                lines.push(`    extra: ${e.extraFields.map((x) => `${x.idHex}${x.name !== null ? ` ${x.name}` : ''} (${x.length} bytes)${x.hex !== undefined ? ` ${x.hex}` : ''}`).join('; ')}`);
+                lines.push(`    extra: ${e.extraFields.map((x) => `${x.idHex}${x.name !== null ? ` ${escapeLine(x.name)}` : ''} (${x.length} bytes)${x.hex !== undefined ? ` ${x.hex}` : ''}`).join('; ')}`);
             }
         }
     }

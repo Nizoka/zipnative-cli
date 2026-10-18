@@ -90,7 +90,9 @@ export async function stream(args: ParsedArgs): Promise<void> {
 
     const sink = createDiagnosticSink(format === 'ndjson' && isJsonMode());
     const source = readableToByteSource(openInputStream(inputPath)) as ByteSource;
-    const iterator = iterateZipEntries(source, commonOptions(args, sink, 'stream'));
+    // No engine signal here (see commonOptions): the deadline is enforced by
+    // checkAborted() in readableToByteSource() and in the sink's write loop.
+    const iterator = iterateZipEntries(source, commonOptions(args, sink, 'stream', { signal: false }));
 
     const rows: EntryRow[] = [];
     const skipped: { name: string; reason: string }[] = [];

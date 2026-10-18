@@ -12,7 +12,7 @@
 
 import type { ZipDiagnostic, ZipDiagnosticHandler } from '../core-bridge/index.js';
 import { isJsonMode, isQuiet } from './agent.js';
-import { escapeTerminal } from './sanitize.js';
+import { escapeLine } from './sanitize.js';
 
 export interface DiagnosticRow {
     readonly code: string;
@@ -83,7 +83,7 @@ export function createDiagnosticSink(silent = false): DiagnosticSink {
 export function formatDiagnosticLine(row: DiagnosticRow): string {
     const where = row.entryName !== undefined ? ` entry '${row.entryName}':` : '';
     // A text line: the entry name and the engine message quote archive bytes.
-    return escapeTerminal(`${row.severity}: [${row.code}]${where} ${row.message}`);
+    return escapeLine(`${row.severity}: [${row.code}]${where} ${row.message}`);
 }
 
 /** Render already-collected diagnostics (e.g. from a `verifyZip` report) as rows. */

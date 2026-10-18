@@ -32,10 +32,14 @@ pkinative-cli and zipnative 1.1 had both split their release for exactly these r
     client pinned **by content** (SHA-512) and publishes that file with provenance through
     Trusted Publishing — no `NPM_TOKEN`, no repository script.
   - `attest` fetches the published tarball back from the registry, checks it against the build
-    digests and `dist.integrity`, runs `npm audit signatures` in an empty project and the
-    installed bin once, writes the runtime SBOMs (CycloneDX and SPDX, `npm sbom`) and the
+    digests and `dist.integrity`, writes the runtime SBOMs (CycloneDX and SPDX, `npm sbom`) and the
     toolchain SBOM from the lockfile, attests all of them with `actions/attest-build-provenance`
-    (Sigstore) and attaches them, with the bundle, to the release.
+    (Sigstore) and attaches them, with the bundle, to the release. It runs no code fetched from
+    the registry: every step of a job with `id-token: write` can mint the signing identity.
+  - `consumer` (read-only permissions) installs the published version into an empty project,
+    runs `npm audit signatures` and the installed bin once. The install resolves `zipnative`
+    afresh from the registry, which is why it is a job of its own (found by the 1.1.0 security
+    review).
 - Every job starts with `step-security/harden-runner` (egress blocked to an allow-list where the
   endpoints are known); every action is pinned by SHA; `tests/tools/workflows.test.ts` holds the
   graph, the permissions, the digests and the absence of a cache.

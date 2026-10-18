@@ -20,7 +20,7 @@
 
 import type { ZipErrorCode } from '../core-bridge/index.js';
 import { activeConfig } from './config.js';
-import { escapeTerminal } from './sanitize.js';
+import { escapeLine } from './sanitize.js';
 import { CliError, ErrorCode, type ErrorCodeValue, type ErrorDetail } from './error.js';
 
 /**
@@ -165,5 +165,5 @@ export function emitStatus(envelope: Readonly<Record<string, unknown>>): void {
 export function progress(line: string): void {
     if (isQuiet()) return;
     // Progress lines quote entry names (skipped, warnings): display-escaped.
-    process.stderr.write(escapeTerminal(line) + '\n');
+    process.stderr.write(escapeLine(line) + '\n');
 }

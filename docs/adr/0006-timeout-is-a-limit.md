@@ -28,6 +28,14 @@ not grow for a condition that already has a class.
   engine measures progress (the chunked writer, the streaming extractor, the forward reader,
   `readEntryStream`); `--quiet` silences it. Opt-in, so a `--json` caller that did not ask for it
   still reads exactly one envelope.
+- `stream` does not pass the signal to `iterateZipEntries`: zipnative 1.1.0's forward reader
+  left a pending entry read unsettled when aborted, the event loop drained, and the run exited
+  0 with a truncated file (found by the 1.1.0 review). The CLI's input loop
+  (`readableToByteSource`) and write loop enforce the deadline there. As a backstop, the
+  dispatcher fails any run whose event loop drains with the command still pending.
+- `mapZipError` returns the deadline error whenever the signal has fired: the engine wraps an
+  abort that reaches a decompressor as `ZIP_DECOMPRESSION_FAILED`.
+- One deadline per process: a `batch` manifest task cannot carry `timeout`.
 - No new `E_*` class.
 
 ### Consequences

@@ -207,6 +207,9 @@ export function applyConfigDefaults(
     const applied: string[] = [];
     for (const [key, value] of Object.entries(defaults)) {
         if (!known.has(key) || merged[key] !== undefined) continue;
+        // `false` is the absence of a switch (hasFlag() treats any boolean as
+        // present): it only turns off what a broader section turned on.
+        if (value === false) continue;
         merged[key] = value;
         applied.push(key);
     }

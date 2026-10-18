@@ -268,4 +268,61 @@ describe.skipIf(!existsSync(BIN))('integration: built binary smoke (dist/cli.cjs
         expect(env.error).toMatchObject({ code: 'E_LIMIT', detail: { limit: 'maxInputSize' } });
     });
 
+    it('--timeout firing mid-entry: stream, stream --cat and extract fail E_LIMIT and leave no partial file (1.1.0 review)', async () => {
+        // 64 MiB at a ratio under 1024:1: decompression outlasts the deadline.
+        // zipnative 1.1's forward reader, given the signal, left the pending
+        // entry read unsettled — the loop drained and the run exited 0 with a
+        // truncated file. Only a child process shows that.
+        const big = Buffer.alloc(64 * 1024 * 1024);
+        for (let i = 0; i < big.length; i += 97) big[i] = i & 255;
+        await writeFile(join(dir, 'big.bin'), big);
+        const zip = join(dir, 'big.zip');
+        expect(zipnative(['create', join(dir, 'big.bin'), '--base', dir, '-o', zip, '--quiet']).status).toBe(0);
+        for (const args of [
+            ['stream', zip, '-d', join(dir, 'sx'), '--timeout', '60ms', '--json'],
+            ['stream', zip, '--cat', 'big.bin', '--timeout', '60ms', '--json'],
+            ['extract', zip, '-d', join(dir, 'ex'), '--timeout', '60ms', '--json'],
+        ]) {
+            const r = zipnative(args);
+            expect(r.status, args.join(' ')).toBe(1);
+            const env = JSON.parse(r.stderr.trim().split('\n').pop() as string) as { error: { code: string; detail?: { limit: string } } };
+            expect(env.error, args.join(' ')).toMatchObject({ code: 'E_LIMIT', detail: { limit: 'timeout' } });
+            expect(r.stderr).not.toContain('MaxListenersExceededWarning');
+        }
+        expect(existsSync(join(dir, 'sx', 'big.bin'))).toBe(false);
+        expect(existsSync(join(dir, 'ex', 'big.bin'))).toBe(false);
+    });
+
+    it('--json after -- is an operand, not agent mode (1.1.0 review)', () => {
+        const r = zipnative(['cat', join(ROOT, 'package.json'), 'x', '--', '--json']);
+        expect(r.status).not.toBe(0);
+        expect(r.stderr).toMatch(/^error E_/m);
+        expect(r.stderr).not.toContain('"ok":false');
+    });
+
+    it('a planted config key cannot reach the terminal raw through the remedy line (1.1.0 review)', async () => {
+        const repo = join(dir, 'cfg-esc');
+        await mkdir(repo);
+        const ESC = String.fromCharCode(27);
+        const BEL = String.fromCharCode(7);
+        await writeFile(join(repo, '.zipnativerc.json'), JSON.stringify({ [`${ESC}]0;PWNED${BEL}${ESC}[2Jx`]: true }));
+        const r = zipnative(['doctor'], repo);
+        expect(r.status).toBe(2);
+        expect(r.stderr).toContain('remedy:');
+        expect(r.stderr).not.toContain(ESC);
+        expect(r.stderr).not.toContain(BEL);
+    });
+
+    it('a false in .zipnativerc.json never turns a switch on (1.1.0 review)', async () => {
+        const repo = join(dir, 'cfg-false');
+        await mkdir(repo);
+        const zip = join(repo, 'a.zip');
+        expect(zipnative(['create', join(ROOT, 'package.json'), '-o', zip, '--quiet', '--no-config'], repo).status).toBe(0);
+        await writeFile(join(repo, '.zipnativerc.json'), JSON.stringify({ json: false, quiet: false, long: false }));
+        const r = zipnative(['list', zip], repo);
+        expect(r.status).toBe(0);
+        expect(r.stdout).toContain('Length');
+        expect(r.stdout.trimStart().startsWith('{')).toBe(false);
+    });
+
 });

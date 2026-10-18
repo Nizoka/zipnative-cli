@@ -28,7 +28,7 @@ This document outlines the planned development direction for zipnative-cli. Prio
   configuration, strict invocation (undeclared / repeated / surplus input is `E_USAGE`), finite
   bounds only, one-descriptor bounded reads, `lstat` + exclusive creates and temp + rename
   overwrites, terminal-safe text output.
-- [x] **Release integrity** (ADR 0009) — four-job publish (guard → build → publish → attest),
+- [x] **Release integrity** (ADR 0009) — five-job publish (guard → build → publish → attest → consumer),
   one gate script (`scripts/gate.mjs`), reproducible build, bundle probe, frozen tarball list,
   install smoke test, harden-runner and `--ignore-scripts` on every job, zizmor / actionlint /
   reuse, OSV-Scanner, dependency review, rulesets as code, SECURITY-INSIGHTS, security.txt.
