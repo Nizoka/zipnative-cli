@@ -15,7 +15,7 @@ We will acknowledge receipt within 48 hours and aim to provide a fix within 7 da
 | Version | Supported |
 |---------|-----------|
 | 1.1.x   | ✅        |
-| 1.0.x   | ⚠️ security fixes only, until 2027-04-18 (six months after 1.1.0) |
+| 1.0.x   | ⚠️ security fixes only, until 2027-04-20 (six months after 1.1.0) |
 | < 1.0   | ❌        |
 
 1.1.0 ships the security fixes recorded below — configuration limited to presentation, strict

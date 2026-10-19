@@ -4,6 +4,6 @@
 
 Contact: https://github.com/Nizoka/zipnative-cli/security/advisories/new
 Contact: mailto:security@pdfnative.dev
-Expires: 2027-10-18T00:00:00.000Z
+Expires: 2027-10-20T00:00:00.000Z
 Policy: https://github.com/Nizoka/zipnative-cli/blob/main/SECURITY.md
 Preferred-Languages: en, fr

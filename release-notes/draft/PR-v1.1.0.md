@@ -154,7 +154,7 @@ the gain is the projection levers', as AGENTS.md §3 says.
   | Scorecard #7 Fuzzing | seeded fuzzing (ADR 0010); no `fast-check` by decision | dismiss "won't fix" |
 
   Comment texts: `.github/drafts/triage-v1.1.0.md` (local).
-- Confirm the 1.0.x security-fix window (SECURITY.md: until 2027-04-18) and the release date in
+- Confirm the 1.0.x security-fix window (SECURITY.md: until 2027-04-20) and the release date in
   CHANGELOG / CITATION / release notes before tagging `v1.1.0`.
 - Engine-side drafts in `.github/drafts/` (local, git-ignored) for the zipnative maintainer.
 

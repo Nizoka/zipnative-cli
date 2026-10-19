@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.1.0] – 2026-10-18
+## [1.1.0] – 2026-10-20
 
 Built on **zipnative 1.1.0** (`^1.0.0` → `^1.1.0`, still the only runtime dependency). The
 engine's 1.1.0 is additive: 77 → 106 exports, the same 39 error codes, a 12th diagnostic
@@ -254,7 +254,7 @@ Security fixes that change behaviour, each with its migration.
   1.1.0 surface: the new flags, the presentation-only configuration, strict invocation, the
   `config` envelope field, terminal-safe text, the 12 diagnostics, `offenders`, the release
   integrity chain and how to verify it, and the engine-bump procedure.
-- SECURITY.md: 1.1.x supported; 1.0.x receives security fixes until 2027-04-18.
+- SECURITY.md: 1.1.x supported; 1.0.x receives security fixes until 2027-04-20.
 - The `[Unreleased]` entries listed after 1.0.0 shipped in the 1.0.0 tarball; they now sit
   under [1.0.0] ("Release-branch review").
 - The pre-release audit is a tracked Claude Code skill (`.claude/skills/release-audit/`: two

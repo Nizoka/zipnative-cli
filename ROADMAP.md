@@ -4,7 +4,7 @@ This document outlines the planned development direction for zipnative-cli. Prio
 
 ## Released
 
-### v1.1.0 — zipnative 1.1.0 parity and hardening _(2026-10-18)_
+### v1.1.0 — zipnative 1.1.0 parity and hardening _(2026-10-20)_
 
 - [x] **`zipnative` pinned** to `^1.1.0` — all 106 exports bridged (101 + 5 worker) and every
   one reachable from a command (`docs/data/core-exports.json` grades none `bridged`), the 12th
