@@ -87,7 +87,15 @@ describe('readFileOrStdin on a device (the byte-counted branch)', () => {
     });
 
     it('refuses a directory with E_IO', async () => {
-        await expect(readFileOrStdin(tmpdir(), 16)).rejects.toBeInstanceOf(Error);
+        // A private directory, never the shared temp root itself: a path handed
+        // to an open() must not be a predictable name in a world-writable
+        // directory (CodeQL js/insecure-temporary-file).
+        const dir = mkdtempSync(join(tmpdir(), 'zipnative-dir-input-'));
+        try {
+            await expect(readFileOrStdin(dir, 16)).rejects.toMatchObject({ code: ErrorCode.IO, exitCode: 1 });
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
     });
 });
 

@@ -55,6 +55,7 @@ Upstream: closes the CLI's engine asks answered by zipnative 1.1.0
 | `chore(release)` | the release date 2026-10-20 and the dates derived from it (1.0.x security fixes until 2027-04-20, `security.txt` `Expires` 2027-10-20) |
 | `fix(audit)` (release day) | the round-4 findings: `batch --task verify` parses the bounds once before the pool, the raw `ZIPNATIVE_JSON` is still judged under `--json` and the refusal names the command, the instruction files counted by the docs test, the licensing sentence, ADR 0009's five jobs, the `batch --dry-run` wording |
 | `docs(release)` (release day) | the round-4 verdict, the triage re-read and the 2026-10-20 figures in this draft |
+| `test(io)` | CodeQL `js/insecure-temporary-file` on the PR: a unit test handed the shared temp root itself to `readFileOrStdin`; it now uses a private `mkdtemp` directory and asserts `E_IO` (no `src/` change) |
 
 ## Behaviour changes (reviewer attention)
 
