@@ -6,7 +6,7 @@
 //         becomes <output-dir>/<name>.zip through the full `create` command
 //         (every create flag — method, level, deterministic, order, date,
 //         comment … — is honoured) with a bounded-concurrency pool.
-//       --task verify: every *.zip in --input-dir is verified (verifyZip) and
+//       --task verify: every *.zip in --input-dir is verified (verifyAll) and
 //         the per-archive verdicts are reported; any failure exits 1.
 //   • Manifest mode (--manifest tasks.json): run an ordered multi-command
 //     pipeline (create → verify → extract → …) with "@id" output references,
@@ -15,16 +15,17 @@
 import { readdir, mkdir, readFile, stat } from 'node:fs/promises';
 import { join, basename, dirname, extname, resolve } from 'node:path';
 import { type ParsedArgs, getStringFlag, hasFlag } from '../utils/args.js';
-import { assertJsonSizeLimit, captureStdout } from '../utils/io.js';
-import { CliError, ErrorCode, type ErrorCodeValue } from '../utils/error.js';
+import { assertJsonSizeLimit, captureStdout, readFileOrStdin } from '../utils/io.js';
+import { CliError, ErrorCode, type ErrorCodeValue, type ErrorDetail } from '../utils/error.js';
 import { isJsonMode, isDryRun, progress, remedyFor } from '../utils/agent.js';
 import { selectFields, serializeJson, parseFieldList } from '../utils/projection.js';
 import { style } from '../utils/colors.js';
-import { verifyZip } from '../core-bridge/index.js';
+import { escapeTerminal, escapeLine } from '../utils/sanitize.js';
+import { verifyAll } from './verify.js';
 import { prepareEngine } from '../utils/engine.js';
-import { parseLimitFlags } from '../utils/limits.js';
+import { parseInputSizeFlag, parseLimitFlags } from '../utils/limits.js';
+import { entryPasses } from '../utils/zipops.js';
 import { parsePositiveInt } from '../utils/sizes.js';
-import { guard } from '../utils/ziperr.js';
 import {
     parseManifest,
     assertCodecPolicy,
@@ -32,6 +33,7 @@ import {
     type ManifestPlan,
     type ManifestTaskPlan,
 } from '../utils/manifest.js';
+import { CREATE_TREE_FLAGS, assertInvocation } from './completion.js';
 import { create } from './create.js';
 
 /** Upper bound for `--concurrency` (directory mode): beyond this the pool only burns file descriptors. */
@@ -51,6 +53,13 @@ interface FileResult {
     readonly ok: boolean;
     readonly error: string | null;
     readonly code?: ErrorCodeValue;
+    /** The engine's ZIP_* cause, when one is known (as in a manifest task's error). */
+    readonly zipCode?: string;
+    /** The failing entry when exactly one failed (as `verify` reports it). */
+    readonly entryName?: string;
+    /** `verify`'s `{ failedEntries, failedCount }`, or a bound's `{ limit, configured, observed }`. */
+    readonly detail?: ErrorDetail;
+    readonly remedy?: string;
 }
 
 /** Build the per-directory ParsedArgs forwarded to `create` (batch flags stripped). */
@@ -105,6 +114,8 @@ async function loadTaskCommand(name: string): Promise<CommandFn> {
         case 'verify': return (await import('./verify.js')).verify;
         case 'stream': return (await import('./stream.js')).stream;
         case 'modify': return (await import('./modify.js')).modify;
+        case 'canonicalize': return (await import('./canonicalize.js')).canonicalize;
+        case 'merge': return (await import('./merge.js')).merge;
         case 'crc32': return (await import('./crc32.js')).crc32;
         case 'inflate': return (await import('./inflate.js')).inflate;
         default:
@@ -208,6 +219,17 @@ async function runManifest(manifestPath: string, args: ParsedArgs): Promise<void
     const raw = rawBuf.toString('utf8');
 
     const plan: ManifestPlan = parseManifest(raw, dirname(resolve(manifestPath)));
+    // Every task honours the same invocation contract as argv — declared flags
+    // only, single values unless repeatable — checked for ALL tasks before the
+    // first one runs, so a typo in task 5 never follows tasks 1-4's writes.
+    for (const t of plan.tasks) {
+        try {
+            assertInvocation(t.command, { flags: t.flags, positionals: [] });
+        } catch (e) {
+            if (e instanceof CliError) throw new CliError(`Manifest task "${t.id}": ${e.message}`, e.exitCode, e.code);
+            throw e;
+        }
+    }
     assertCodecPolicy(plan, allowCodecLoad);
     // JSON mode: stdout is ONE batch document; every task's stdout is
     // captured into tasks[i].report, so artefact-to-stdout tasks are refused.
@@ -220,7 +242,7 @@ async function runManifest(manifestPath: string, args: ParsedArgs): Promise<void
         if (format === 'text') {
             plan.tasks.forEach((task: ManifestTaskPlan, i: number) => {
                 const target = task.output !== undefined ? ` → ${task.output}` : task.outputDir !== undefined ? ` → ${task.outputDir}/` : '';
-                process.stdout.write(`plan [${i + 1}/${total}] ${task.command} ${task.id}${target}\n`);
+                process.stdout.write(escapeTerminal(`plan [${i + 1}/${total}] ${task.command} ${escapeLine(task.id)}${escapeLine(target)}\n`));
             });
         }
         const planned = plan.tasks.map((t): ManifestTaskResult => ({
@@ -277,6 +299,7 @@ async function runManifest(manifestPath: string, args: ParsedArgs): Promise<void
             progress(`${label} … ${style('ok', 'green')}`);
         } catch (e) {
             const cli = e instanceof CliError ? e : new CliError(e instanceof Error ? e.message : String(e), 1, ErrorCode.RUNTIME);
+            const remedy = remedyFor(cli);
             firstError ??= cli;
             status.set(task.id, 'failed');
             results.push({
@@ -287,7 +310,7 @@ async function runManifest(manifestPath: string, args: ParsedArgs): Promise<void
                     code: cli.code,
                     message: cli.message,
                     ...(cli.zipCode !== undefined ? { zipCode: cli.zipCode } : {}),
-                    ...(remedyFor(cli) !== undefined ? { remedy: remedyFor(cli) } : {}),
+                    ...(remedy !== undefined ? { remedy } : {}),
                 },
             });
             progress(`${label} … ${style('failed', 'red')} (${cli.message})`);
@@ -302,9 +325,24 @@ async function runManifest(manifestPath: string, args: ParsedArgs): Promise<void
     emitManifestSummary(args, format, { total, succeeded, failed, skipped }, results, false);
 
     if (failed > 0 && firstError !== undefined) {
-        throw new CliError('', 1, firstError.code, firstError.zipCode !== undefined ? { zipCode: firstError.zipCode } : undefined);
+        // One line in text mode too (the per-task lines are progress, silenced by --quiet).
+        throw new CliError(`${failed} of ${total} manifest task(s) failed`, 1, firstError.code, firstError.zipCode !== undefined ? { zipCode: firstError.zipCode } : undefined);
     }
 }
+
+/**
+ * Strict invocation per MODE: `batch` declares the union of its modes'
+ * flags, so a flag another mode would use is refused here instead of being
+ * silently ignored (SECURITY.md: an input the run would ignore is E_USAGE).
+ */
+function refuseFlags(args: ParsedArgs, names: readonly string[], why: string): void {
+    for (const name of names) {
+        const bare = name.replace(/^--/, '');
+        if (args.flags[bare] !== undefined) throw new CliError(`--${bare} ${why}`, 2);
+    }
+}
+
+const DIRECTORY_MODE_FLAGS: readonly string[] = ['--task', '--concurrency', '--fail-fast'];
 
 export async function batch(args: ParsedArgs): Promise<void> {
     const inputDir = getStringFlag(args.flags, 'input-dir');
@@ -319,6 +357,7 @@ export async function batch(args: ParsedArgs): Promise<void> {
                 2,
             );
         }
+        refuseFlags(args, [...DIRECTORY_MODE_FLAGS, ...CREATE_TREE_FLAGS], 'applies to the directory mode (--input-dir), not to --manifest: set it on the manifest task that needs it.');
         await runManifest(manifestPath, args);
         return;
     }
@@ -333,6 +372,9 @@ export async function batch(args: ParsedArgs): Promise<void> {
 
     if (inputDir === undefined) {
         throw new CliError('batch requires --input-dir <dir> (or --manifest <file>).', 2);
+    }
+    if (task === 'verify') {
+        refuseFlags(args, [...CREATE_TREE_FLAGS, '--output-dir'], 'is a create flag: --task verify only reads the archives (it takes --input-dir, the --max-* bounds and --max-input-size).');
     }
     if (task === 'create' && outputDir === undefined) {
         throw new CliError('batch --task create requires --output-dir <dir>.', 2);
@@ -392,7 +434,13 @@ export async function batch(args: ParsedArgs): Promise<void> {
         if (zips.length === 0) {
             throw new CliError(`No .zip files found in ${inputDir}: --task verify checks every *.zip directly inside the directory (not recursively).`, 1, ErrorCode.INPUT);
         }
-        const limits = parseLimitFlags(args);
+        // Every --max-* value is parsed once, before the pool and before any
+        // read: a malformed bound is one E_USAGE (exit 2), never a row per
+        // archive and never a plan that says ok (release audit C-02, C-03).
+        parseLimitFlags(args);
+        // The same bound as `verify`: one descriptor, size-checked (a FIFO or
+        // a symlink named *.zip is byte-counted, never read whole).
+        const maxInputSize = parseInputSizeFlag(args);
         await runPool(zips, concurrency, async (file) => {
             if (aborted) return;
             const input = join(inputDir, file);
@@ -401,21 +449,38 @@ export async function batch(args: ParsedArgs): Promise<void> {
                 return;
             }
             try {
-                const buf = await readFile(input);
-                const report = guard('Verification failed', () => verifyZip(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength), limits !== undefined ? { limits } : undefined));
+                const buf = await readFileOrStdin(input, maxInputSize);
+                // The same path as `verify`: a declared size over a bound is E_LIMIT, not a verdict.
+                const { core: report } = verifyAll(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength), args);
                 if (report.ok) {
                     results.push({ input, ok: true, error: null });
                     progress(`${style('✓', 'green')} ${file}`);
                 } else {
-                    const failedEntries = report.entries.filter((e) => e.skipped === undefined && !e.ok).length;
-                    const error = report.error !== null ? `${report.error.code}: ${report.error.message}` : `${failedEntries} entries failed verification`;
-                    results.push({ input, ok: false, error, code: ErrorCode.VERIFY_FAILED });
+                    // The failing names travel with the row, as `verify` reports them (capped at 16).
+                    const failedNames = report.entries.filter((e) => !entryPasses(e)).map((e) => e.name);
+                    const error = report.error !== null ? `${report.error.code}: ${report.error.message}` : `${failedNames.length} entries failed verification`;
+                    results.push({
+                        input, ok: false, error, code: ErrorCode.VERIFY_FAILED,
+                        ...(report.error !== null ? { zipCode: report.error.code } : {}),
+                        ...(failedNames.length === 1 ? { entryName: failedNames[0] as string } : {}),
+                        ...(failedNames.length > 0 ? { detail: { failedEntries: failedNames.slice(0, 16).join(', '), failedCount: failedNames.length } } : {}),
+                    });
                     progress(`${style('✗', 'red')} ${file}: ${error}`);
                     if (failFast) aborted = true;
                 }
             } catch (e) {
                 const error = e instanceof Error ? e.message : String(e);
-                results.push({ input, ok: false, error, ...(e instanceof CliError ? { code: e.code } : {}) });
+                const remedy = e instanceof CliError ? remedyFor(e) : undefined;
+                results.push({
+                    input, ok: false, error,
+                    ...(e instanceof CliError ? {
+                        code: e.code,
+                        ...(e.zipCode !== undefined ? { zipCode: e.zipCode } : {}),
+                        ...(e.entryName !== undefined ? { entryName: e.entryName } : {}),
+                        ...(e.detail !== undefined ? { detail: e.detail } : {}),
+                        ...(remedy !== undefined ? { remedy } : {}),
+                    } : {}),
+                });
                 progress(`${style('✗', 'red')} ${file}: ${error}`);
                 if (failFast) aborted = true;
             }
@@ -445,6 +510,6 @@ export async function batch(args: ParsedArgs): Promise<void> {
 
     if (failures > 0) {
         const first = results.find((r) => !r.ok);
-        throw new CliError('', 1, first?.code ?? ErrorCode.RUNTIME);
+        throw new CliError(`${failures} of ${total} ${task === 'create' ? 'director(ies)' : 'archive(s)'} failed`, 1, first?.code ?? ErrorCode.RUNTIME, first?.zipCode !== undefined ? { zipCode: first.zipCode } : undefined);
     }
 }

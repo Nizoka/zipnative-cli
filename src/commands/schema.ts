@@ -9,16 +9,18 @@
 // Philosophy: zero runtime deps, pure data. No validation engine is bundled —
 // the CLI only PRODUCES schemas; callers validate with their own tooling.
 
-import type { ParsedArgs } from '../utils/args.js';
+import { type ParsedArgs, hasFlag } from '../utils/args.js';
 import { CliError, ErrorCode } from '../utils/error.js';
 import { cliVersion, engineVersion } from '../utils/version.js';
-import { LIMIT_FLAGS } from '../utils/limits.js';
+import { ENGINE_ONLY_LIMITS, LIMIT_FLAGS, LIMIT_KEYS } from '../utils/limits.js';
 import { ZIP_REMEDY } from '../utils/agent.js';
 import { ZIP_DIAGNOSTIC_CODES, ZIP_TO_CLI } from '../utils/ziperr.js';
 import { MANIFEST_COMMANDS } from '../utils/manifest.js';
 import { PROJECTED_COMMANDS } from '../utils/projection.js';
 import { DEFAULT_ZIP_LIMITS } from '../core-bridge/index.js';
-import { COMMANDS, DRY_RUN_COMMANDS, GLOBAL_FLAGS } from './completion.js';
+import { BOOLEAN_FLAGS } from '../utils/flags.js';
+import { isJsonMode } from '../utils/agent.js';
+import { COMMANDS, DRY_RUN_COMMANDS, GLOBAL_FLAGS, GLOBAL_REPEATABLE_FLAGS, OPERANDS, PATH_FLAGS, REPEATABLE_FLAGS } from './completion.js';
 
 type JsonSchema = Readonly<Record<string, unknown>>;
 
@@ -83,7 +85,7 @@ const entryRowSchema: JsonSchema = {
     required: ['name', 'nameEncoding', 'isDirectory', 'isSymlink', 'method', 'methodName', 'compressedSize', 'uncompressedSize', 'ratio', 'crc32', 'lastModified', 'isEncrypted', 'usesZip64', 'usesDataDescriptor', 'unixMode'],
     properties: {
         name: { type: 'string' },
-        nameEncoding: { enum: ['utf-8', 'cp437'] },
+        nameEncoding: { enum: ['utf-8', 'cp437', 'custom'], description: '"custom" when --name-encoding decoded the name (zipnative 1.1 nameDecoder).' },
         isDirectory: { type: 'boolean' },
         isSymlink: { type: ['boolean', 'null'], description: 'null in forward (stream) mode — attributes live only in the central directory.' },
         method: { type: 'integer' },
@@ -116,6 +118,25 @@ const entryRowSchema: JsonSchema = {
         },
         rawNameHex: { type: 'string', pattern: '^([0-9a-f]{2})*$', description: 'Present with --long: the stored name bytes (cp437 / invalid-UTF-8 forensics).' },
         commentHex: { type: 'string', pattern: '^([0-9a-f]{2})*$', description: 'Present with --long when the entry has a comment: its raw bytes.' },
+        timestamps: {
+            type: 'object',
+            description: 'Present with --long on central-directory rows (list, inspect): the best timestamps the metadata offers — the UT (0x5455) or NTFS (0x000a) extra, else the DOS fields (zipnative 1.1 getExtendedTimestamps).',
+            required: ['mtime', 'atime', 'ctime', 'source'],
+            additionalProperties: false,
+            properties: {
+                mtime: { type: ['string', 'null'], format: 'date-time' },
+                atime: { type: ['string', 'null'], format: 'date-time' },
+                ctime: { type: ['string', 'null'], format: 'date-time' },
+                source: { enum: ['ut', 'ntfs', 'dos'] },
+            },
+        },
+        unixIds: {
+            type: ['object', 'null'],
+            description: 'Present with --long on central-directory rows: the Info-ZIP 0x7875 uid/gid, null when the archive carries none (zipnative 1.1 getUnixIds).',
+            required: ['uid', 'gid'],
+            additionalProperties: false,
+            properties: { uid: { type: 'integer' }, gid: { type: 'integer' } },
+        },
     },
 };
 
@@ -162,6 +183,17 @@ function createManifestSchema(): JsonSchema {
                         path: { type: 'string', description: 'File to read (exactly one of path / data / dataBase64 for files).' },
                         data: { type: 'string', description: 'Inline UTF-8 content.' },
                         dataBase64: { type: 'string', description: 'Inline base64 content.' },
+                        raw: {
+                            type: 'object',
+                            description: 'A PRE-COMPRESSED payload (path or dataBase64 holds the compressed bytes), copied without recompression (zipnative addRaw) — after the CLI decodes it once and checks the declared size and CRC-32. Excludes data, method, level and deterministic.',
+                            required: ['method', 'crc32', 'uncompressedSize'],
+                            additionalProperties: false,
+                            properties: {
+                                method: { type: 'integer', minimum: 0, maximum: 65535, description: '0 = store, 8 = deflate, or a method registered with --codec.' },
+                                crc32: { anyOf: [{ type: 'string', pattern: '^[0-9a-fA-F]{8}$' }, { type: 'integer', minimum: 0, maximum: 4294967295 }] },
+                                uncompressedSize: { type: 'integer', minimum: 0 },
+                            },
+                        },
                         directory: { type: 'boolean', description: 'Explicit directory entry (no payload).' },
                         ...compressionProps,
                         date: { type: 'string' },
@@ -280,12 +312,14 @@ function entriesSummarySchema(): JsonSchema {
         $id: id('entries-summary'),
         title: 'zipnative-cli list --summary output',
         type: 'object',
-        required: ['entries', 'files', 'directories', 'compressedSize', 'uncompressedSize', 'zip64', 'encrypted'],
+        required: ['entries', 'files', 'directories', 'compressedSize', 'uncompressedSize', 'zip64', 'zip64Entries', 'encrypted'],
         additionalProperties: false,
         properties: {
             entries: { type: 'integer' }, files: { type: 'integer' }, directories: { type: 'integer' },
             compressedSize: { type: 'integer' }, uncompressedSize: { type: 'integer' },
-            zip64: { type: 'boolean' }, encrypted: { type: 'integer' },
+            zip64: { type: 'boolean', description: 'The archive carries a Zip64 end-of-central-directory record.' },
+            zip64Entries: { type: 'integer', description: 'Entries carrying a Zip64 extra field (a streamed --zip64 archive has these and no Zip64 EOCD).' },
+            encrypted: { type: 'integer' },
         },
     };
 }
@@ -325,12 +359,32 @@ function inspectSchema(): JsonSchema {
             },
             determinism: {
                 type: 'object',
-                required: ['epochTimestamps', 'canonicalOrder', 'utf8Flags', 'noDataDescriptors', 'canonicalLayout', 'deterministic'],
+                required: [
+                    'epochTimestamps', 'canonicalOrder', 'utf8Flags', 'noDataDescriptors', 'canonicalLayout', 'deterministic',
+                    'canonicalExtras', 'canonicalVersionMadeBy', 'canonicalForm', 'offenders',
+                ],
+                description: 'Measured by the engine\'s analyzeDeterminism() (zipnative 1.1). deterministic keeps the CLI 1.0 verdict; canonicalForm is the engine\'s stricter one.',
                 properties: {
                     epochTimestamps: { type: 'boolean' }, canonicalOrder: { type: 'boolean' }, utf8Flags: { type: 'boolean' },
                     noDataDescriptors: { type: 'boolean' },
                     canonicalLayout: { type: 'boolean', description: 'No data descriptors (buffered layout). A streamed archive is reproducible but not canonical.' },
                     deterministic: { type: 'boolean', description: 'Reproducible: epoch timestamps AND canonical order AND UTF-8 flags (layout excluded).' },
+                    canonicalExtras: { type: 'boolean', description: 'No extra field other than Zip64 (0x0001) on any entry.' },
+                    canonicalVersionMadeBy: { type: 'boolean', description: 'Every entry carries the version-made-by zipnative writes (0x032D).' },
+                    canonicalForm: { type: 'boolean', description: 'The engine verdict: deterministic AND canonicalExtras AND canonicalVersionMadeBy (data descriptors excluded) — the form zipnative\'s own writer emits.' },
+                    offenders: {
+                        type: 'array',
+                        description: 'Every canonical-form rule an entry breaks, in central-directory order (a data-descriptor offender is informational).',
+                        items: {
+                            type: 'object',
+                            required: ['name', 'concern'],
+                            additionalProperties: false,
+                            properties: {
+                                name: { type: 'string' },
+                                concern: { enum: ['timestamp', 'order', 'utf8-flag', 'extra-field', 'version-made-by', 'data-descriptor'] },
+                            },
+                        },
+                    },
                 },
             },
             entries: { type: 'array', items: entryRowSchema, description: 'Present with --entries / --entry.' },
@@ -350,12 +404,16 @@ function inspectSummarySchema(): JsonSchema {
         $id: id('inspect-summary'),
         title: 'zipnative-cli inspect --summary output',
         type: 'object',
-        required: ['entries', 'bytes', 'uncompressedSize', 'zip64', 'encrypted', 'deterministic', 'canonicalLayout', 'diagnostics'],
+        required: ['entries', 'bytes', 'uncompressedSize', 'zip64', 'zip64Entries', 'encrypted', 'deterministic', 'canonicalLayout', 'canonicalForm', 'unsafeNames', 'symlinks', 'duplicateNames', 'diagnostics'],
         additionalProperties: false,
         properties: {
             entries: { type: 'integer' }, bytes: { type: 'integer' }, uncompressedSize: { type: 'integer' },
-            zip64: { type: 'boolean' }, encrypted: { type: 'integer' }, deterministic: { type: 'boolean' },
-            canonicalLayout: { type: 'boolean' },
+            zip64: { type: 'boolean', description: 'The archive carries a Zip64 end-of-central-directory record.' },
+            zip64Entries: { type: 'integer', description: 'Entries carrying a Zip64 extra field (--check zip64 passes on either fact).' },
+            encrypted: { type: 'integer' }, deterministic: { type: 'boolean' },
+            canonicalLayout: { type: 'boolean' }, canonicalForm: { type: 'boolean' },
+            unsafeNames: { type: 'integer', description: 'Entry names sanitizeEntryPath() refuses (traversal, absolute, drive/UNC, NUL, ADS, device names).' },
+            symlinks: { type: 'integer' }, duplicateNames: { type: 'integer' },
             diagnostics: { type: 'integer' }, checksPassed: { type: 'boolean' },
         },
     };
@@ -463,7 +521,17 @@ function batchSchema(): JsonSchema {
             total: { type: 'integer' }, succeeded: { type: 'integer' }, failed: { type: 'integer' }, skipped: { type: 'integer' },
             results: {
                 type: 'array',
-                items: { type: 'object', required: ['input', 'ok', 'error'], properties: { input: { type: 'string' }, output: { type: 'string' }, ok: { type: 'boolean' }, error: { type: ['string', 'null'] }, code: { enum: ERROR_CODES } } },
+                items: {
+                    type: 'object',
+                    required: ['input', 'ok', 'error'],
+                    properties: {
+                        input: { type: 'string' }, output: { type: 'string' }, ok: { type: 'boolean' }, error: { type: ['string', 'null'] },
+                        code: { enum: ERROR_CODES }, zipCode: { enum: ZIP_CODES },
+                        entryName: { type: 'string', description: 'The failing entry when exactly one failed.' },
+                        detail: { type: 'object', description: "verify: { failedEntries, failedCount }; a bound: { limit, configured, observed }." },
+                        remedy: { type: 'string' },
+                    },
+                },
             },
             tasks: {
                 type: 'array',
@@ -518,7 +586,7 @@ function doctorSchema(): JsonSchema {
                         status: { enum: ['ok', 'warn', 'error'] },
                         value: { type: 'string' },
                         detail: { type: 'string' },
-                        data: { type: 'object', description: 'Machine-readable payload; `limits` carries the effective bounds (ZipLimits keys + maxInputSize; "none" when disabled).' },
+                        data: { type: 'object', description: 'Machine-readable payload; `limits` carries the effective bounds as numbers (the nine ZipLimits keys + maxInputSize; always finite).' },
                     },
                 },
             },
@@ -565,13 +633,36 @@ function statusSchema(): JsonSchema {
         $schema: DRAFT,
         $id: id('status'),
         title: 'zipnative-cli --json success status envelope',
-        description: 'One JSON line on stderr after a successful run (or --dry-run) of create, modify, extract, stream, cat, inflate, or after crc32. Fields beyond the required ones are command-specific (documented in AGENTS.md).',
+        description: 'One JSON line on stderr after a successful run (or --dry-run) of create, modify, canonicalize, merge, extract, stream, cat, inflate, or after crc32. Fields beyond the required ones are command-specific (documented in AGENTS.md).',
         type: 'object',
         required: ['ok', 'command'],
         properties: {
             ok: { const: true },
-            command: { enum: ['create', 'modify', 'extract', 'stream', 'cat', 'inflate', 'crc32'] },
+            command: { enum: ['create', 'modify', 'canonicalize', 'merge', 'extract', 'stream', 'cat', 'inflate', 'crc32'] },
             dryRun: { type: 'boolean' },
+            config: configFieldSchema,
+            method: { type: ['string', 'integer'] },
+            methodName: { type: 'string' },
+            level: { type: 'integer' },
+            deterministic: { type: 'boolean' },
+            order: { enum: ['canonical', 'insertion'] },
+            stream: { type: 'boolean' },
+            zip64: { type: 'boolean', description: 'create: --zip64 (streamed entries carry a Zip64 local header).' },
+            parallel: { anyOf: [{ const: false }, { type: 'object' }] },
+            mode: { type: 'string' },
+            raw: { type: 'boolean' },
+            sync: { type: 'boolean' },
+            leftover: { type: 'integer' },
+            maxOutput: { type: 'integer' },
+            verifyCrc: { type: 'boolean' },
+            symlinksAsData: { type: 'integer' },
+            stoppedAt: { enum: ['central-directory', 'eof'] },
+            edits: { type: 'array' },
+            inputs: { type: 'integer', description: 'merge: the number of source archives.' },
+            canonical: { type: 'boolean', description: 'modify --compact --canonical: the output is in the canonical deterministic form.' },
+            canonicalForm: { type: 'boolean', description: 'canonicalize: analyzeDeterminism() on the OUTPUT (the full form the engine writes).' },
+            unsafeNames: { type: 'integer', description: 'canonicalize: names that would not extract safely; kept as they are (reproducible is not safe).' },
+            encrypted: { type: 'integer', description: 'canonicalize: encrypted entries, copied unchanged.' },
             output: { type: 'string' },
             outputDir: { type: 'string' },
             bytes: { type: 'integer' },
@@ -605,6 +696,7 @@ function errorSchema(): JsonSchema {
         properties: {
             ok: { const: false },
             command: { type: ['string', 'null'] },
+            config: configFieldSchema,
             error: {
                 type: 'object',
                 required: ['code', 'message'],
@@ -629,6 +721,14 @@ function errorSchema(): JsonSchema {
     };
 }
 
+/** `config: { path, applied }` — the .zipnativerc.json that shaped the run (envelopes, ADR 0001). */
+const configFieldSchema: JsonSchema = {
+    type: 'object',
+    required: ['path', 'applied'],
+    additionalProperties: false,
+    properties: { path: { type: 'string' }, applied: { type: 'array', items: { type: 'string' } } },
+};
+
 function errorsDocument(): JsonSchema {
     const zip: Record<string, { code: string; exitCode: number; remedy?: string }> = {};
     for (const [k, [code, exitCode]] of Object.entries(ZIP_TO_CLI)) {
@@ -648,20 +748,23 @@ function errorsDocument(): JsonSchema {
 }
 
 function limitsSchema(): JsonSchema {
+    // Engine declaration order: the eight flagged bounds and the engine-only one.
     const props: Record<string, unknown> = {};
-    for (const l of LIMIT_FLAGS) {
-        props[l.key] = {
-            type: 'number',
-            minimum: 1,
-            default: DEFAULT_ZIP_LIMITS[l.key],
-            description: `${l.description} (${l.cwe}); flag --${l.flag}; "none" disables the bound.`,
-        };
+    for (const key of LIMIT_KEYS) {
+        const flagged = LIMIT_FLAGS.find((l) => l.key === key);
+        const engineOnly = ENGINE_ONLY_LIMITS.find((l) => l.key === key);
+        const description = flagged !== undefined
+            ? `${flagged.description} (${flagged.cwe}); flag --${flagged.flag} (a positive, finite value).`
+            : engineOnly !== undefined
+                ? `${engineOnly.description} (${engineOnly.cwe}); no flag: ${engineOnly.reason}.`
+                : `${key} (engine bound)`;
+        props[key] = { type: 'number', minimum: 1, default: DEFAULT_ZIP_LIMITS[key], description };
     }
     return {
         $schema: DRAFT,
         $id: id('limits'),
         title: 'zipnative ZipLimits (security bounds)',
-        description: 'The eight CWE-tagged bounds every core entry point enforces during parsing and inflation. Override with --max-* flags or .zipnativerc.json keys.',
+        description: `The ${LIMIT_KEYS.length} CWE-tagged ZipLimits bounds of the engine. Each is overridden with its --max-* flag (a positive, finite value); maxEntryCompressedSize bounds the entries --range fetches.`,
         type: 'object',
         additionalProperties: false,
         properties: props,
@@ -673,7 +776,7 @@ function diagnosticsSchema(): JsonSchema {
         $schema: DRAFT,
         $id: id('diagnostics'),
         title: 'zipnative diagnostic',
-        description: 'Conformance / determinism concerns the engine reports without failing (11 codes). --strict escalates the first one into E_CHECK_FAILED.',
+        description: `Conformance / determinism concerns the engine reports without failing (${ZIP_DIAGNOSTIC_CODES.length} codes). --strict escalates the first one into E_CHECK_FAILED.`,
         ...diagnosticSchema,
     };
 }
@@ -694,10 +797,13 @@ function manifestDocument(): JsonSchema {
         contract: {
             stdout: 'primary artifact (archive bytes, entry bytes, JSON report, text, schema, script)',
             stderr: 'diagnostics and, under --json, the status/error envelope',
-            exitCodes: { '0': 'success', '1': 'runtime/check failure', '2': 'usage error' },
+            exitCodes: { '0': 'success (also a closed downstream pipe)', '1': 'runtime/check failure', '2': 'usage error', '130': 'interrupted (SIGINT); in-flight output removed', '143': 'terminated (SIGTERM); in-flight output removed' },
             network: 'none — no command can open a socket',
         },
         globalFlags: GLOBAL_FLAGS,
+        // Arity without scraping --help: a switch takes no value (or =true|false).
+        globalSwitches: GLOBAL_FLAGS.filter((f) => BOOLEAN_FLAGS.has(f.replace(/^--/, ''))),
+        globalRepeatable: GLOBAL_REPEATABLE_FLAGS.map((f) => `--${f}`),
         dryRunCommands: DRY_RUN_COMMANDS,
         projectedCommands: PROJECTED_COMMANDS,
         manifestCommands: [...MANIFEST_COMMANDS],
@@ -706,7 +812,22 @@ function manifestDocument(): JsonSchema {
         diagnosticCodes: [...ZIP_DIAGNOSTIC_CODES],
         limits: LIMIT_FLAGS.map((l) => ({ flag: `--${l.flag}`, key: l.key, default: DEFAULT_ZIP_LIMITS[l.key], cwe: l.cwe })),
         schemas: SUBJECTS,
-        commands: COMMANDS.map((c) => ({ name: c.name, group: c.group, summary: c.summary, flags: c.flags })),
+        commands: COMMANDS.map((c) => {
+            const operands = OPERANDS[c.name];
+            return {
+                name: c.name,
+                group: c.group,
+                summary: c.summary,
+                flags: c.flags,
+                switches: c.flags.filter((f) => BOOLEAN_FLAGS.has(f.replace(/^--/, ''))),
+                repeatable: (REPEATABLE_FLAGS[c.name] ?? []).map((f) => `--${f}`),
+                pathFlags: c.flags.filter((f) => PATH_FLAGS.includes(f)),
+                operands: {
+                    max: operands === undefined || operands.max === Infinity ? null : operands.max,
+                    ...(operands?.for !== undefined ? { for: `--${operands.for}` } : {}),
+                },
+            };
+        }),
     };
 }
 
@@ -746,15 +867,20 @@ export function buildSchema(subject: Subject): JsonSchema {
 
 export async function schema(args: ParsedArgs): Promise<void> {
     const subject = args.positionals[0];
+    // Compact under --json like every JSON-on-stdout command (--pretty opts out).
+    const pretty = !isJsonMode() || hasFlag(args.flags, 'pretty');
+    const emit = (doc: unknown): void => {
+        process.stdout.write((pretty ? JSON.stringify(doc, null, 2) : JSON.stringify(doc)) + '\n');
+    };
 
     if (subject === undefined) {
         // No subject → the most common need: the create manifest input schema.
-        process.stdout.write(JSON.stringify(BUILDERS['create-manifest'](), null, 2) + '\n');
+        emit(BUILDERS['create-manifest']());
         return Promise.resolve();
     }
 
     if (subject === 'list') {
-        process.stdout.write(JSON.stringify({ subjects: SUBJECTS }, null, 2) + '\n');
+        emit({ subjects: SUBJECTS });
         return Promise.resolve();
     }
 
@@ -766,6 +892,6 @@ export async function schema(args: ParsedArgs): Promise<void> {
         );
     }
 
-    process.stdout.write(JSON.stringify(BUILDERS[subject](), null, 2) + '\n');
+    emit(BUILDERS[subject]());
     return Promise.resolve();
 }

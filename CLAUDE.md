@@ -30,7 +30,7 @@ this file wins on Claude-Code workflow specifics.
 3. **All core imports go through [src/core-bridge/index.ts](src/core-bridge/index.ts).**
    Never import from `zipnative` or `zipnative/worker` directly in a command
    or util — add a selective re-export to the bridge instead. The bridge is
-   the 77-export coverage ledger mapped in `docs/KNOWLEDGE_BASE.md` §8.
+   the 106-export coverage ledger mapped in `docs/KNOWLEDGE_BASE.md` §8.
 4. **Agent-first.** stdout = artifact, stderr = diagnostics/envelopes, stable
    exit codes (0/1/2), 13 stable `E_*` classes and the engine's `ZIP_*` code
    carried verbatim as `zipCode`. Every core call is wrapped with
@@ -58,7 +58,7 @@ this file wins on Claude-Code workflow specifics.
 - `src/index.ts` — entry point: USAGE strings (one per command + the global
   block), `loadCommand()` dispatch, global flags → `ZIPNATIVE_*` env, config
   merge, agent error envelope.
-- `src/commands/*.ts` — one file per command (15), each exporting a single
+- `src/commands/*.ts` — one file per command (17), each exporting a single
   `async function <name>(args: ParsedArgs): Promise<void>`; `completion.ts`
   holds the `COMMANDS` table (the single source of truth for the surface).
 - `src/utils/*.ts` — `args` (arg parsing), `flags` (the boolean-flag table:
@@ -69,15 +69,19 @@ this file wins on Claude-Code workflow specifics.
   `stream`: lexical + realpath containment, duplicate policy, exclusive open,
   partial-file removal), `inflight` (SIGINT / SIGTERM cleanup of the files
   being written, exit 130 / 143), error codes, `ziperr` (the 39-code
-  mapping), `limits` (the eight `--max-*` flags + `--max-input-size`),
+  mapping), `limits` (the nine `--max-*` flags + `--max-input-size`),
   `engine` (`prepareEngine`), `codecs` (`--codec`), `diagnostics` (the
   diagnostic sink), `entryfmt` (the `EntryRow`), `zipops` (shared flag →
   option translation, UTC dates, extra fields), `manifest`, `projection`,
-  `agent`, `colors`, `config`, `governance`.
+  `agent`, `colors`, `config`, `governance`, `control` (`--timeout` /
+  `--progress`), `engines` (the `engines.node` range check), `glob`,
+  `sanitize` (terminal-safe text), `rawentry` (verified manifest `raw`
+  entries), `sizes`, `version`, `walk`.
 - `src/core-bridge/index.ts` — the single import point of `zipnative` /
   `zipnative/worker` (+ `ensureCodecsReady()`, `loadParallelZip()`).
-- `scripts/` — `generate-zip-corpus.mjs` + `validate-zip.mjs` (veraZIP) +
-  `helpers/interop-tools.mjs`.
+- `scripts/` — `gate.mjs` (the definition of green), `generate-zip-corpus.mjs` +
+  `validate-zip.mjs` (veraZIP) + `helpers/interop-tools.mjs`, `package-files.mjs`,
+  `smoke-install.mjs`, `sync-engine-data.mjs`, `install-git-hooks.mjs`, `lib/`.
 - `tests/**` — vitest, in-process (stdout/stderr captured via
   `tests/helpers/capture.ts`); one spawn smoke test against `dist/cli.cjs`;
   `tests/docs/consistency.test.ts` pins the docs to the code and
@@ -103,7 +107,9 @@ A new command touches **all** of these — miss one and it half-works:
    and the docs test derive from this table. Every **boolean** flag also goes
    into `COMMAND_BOOLEAN_FLAGS` in `src/utils/flags.ts` (otherwise the parser
    makes it consume the next token); a path-valued flag goes into
-   `PATH_FLAGS` so the shells complete files. Also `src/utils/config.ts`
+   `PATH_FLAGS` so the shells complete files; a repeatable flag into
+   `REPEATABLE_FLAGS` and the operand count into `OPERANDS` (strict invocation
+   refuses anything else, and `schema manifest` publishes all four). Also `src/utils/config.ts`
    `KNOWN_COMMANDS`, `src/utils/projection.ts` `PROJECTED_COMMANDS` if it
    emits a JSON report, and `src/utils/manifest.ts` `MANIFEST_COMMANDS` +
    `batch.ts` `loadTaskCommand()` if it may run inside a manifest.
@@ -118,7 +124,7 @@ A new command touches **all** of these — miss one and it half-works:
    `docs/data/errors.json` and update the mapping tables.
 6. `tests/**` — a command test (in-process) plus an integration round-trip
    where meaningful; **`tests/docs/consistency.test.ts`** must still pass
-   (command counts, `E_*` codes, `ZIP_*` mapping, the 77-export map, the
+   (command counts, `E_*` codes, `ZIP_*` mapping, the 106-export map, the
    limits table, the schema subject count).
 7. `samples/<name>/` — a `.sh` and a `.ps1` (keep them runnable, offline).
    If the command **writes archives**, add a corpus entry to
@@ -132,7 +138,13 @@ A new command touches **all** of these — miss one and it half-works:
 ## Build, test, verify
 
 ```bash
-npm run typecheck:all   # tsc for src + tests — must be clean
+npm run gate            # THE definition of green (scripts/gate.mjs --ci): typecheck, lint, build,
+                        #   reproducible build, bundle check, smoke, coverage, engine data,
+                        #   the pinned tarball list — run it before claiming a change works
+npm run gate:fast       # the inner loop: typecheck:all, lint, test
+node scripts/gate.mjs --publish --require-all   # what publish.yml runs (+ samples, veraZIP,
+                        #   install smoke test)
+npm run typecheck:all   # tsc for src + tests + the @ts-check scripts — must be clean
 npm run lint            # eslint src/ tests/ — type-aware strictTypeChecked on src/, 0 errors
 npm run test            # vitest run — all pass; keep coverage ≥ thresholds
 npm run build           # tsup → dist/cli.cjs (the bin — the only artefact)
@@ -143,9 +155,9 @@ npm run validate:zip    # veraZIP gate: build + corpus:zip + scripts/validate-zi
                         #   VERAZIP_REQUIRED=1 (CI) fails closed when no level-1 tool exists
 ```
 
-Coverage thresholds live in `vitest.config.ts` (statements 93 / branches 88 /
-functions 94 / lines 93 — ratcheted after the 1.0.0 audit pass, three points
-below the measured actuals). Do not lower them to make a change pass — add
+Coverage thresholds live in `vitest.config.ts` (statements 95 / branches 91 /
+functions 97 / lines 96 — ratcheted for 1.1.0, one point below the measured
+actuals). Do not lower them to make a change pass — add
 tests.
 
 > **Bundle gotcha:** tsup flattens `src/**` into one `dist/cli.cjs` — the
@@ -174,6 +186,13 @@ tests.
 - Adversarial archives for tests come from `tests/helpers/raw-zip-builder.ts`
   — never commit a CLI- or engine-produced archive (see
   `tests/fixtures/README.md`).
+- `/release-audit release-notes/vX.Y.Z.md` is the maintainer's pre-release
+  audit (`.claude/skills/release-audit/`, `disable-model-invocation`): never
+  run it on your own. Its ledger lives under `.audit/<version>/`, git-ignored;
+  the release PR draft carries the summary.
+- `.claude/settings.json` is tracked: attribution off, `npm publish`,
+  `git push`, `git tag` and the `gh` writes denied. Per-machine allowances go
+  in `.claude/settings.local.json` (git-ignored).
 
 ## Governance / HITL (hard rule)
 

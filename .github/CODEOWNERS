@@ -4,24 +4,47 @@
 # Default owner for everything
 * @Nizoka
 
-# CLI commands
-src/commands/ @Nizoka
+# The filesystem trust boundary: reads, writes, the extraction sink, signals
+src/utils/io.ts @Nizoka
+src/utils/sink.ts @Nizoka
+src/utils/inflight.ts @Nizoka
 
-# Utilities and core bridge
-src/utils/ @Nizoka
+# The invocation contract and the configuration file (must never relax a check)
+src/utils/args.ts @Nizoka
+src/utils/config.ts @Nizoka
+src/utils/limits.ts @Nizoka
+src/utils/sizes.ts @Nizoka
+src/utils/sanitize.ts @Nizoka
+
+# The one dynamic import of user code, the error mapping
+src/utils/codecs.ts @Nizoka
+src/utils/ziperr.ts @Nizoka
+
+# The only module that imports the engine
 src/core-bridge/ @Nizoka
 
-# Public entry point
+# CLI commands and the entry point
+src/commands/ @Nizoka
 src/index.ts @Nizoka
 
-# Corpus generator + vendored veraZIP validator (raw bytes live here)
+# Corpus generator, vendored veraZIP validator, gate and release checks
 scripts/ @Nizoka
 
-# Documentation and samples (counts are pinned by tests/docs/)
-docs/ @Nizoka
-samples/ @Nizoka
+# Engine-derived data, the pinned tarball list, decisions
+docs/data/ @Nizoka
+docs/adr/ @Nizoka
+
+# Policy, governance and agent configuration
+SECURITY.md @Nizoka
+.github/SECURITY-INSIGHTS.yml @Nizoka
+.github/ai-governance.json @Nizoka
+.github/AGENT_RULES.md @Nizoka
 
 # CI/CD and release
 .github/workflows/ @Nizoka
+.github/rulesets/ @Nizoka
+.github/dependabot.yml @Nizoka
+.npmrc @Nizoka
 package.json @Nizoka
+package-lock.json @Nizoka
 tsup.config.ts @Nizoka

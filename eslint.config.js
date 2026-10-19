@@ -19,7 +19,7 @@ export default tseslint.config(
         rules: {
             '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
             '@typescript-eslint/no-explicit-any': 'error',
-            '@typescript-eslint/no-non-null-assertion': 'warn',
+            '@typescript-eslint/no-non-null-assertion': 'error',
             '@typescript-eslint/consistent-type-imports': ['error', { prefer: 'type-imports', fixStyle: 'inline-type-imports' }],
             'eqeqeq': ['error', 'always'],
             'no-throw-literal': 'error',
@@ -30,7 +30,9 @@ export default tseslint.config(
             'no-eval': 'error',
             'no-implied-eval': 'error',
             'no-new-func': 'error',
-            'no-console': ['error', { allow: ['warn', 'error'] }],
+            // stdout is the artefact and stderr carries the envelopes: every write
+            // goes through process.stdout / process.stderr explicitly.
+            'no-console': 'error',
             // Numbers and booleans in template literals are ubiquitous in CLI
             // messages and envelopes; the risk the rule guards (objects → "[object
             // Object]") is kept.
@@ -40,6 +42,17 @@ export default tseslint.config(
             // Every command is `async (args) => Promise<void>` by contract, whether
             // or not it awaits; the dispatcher awaits it.
             '@typescript-eslint/require-await': 'off',
+        },
+    },
+    {
+        // The engine is imported in ONE module (CLAUDE.md rule 3): a command or a
+        // util that needs an export adds a re-export to the bridge instead.
+        files: ['src/**/*.ts'],
+        ignores: ['src/core-bridge/index.ts'],
+        rules: {
+            'no-restricted-imports': ['error', {
+                patterns: [{ group: ['zipnative', 'zipnative/*'], message: 'Import the engine through src/core-bridge/index.ts only.' }],
+            }],
         },
     },
     {

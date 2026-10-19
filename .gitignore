@@ -20,8 +20,13 @@ samples/output/
 !.github/drafts/README.md
 !.github/drafts/TEMPLATE.md
 
-# Local Claude Code state
-.claude/
+# Claude Code: the shared settings and the release-audit skill are tracked;
+# per-machine settings and worktrees are not
+.claude/settings.local.json
+.claude/worktrees/
+
+# Release-audit ledgers (/release-audit) — local, never committed
+.audit/
 
 # Environment files — never commit secrets
 .env
@@ -35,6 +40,5 @@ Thumbs.db
 *.swo
 .vscode/settings.json
 
-# npm
+# npm (the project .npmrc IS tracked: ignore-scripts, engine-strict, audit level)
 *.tgz
-.npmrc

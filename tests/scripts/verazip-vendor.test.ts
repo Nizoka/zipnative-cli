@@ -6,7 +6,7 @@
 // and pin:
 //   - the upstream commit + blob hashes the port was taken from (bump both
 //     in the same PR as a re-port);
-//   - the frozen 22-id check vocabulary (`fail('<id>'` literals);
+//   - the frozen 23-id check vocabulary (`fail('<id>'` literals);
 //   - the anti-circularity invariant: neither the validator nor the
 //     foreign-tool helper imports `zipnative` or runs dist/cli.cjs, and the
 //     corpus generator's raw writer never imports zipnative either;
@@ -14,7 +14,8 @@
 //   - REQUIRED_NEGATIVE_CHECKS ⊆ the generator's declared `expectedCheck`
 //     literals (the coverage canary can only trip on a real regression).
 
-import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -26,8 +27,8 @@ const validator = read('scripts/validate-zip.mjs');
 const tools = read('scripts/helpers/interop-tools.mjs');
 const generator = read('scripts/generate-zip-corpus.mjs');
 
-const UPSTREAM_COMMIT = '4f1bc3619372e8543bccea65d2365bf0c048a10c';
-const UPSTREAM_VALIDATOR_BLOB = '5ddea000a3b6a4adfb720d673a43664972118139';
+const UPSTREAM_COMMIT = '1e2ab4216804a5936c83a94bfca10086760a6436';
+const UPSTREAM_VALIDATOR_BLOB = '604321fa40ef1afba04eb9ce14f53e0c19efa474';
 const UPSTREAM_TOOLS_BLOB = '2fef80f17e302384a0f6a5f57f7a0f14911401f5';
 
 /** The frozen ISO/IEC 21320-1 + well-formedness vocabulary of the vendored validator. */
@@ -53,6 +54,7 @@ const CHECK_IDS = [
     'WF/LFH-SIZE-MISMATCH',
     'WF/LFH-CRC-MISMATCH',
     'WF/DESCRIPTOR-MISMATCH',
+    'WF/DESCRIPTOR-WIDTH',
     'WF/ENTRY-OVERLAP',
 ];
 
@@ -66,9 +68,9 @@ describe('veraZIP vendored validator (scripts/validate-zip.mjs)', () => {
         expect(validator).toMatch(/upstream file:\s+scripts\/validate-zip\.ts/);
     });
 
-    it('emits exactly the frozen 22-id check vocabulary', () => {
+    it('emits exactly the frozen 23-id check vocabulary', () => {
         const ids = new Set(literals(validator, /\bfail\('([^']+)'/g));
-        expect(CHECK_IDS).toHaveLength(22);
+        expect(CHECK_IDS).toHaveLength(23);
         expect([...ids].sort()).toEqual([...CHECK_IDS].sort());
     });
 
@@ -101,6 +103,28 @@ describe('level-1 foreign tools (scripts/helpers/interop-tools.mjs)', () => {
     it('exposes exactly the five integrity tools, in upstream order', () => {
         expect(literals(tools, /\bid:\s*'([^']+)'/g)).toEqual(['bsdtar', 'unzip', '7z', 'python-zipfile', 'jar']);
         expect(tools).toContain('export const INTEGRITY_TOOLS');
+    });
+});
+
+// Divergence guard: when an engine checkout is present (the CI audit job
+// clones it; locally ../zipnative or $ZIPNATIVE_ENGINE_CHECKOUT), the pinned
+// blobs must equal the upstream files at the tag of the INSTALLED engine — a
+// veraZIP change upstream fails here until it is re-ported. Skipped, not
+// faked, without a checkout or the tag.
+const engineDir = resolve(process.env['ZIPNATIVE_ENGINE_CHECKOUT'] ?? join(ROOT, '..', 'zipnative'));
+const engineVersion = (JSON.parse(read('node_modules/zipnative/package.json')) as { version: string }).version;
+const gitBlob = (rev: string): string | undefined => {
+    if (!existsSync(join(engineDir, '.git'))) return undefined;
+    const r = spawnSync('git', ['-C', engineDir, 'rev-parse', '--verify', '--quiet', rev], { encoding: 'utf8' });
+    return r.status === 0 ? r.stdout.trim() : undefined;
+};
+const tagged = gitBlob(`v${engineVersion}:scripts/validate-zip.ts`);
+
+describe.skipIf(tagged === undefined)(`veraZIP in sync with the engine checkout at v${engineVersion}`, () => {
+    it('the vendored validator and tool roster match the installed engine\'s upstream files', () => {
+        expect(tagged, 'scripts/validate-zip.ts changed upstream: re-port it and bump the pins').toBe(UPSTREAM_VALIDATOR_BLOB);
+        expect(gitBlob(`v${engineVersion}:tests/helpers/interop-tools.ts`)).toBe(UPSTREAM_TOOLS_BLOB);
+        expect(gitBlob(`${UPSTREAM_COMMIT}:scripts/validate-zip.ts`)).toBe(UPSTREAM_VALIDATOR_BLOB);
     });
 });
 

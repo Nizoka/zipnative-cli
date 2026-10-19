@@ -1,11 +1,12 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
+    ENGINE_ONLY_LIMITS,
     LIMIT_FLAGS,
     LIMIT_FLAG_NAMES,
+    LIMIT_KEYS,
     parseLimitFlags,
     effectiveLimits,
     formatLimitValue,
-    _resetLimitWarnings,
     DEFAULT_MAX_INPUT_SIZE,
     MAX_INPUT_SIZE_FLAG,
     parseInputSizeFlag,
@@ -19,6 +20,7 @@ import { captureStderr } from '../helpers/capture.js';
 const ZIP_LIMITS_ORDER: readonly (keyof ZipLimits)[] = [
     'maxEntries',
     'maxEntryUncompressedSize',
+    'maxEntryCompressedSize',
     'maxTotalUncompressedSize',
     'maxCompressionRatio',
     'maxNameBytes',
@@ -39,10 +41,6 @@ function expectUsage(fn: () => unknown, pattern?: RegExp): void {
     if (pattern !== undefined) expect((caught as CliError).message).toMatch(pattern);
 }
 
-beforeEach(() => {
-    _resetLimitWarnings();
-});
-
 afterEach(() => {
     delete process.env['ZIPNATIVE_QUIET'];
     delete process.env['ZIPNATIVE_JSON'];
@@ -50,15 +48,23 @@ afterEach(() => {
 });
 
 describe('LIMIT_FLAGS', () => {
-    it('has 8 entries in ZipLimits declaration order', () => {
-        expect(LIMIT_FLAGS).toHaveLength(8);
+    it('has one flag per ZipLimits key, in declaration order (since 1.1.0 --range)', () => {
+        expect(LIMIT_FLAGS).toHaveLength(9);
         expect(LIMIT_FLAGS.map((l) => l.key)).toEqual(ZIP_LIMITS_ORDER);
         expect(Object.keys(DEFAULT_ZIP_LIMITS)).toEqual(ZIP_LIMITS_ORDER);
+        expect(LIMIT_KEYS).toEqual(ZIP_LIMITS_ORDER);
+    });
+
+    it('every ZipLimits key is flagged; no key is engine-only any more (ADR 0011)', () => {
+        const flagged = new Set(LIMIT_FLAGS.map((l) => l.key));
+        expect(ENGINE_ONLY_LIMITS).toEqual([]);
+        expect(flagged.size).toBe(LIMIT_KEYS.length);
+        expect(LIMIT_FLAGS.find((l) => l.key === 'maxEntryCompressedSize')).toMatchObject({ flag: 'max-entry-compressed-size', cwe: 'CWE-770' });
     });
 
     it('uses distinct --max-* flag names with a kind, a CWE and a description', () => {
         const flags = LIMIT_FLAGS.map((l) => l.flag);
-        expect(new Set(flags).size).toBe(8);
+        expect(new Set(flags).size).toBe(9);
         for (const l of LIMIT_FLAGS) {
             expect(l.flag).toMatch(/^max-[a-z-]+$/);
             expect(['size', 'count', 'ratio']).toContain(l.kind);
@@ -109,9 +115,9 @@ describe('parseLimitFlags', () => {
         expect(out).toEqual({ maxEntries: 10, maxCompressionRatio: 50, maxNameBytes: 1024 });
     });
 
-    it('rejects 0 with exit 2 and points at "none"', () => {
-        expectUsage(() => parseLimitFlags(parseArgs(['--max-entries', '0'])), /--max-entries must be positive.*"none"/);
-        expectUsage(() => parseLimitFlags(parseArgs(['--max-total-size', '0'])), /--max-total-size must be positive/);
+    it('rejects 0 with exit 2', () => {
+        expectUsage(() => parseLimitFlags(parseArgs(['--max-entries', '0'])), /--max-entries must be a positive bound/);
+        expectUsage(() => parseLimitFlags(parseArgs(['--max-total-size', '0'])), /--max-total-size must be a positive bound/);
     });
 
     it('rejects malformed values with exit 2', () => {
@@ -119,35 +125,24 @@ describe('parseLimitFlags', () => {
         expectUsage(() => parseLimitFlags(parseArgs(['--max-entries'])), /--max-entries requires a value/);
     });
 
-    it('"none" disables the bound (Infinity) and warns once on stderr', () => {
-        const err = captureStderr();
-        const out = parseLimitFlags(parseArgs(['--max-total-size', 'none', '--max-entries', 'none']));
-        expect(out).toEqual({ maxTotalUncompressedSize: Infinity, maxEntries: Infinity });
-        expect(err.calls).toBe(1);
-        expect(err.text()).toMatch(/^warning: --max-entries none disables a security bound/);
-        expect(err.text()).toMatch(/not recommended for untrusted input/);
+    it.each(['none', 'NONE', 'inf', 'infinity', ' Inf '])('refuses the 1.0 unbounded form %j (exit 2) with an explicit-value remedy', (raw) => {
+        for (const spec of LIMIT_FLAGS) {
+            let caught: unknown;
+            try {
+                parseLimitFlags(parseArgs([`--${spec.flag}`, raw]));
+            } catch (e) {
+                caught = e;
+            }
+            expect(caught, spec.flag).toBeInstanceOf(CliError);
+            expect(caught).toMatchObject({ exitCode: 2, code: 'E_USAGE' });
+            expect((caught as CliError).message).toMatch(/no longer accepted: since 1\.1\.0 every bound is finite/);
+            expect((caught as CliError).remedy).toMatch(new RegExp(`^--${spec.flag} \\d+`));
+        }
     });
 
-    it('warns only once per process until reset', () => {
+    it('never prints anything on stderr (no "disabled bound" warning exists any more)', () => {
         const err = captureStderr();
-        parseLimitFlags(parseArgs(['--max-entries', 'none']));
-        parseLimitFlags(parseArgs(['--max-entries', 'none']));
-        expect(err.calls).toBe(1);
-        _resetLimitWarnings();
-        parseLimitFlags(parseArgs(['--max-entries', 'none']));
-        expect(err.calls).toBe(2);
-    });
-
-    it('suppresses the warning under ZIPNATIVE_QUIET=1', () => {
-        process.env['ZIPNATIVE_QUIET'] = '1';
-        const err = captureStderr();
-        expect(parseLimitFlags(parseArgs(['--max-ratio', 'inf']))).toEqual({ maxCompressionRatio: Infinity });
-        expect(err.calls).toBe(0);
-    });
-
-    it('does not warn for finite values', () => {
-        const err = captureStderr();
-        parseLimitFlags(parseArgs(['--max-entries', '5']));
+        parseLimitFlags(parseArgs(['--max-entries', '5', '--max-total-size', '64g']));
         expect(err.calls).toBe(0);
     });
 });
@@ -160,9 +155,9 @@ describe('effectiveLimits', () => {
 
     it('merges overrides on top of the defaults without mutating them', () => {
         const before = { ...DEFAULT_ZIP_LIMITS };
-        const out = effectiveLimits({ maxEntries: 3, maxCompressionRatio: Infinity });
+        const out = effectiveLimits({ maxEntries: 3, maxCompressionRatio: 4096 });
         expect(out.maxEntries).toBe(3);
-        expect(out.maxCompressionRatio).toBe(Infinity);
+        expect(out.maxCompressionRatio).toBe(4096);
         expect(out.maxNameBytes).toBe(DEFAULT_ZIP_LIMITS.maxNameBytes);
         expect(DEFAULT_ZIP_LIMITS).toEqual(before);
     });
@@ -183,11 +178,6 @@ describe('formatLimitValue', () => {
         expect(formatLimitValue(count, 100000)).toBe('100000');
     });
 
-    it('renders a disabled bound as unlimited for every kind', () => {
-        expect(formatLimitValue(size, Infinity)).toBe('unlimited');
-        expect(formatLimitValue(count, Infinity)).toBe('unlimited');
-        expect(formatLimitValue(ratio, Infinity)).toBe('unlimited');
-    });
 });
 
 describe('parseInputSizeFlag (--max-input-size)', () => {
@@ -202,15 +192,12 @@ describe('parseInputSizeFlag (--max-input-size)', () => {
         expect(parseInputSizeFlag(parseArgs(['--max-input-size', '65536']))).toBe(65536);
     });
 
-    it('"none" disables the bound with a single warning', () => {
-        const err = captureStderr();
-        expect(parseInputSizeFlag(parseArgs(['--max-input-size', 'none']))).toBe(Infinity);
-        expect(parseInputSizeFlag(parseArgs(['--max-input-size', 'none']))).toBe(Infinity);
-        expect(err.text().match(/--max-input-size none disables a security bound/g)).toHaveLength(1);
+    it('"none" is refused (exit 2): the buffered-read bound is always finite', () => {
+        expectUsage(() => parseInputSizeFlag(parseArgs(['--max-input-size', 'none'])), /no longer accepted/);
     });
 
     it('0 and garbage are usage errors', () => {
-        expectUsage(() => parseInputSizeFlag(parseArgs(['--max-input-size', '0'])), /must be positive/);
+        expectUsage(() => parseInputSizeFlag(parseArgs(['--max-input-size', '0'])), /must be a positive bound/);
         expectUsage(() => parseInputSizeFlag(parseArgs(['--max-input-size', 'lots'])));
     });
 });

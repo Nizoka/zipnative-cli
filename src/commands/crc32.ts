@@ -13,6 +13,7 @@ import { prepareEngine } from '../utils/engine.js';
 import { CliError, ErrorCode } from '../utils/error.js';
 import { openInputStream } from '../utils/io.js';
 import { serializeJson } from '../utils/projection.js';
+import { escapeLine } from '../utils/sanitize.js';
 import { mapZipError } from '../utils/ziperr.js';
 import { parseFormat } from '../utils/zipops.js';
 
@@ -57,7 +58,7 @@ export async function crc32(args: ParsedArgs): Promise<void> {
         const pretty = hasFlag(args.flags, 'pretty') || !isJsonMode();
         process.stdout.write(serializeJson({ files: results, ...(expect !== undefined ? { expect: crcHex(expect) } : {}) }, pretty) + '\n');
     } else {
-        for (const r of results) process.stdout.write(`${r.crc32}  ${r.bytes}  ${r.file}\n`);
+        for (const r of results) process.stdout.write(`${r.crc32}  ${r.bytes}  ${escapeLine(r.file)}\n`);
     }
 
     if (expect !== undefined) {

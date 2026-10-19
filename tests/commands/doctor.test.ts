@@ -62,7 +62,7 @@ describe('doctor', () => {
         expect(doc.checks.every((c) => c.status !== 'error')).toBe(true);
     });
 
-    it('reports the CLI version, Node >= 22, the engine and the registered command count', async () => {
+    it('reports the CLI version, the Node floor, the engine and the registered command count', async () => {
         const doc = JSON.parse(await capture(() => doctor(parseArgs(['--format', 'json'])))) as DoctorReport;
         const byName = new Map(doc.checks.map((c) => [c.name, c]));
         expect(byName.get('cli')?.value).toMatch(/^\d+\.\d+\.\d+/);
@@ -70,7 +70,7 @@ describe('doctor', () => {
         expect(byName.get('node')?.status).toBe('ok');
         expect(byName.get('zipnative')?.status).toBe('ok');
         expect(byName.get('zipnative')?.value).toMatch(/^\d+\.\d+\.\d+/);
-        expect(byName.get('commands')?.value).toBe('15');
+        expect(byName.get('commands')?.value).toBe('17');
         expect(byName.get('web-streams')).toMatchObject({ status: 'ok', value: 'available' });
         expect(byName.get('workers')?.status).toBe('ok');
         expect(byName.get('workers')?.detail).toContain('zip-worker.js');
@@ -103,10 +103,10 @@ describe('doctor', () => {
         const o = overridden.checks.find((c) => c.name === 'limits');
         expect(o?.value).toBe('1 override(s)');
         expect(o?.detail).toContain('maxEntries=5');
-        const two = JSON.parse(await capture(() => doctor(parseArgs(['--format', 'json', '--max-entries', '5', '--max-ratio', 'none'])))) as DoctorReport;
+        const two = JSON.parse(await capture(() => doctor(parseArgs(['--format', 'json', '--max-entries', '5', '--max-ratio', '4096'])))) as DoctorReport;
         const t = two.checks.find((c) => c.name === 'limits');
         expect(t?.value).toBe('2 override(s)');
-        expect(t?.detail).toContain('maxCompressionRatio=unlimited');
+        expect(t?.detail).toContain('maxCompressionRatio=4096:1');
     });
 
     it('ZIPNATIVE_JSON=1 emits compact JSON; --pretty restores indentation; --json flag also switches', async () => {

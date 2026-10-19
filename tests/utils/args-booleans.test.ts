@@ -24,7 +24,7 @@ describe('parseArgs boolean-flag table', () => {
 
     it('value flags still consume the next token', () => {
         const args = parseArgs(['--input', 'a.zip', '--level', '9', '-o', 'out.zip']);
-        expect(args.flags).toEqual({ input: 'a.zip', level: '9', o: 'out.zip' });
+        expect(args.flags).toEqual({ input: 'a.zip', level: '9', output: 'out.zip' });
         expect(args.positionals).toEqual([]);
     });
 
@@ -44,7 +44,7 @@ describe('parseArgs boolean-flag table', () => {
 
     it('a lone dash is a value', () => {
         expect(parseArgs(['--input', '-']).flags).toEqual({ input: '-' });
-        expect(parseArgs(['-o', '-']).flags).toEqual({ o: '-' });
+        expect(parseArgs(['-o', '-']).flags).toEqual({ output: '-' });
     });
 
     it('combined short flags are refused with a usage error', () => {
@@ -53,7 +53,8 @@ describe('parseArgs boolean-flag table', () => {
             parseArgs(['-lq']);
         } catch (e) {
             expect((e as CliError).exitCode).toBe(2);
-            expect((e as CliError).message).toContain('-l -q');
+            expect((e as CliError).message).toContain('-i -o -d -e -f -h -q -V');
+            expect((e as CliError).message).not.toContain('-l ');
         }
     });
 

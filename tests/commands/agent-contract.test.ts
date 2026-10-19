@@ -190,12 +190,12 @@ describe('error classes for entry names (data, not usage)', () => {
 });
 
 describe('doctor limits data', () => {
-    it('exposes the effective bounds as numbers ("none" when disabled) plus maxInputSize', async () => {
-        const r = await run(() => doctor(parseArgs(['--format', 'json', '--max-entries', '5', '--max-ratio', 'none', '--max-input-size', '1m'])));
+    it('exposes the effective bounds as numbers (always finite) plus maxInputSize', async () => {
+        const r = await run(() => doctor(parseArgs(['--format', 'json', '--max-entries', '5', '--max-ratio', '2048', '--max-input-size', '1m'])));
         expect(r.error).toBeUndefined();
         const doc = JSON.parse(r.text) as { checks: { name: string; data?: Record<string, unknown>; value: string }[] };
         const limits = doc.checks.find((c) => c.name === 'limits');
-        expect(limits?.data).toMatchObject({ maxEntries: 5, maxCompressionRatio: 'none', maxInputSize: 1024 * 1024 });
+        expect(limits?.data).toMatchObject({ maxEntries: 5, maxCompressionRatio: 2048, maxInputSize: 1024 * 1024, maxEntryCompressedSize: 1024 ** 3 + 1024 ** 2 });
         expect(limits?.value).toBe('3 override(s)');
         expect(doc.checks.filter((c) => c.name !== 'limits').every((c) => c.data === undefined)).toBe(true);
     });

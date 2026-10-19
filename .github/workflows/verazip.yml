@@ -2,7 +2,7 @@ name: ISO 21320-1 Validation (veraZIP)
 
 # veraZIP — zipnative-cli's analogue of pdfnative-cli's veraPDF gate.
 #
-# WHAT: the BUILT binary (dist/cli.cjs) writes a corpus of 37 archives (33 conformant + 4 negative canaries)
+# WHAT: the BUILT binary (dist/cli.cjs) writes a corpus of 41 archives (37 conformant + 4 negative canaries)
 # (scripts/generate-zip-corpus.mjs → test-output/zip/ + manifest.json)
 # covering a representative sample of the features the CLI exposes:
 # store/deflate, --stream, --parallel, --deterministic, zip64, directory
@@ -78,6 +78,11 @@ jobs:
     timeout-minutes: 20
 
     steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit # 2026-10-18: audit on Windows (vendor matrix); the registry is the only host either leg needs
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
@@ -89,7 +94,7 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Record tool versions
         run: |
@@ -146,11 +151,16 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      # Step outputs reach the script through env:, never interpolated into it
+      # (template injection — zizmor / actionlint). RUNNER_OS is set by the runner.
       - name: Job summary
         if: always()
         shell: bash
+        env:
+          EXIT_CODE: ${{ steps.validate.outputs.exit_code }}
+          OUTCOME: ${{ steps.validate.outcome }}
         run: |
-          code='${{ steps.validate.outputs.exit_code }}'
+          code="${EXIT_CODE}"
           case "${code}" in
             0) verdict='all expectations met' ;;
             1) verdict='CONFORMANCE failure (FAIL, XPASS, level-1 rejection or canary drift — see report)' ;;
@@ -159,9 +169,9 @@ jobs:
             *) verdict="unknown (exit ${code:-n/a})" ;;
           esac
           {
-            echo "## ISO/IEC 21320-1 validation (veraZIP, blocking, ${{ runner.os }})"
+            echo "## ISO/IEC 21320-1 validation (veraZIP, blocking, ${RUNNER_OS})"
             echo
-            echo "Step outcome: ${{ steps.validate.outcome }} · exit ${code:-n/a} · ${verdict}"
+            echo "Step outcome: ${OUTCOME} · exit ${code:-n/a} · ${verdict}"
             echo
             echo '```'
             cat verazip-report.txt 2>/dev/null || echo "(no report produced)"
@@ -182,6 +192,11 @@ jobs:
     timeout-minutes: 25
 
     steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit # 2026-10-18: audit on Windows (vendor matrix); the registry is the only host either leg needs
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
@@ -193,7 +208,7 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Record tool versions
         shell: pwsh
@@ -238,11 +253,16 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      # Step outputs reach the script through env:, never interpolated into it
+      # (template injection — zizmor / actionlint). RUNNER_OS is set by the runner.
       - name: Job summary
         if: always()
         shell: bash
+        env:
+          EXIT_CODE: ${{ steps.validate.outputs.exit_code }}
+          OUTCOME: ${{ steps.validate.outcome }}
         run: |
-          code='${{ steps.validate.outputs.exit_code }}'
+          code="${EXIT_CODE}"
           case "${code}" in
             0) verdict='all expectations met' ;;
             1) verdict='CONFORMANCE failure (FAIL, XPASS, level-1 rejection or canary drift — see report)' ;;
@@ -251,9 +271,9 @@ jobs:
             *) verdict="unknown (exit ${code:-n/a})" ;;
           esac
           {
-            echo "## ISO/IEC 21320-1 validation (veraZIP, blocking, ${{ runner.os }})"
+            echo "## ISO/IEC 21320-1 validation (veraZIP, blocking, ${RUNNER_OS})"
             echo
-            echo "Step outcome: ${{ steps.validate.outcome }} · exit ${code:-n/a} · ${verdict}"
+            echo "Step outcome: ${OUTCOME} · exit ${code:-n/a} · ${verdict}"
             echo
             echo '```'
             cat verazip-report.txt 2>/dev/null || echo "(no report produced)"

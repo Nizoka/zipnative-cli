@@ -127,12 +127,23 @@ const JOBS = [
     after: () => byteIdentical(OUT('create', '06-sequential.zip'), OUT('create', '06-parallel.zip')),
   },
   { category: 'create', id: '07-comment-and-order', args: ['create', IN('text'), '--comment', 'built by samples/run-all.js', '--entry-comment', 'text/readme.txt=the readme', '--order', 'insertion', '--date', '2024-01-02T03:04:06Z', '--output', OUT('create', '07-comment-and-order.zip')] },
+  { category: 'create', id: '08-zip64-stream', input: IN('binary', 'pattern.bin'), args: ['create', '--stdin-name', 'data/pattern.bin', '--stream', '--zip64', '--output', OUT('create', '08-zip64-stream.zip')] },
+  { category: 'create', id: '08-zip64-check', args: ['inspect', '--input', OUT('create', '08-zip64-stream.zip'), '--summary', '--check', 'zip64'] },
 
   // ── list ────────────────────────────────────────────────────────────────
   { category: 'list', id: '00-setup', args: ['create', IN('text'), IN('unicode'), '--output', OUT('list', 'archive.zip')] },
   { category: 'list', id: '01-table', stdout: OUT('list', '01-table.txt'), args: ['list', '--input', OUT('list', 'archive.zip'), '--long'] },
   { category: 'list', id: '02-json-fields', stdout: OUT('list', '02-json-fields.json'), args: ['list', '--input', OUT('list', 'archive.zip'), '--format', 'json', '--fields', 'entries.name,entries.uncompressedSize'] },
   { category: 'list', id: '03-ndjson', stdout: OUT('list', '03-ndjson.ndjson'), args: ['list', '--input', OUT('list', 'archive.zip'), '--format', 'ndjson', '--include', '**/*.md'] },
+  { category: 'list', id: '05-range-setup', args: ['create', INPUT_DIR, '--output', OUT('list', '05-range.zip')] },
+  { category: 'list', id: '05-range-buffered-refused', expectExit: 1, expectCode: 'E_LIMIT', args: ['list', '--input', OUT('list', '05-range.zip'), '--max-input-size', '1k', '--json', '--summary'] },
+  { category: 'list', id: '05-range', args: ['list', '--input', OUT('list', '05-range.zip'), '--range', '--max-input-size', '1k', '--json', '--summary'] },
+  { category: 'list', id: '05-range-verify', args: ['verify', '--input', OUT('list', '05-range.zip'), '--range', '--max-input-size', '1k', '--json', '--summary'] },
+  {
+    category: 'list', id: '04-name-encoding', stdout: OUT('list', '04-name-encoding.json'),
+    args: ['list', '--input', IN('legacy', 'shift-jis-names.zip'), '--name-encoding', 'shift_jis', '--long', '--format', 'json', '--fields', 'entries.name,entries.nameEncoding,entries.rawNameHex'],
+    after: () => { const e = JSON.parse(readFileSync(OUT('list', '04-name-encoding.json'), 'utf8')).entries[0]; if (e.name !== '日本語/挨拶.txt' || e.nameEncoding !== 'custom') throw new Error(`Shift_JIS name not decoded: ${e.name} (${e.nameEncoding})`); },
+  },
 
   // ── inspect ─────────────────────────────────────────────────────────────
   { category: 'inspect', id: '00-setup', args: ['create', IN('text'), IN('binary'), '--deterministic', '--output', OUT('inspect', 'archive.zip')] },
@@ -144,6 +155,13 @@ const JOBS = [
     before: () => prependStub(OUT('inspect', 'archive.zip'), OUT('inspect', '03-prepended.zip')),
     args: ['inspect', '--input', OUT('inspect', '03-prepended.zip'), '--strict', '--json', '--summary'],
   },
+  { category: 'inspect', id: '04-setup-dated', args: ['create', IN('text'), '--date', '2024-01-02T03:04:06Z', '--output', OUT('inspect', '04-dated.zip')] },
+  { category: 'inspect', id: '04-canonical-pass', args: ['inspect', '--input', OUT('inspect', 'archive.zip'), '--summary', '--check', 'canonical-form,deterministic'] },
+  {
+    category: 'inspect', id: '04-offenders', stdout: OUT('inspect', '04-offenders.json'), args: ['inspect', '--input', OUT('inspect', '04-dated.zip'), '--format', 'json', '--fields', 'determinism'],
+    after: () => { const d = JSON.parse(readFileSync(OUT('inspect', '04-offenders.json'), 'utf8')).determinism; if (d.canonicalForm !== false || d.offenders.length !== 3 || d.offenders.some((o) => o.concern !== 'timestamp')) throw new Error(`unexpected offenders: ${JSON.stringify(d.offenders)}`); },
+  },
+  { category: 'inspect', id: '04-canonical-fail', expectExit: 1, expectCode: 'E_CHECK_FAILED', args: ['inspect', '--input', OUT('inspect', '04-dated.zip'), '--json', '--summary', '--check', 'canonical-form'] },
 
   // ── extract ─────────────────────────────────────────────────────────────
   { category: 'extract', id: '00-setup', args: ['create', IN('text'), IN('unicode'), '--output', OUT('extract', 'archive.zip')] },
@@ -193,6 +211,22 @@ const JOBS = [
   { category: 'modify', id: '03-rename-and-comment', args: ['modify', '--input', OUT('modify', 'base.zip'), '--output', OUT('modify', '03-rename-and-comment.zip'), '--rename', 'text/notes.md=text/NOTES.md', '--comment', 'renamed by samples/run-all.js', '--compact', '--json'] },
   { category: 'modify', id: '04-from-manifest', args: ['modify', '--input', OUT('modify', 'base.zip'), '--output', OUT('modify', '04-from-manifest.zip'), '--from-manifest', IN('manifest', 'edits.json'), '--compact', '--json'] },
 
+  // ── canonicalize ────────────────────────────────────────────────────────
+  { category: 'canonicalize', id: '01-canonicalize', args: ['canonicalize', join(ROOT_DIR, 'tests', 'fixtures', 'interop', 'bsdtar-basic.zip'), '-o', OUT('canonicalize', '01-canonical.zip'), '--json'] },
+  { category: 'canonicalize', id: '01-gate', args: ['inspect', '--input', OUT('canonicalize', '01-canonical.zip'), '--summary', '--check', 'canonical-form'] },
+  {
+    category: 'canonicalize', id: '01-idempotent', args: ['canonicalize', OUT('canonicalize', '01-canonical.zip'), '-o', OUT('canonicalize', '01-again.zip'), '--json'],
+    after: () => byteIdentical(OUT('canonicalize', '01-canonical.zip'), OUT('canonicalize', '01-again.zip')),
+  },
+
+  // ── merge ───────────────────────────────────────────────────────────────
+  { category: 'merge', id: '00-setup-text', args: ['create', IN('text'), '--output', OUT('merge', 'text.zip')] },
+  { category: 'merge', id: '00-setup-unicode', args: ['create', IN('unicode'), '--output', OUT('merge', 'unicode.zip')] },
+  { category: 'merge', id: '01-merge', args: ['merge', OUT('merge', 'text.zip'), OUT('merge', 'unicode.zip'), '-o', OUT('merge', 'all.zip'), '--json'] },
+  { category: 'merge', id: '01-verify', args: ['verify', '--input', OUT('merge', 'all.zip'), '--json', '--summary'] },
+  { category: 'merge', id: '01-split', args: ['merge', OUT('merge', 'all.zip'), '--include', '**/*.md', '-o', OUT('merge', 'md-only.zip'), '--json'] },
+  { category: 'merge', id: '01-duplicate-refused', expectExit: 1, expectCode: 'E_INPUT', args: ['merge', OUT('merge', 'text.zip'), OUT('merge', 'text.zip'), '-o', OUT('merge', 'dup.zip'), '--json'] },
+
   // ── crc32 ───────────────────────────────────────────────────────────────
   { category: 'crc32', id: '01-file', stdout: OUT('crc32', '01-file.json'), args: ['crc32', IN('text', 'readme.txt'), IN('binary', 'pattern.bin'), '--format', 'json'] },
   { category: 'crc32', id: '01-stdin', input: IN('text', 'readme.txt'), stdout: OUT('crc32', '01-stdin.txt'), args: ['crc32'] },
@@ -233,9 +267,11 @@ const JOBS = [
   { category: 'completion', id: '01-generate-powershell', args: ['completion', 'powershell'] },
 
   // ── config ──────────────────────────────────────────────────────────────
-  { category: 'config', id: '01-with-config', args: ['create', IN('text'), '--config', IN('config', '.zipnativerc.json'), '--output', OUT('config', '01-with-config.zip')] },
-  { category: 'config', id: '01-no-config', args: ['create', IN('text'), '--no-config', '--output', OUT('config', '01-no-config.zip')] },
-  { category: 'config', id: '01-check-deterministic', args: ['inspect', '--input', OUT('config', '01-with-config.zip'), '--check', 'deterministic', '--summary', '--format', 'json'] },
+  // A config is presentation only (1.1.0): format / long / summary / pretty apply; an opt-out is refused.
+  { category: 'config', id: '01-archive', args: ['create', IN('text'), '--no-config', '--deterministic', '--output', OUT('config', '01-archive.zip')] },
+  { category: 'config', id: '01-list-with-config', stdout: OUT('config', '01-list.json'), args: ['list', OUT('config', '01-archive.zip'), '--config', IN('config', '.zipnativerc.json')], after: () => { const doc = JSON.parse(readFileSync(OUT('config', '01-list.json'), 'utf8')); if (doc.entries[0].rawNameHex === undefined) throw new Error('config long / format defaults not applied'); } },
+  { category: 'config', id: '01-unsafe-config-refused', expectExit: 2, expectCode: 'E_USAGE', args: ['extract', '--input', OUT('config', '01-archive.zip'), '--output-dir', OUT('config', '01-extracted'), '--config', IN('config-unsafe', '.zipnativerc.json'), '--json'] },
+  { category: 'config', id: '01-no-config', args: ['extract', '--input', OUT('config', '01-archive.zip'), '--output-dir', OUT('config', '01-extracted'), '--no-config'] },
 
   // ── agent ───────────────────────────────────────────────────────────────
   { category: 'agent', id: '01-dry-run', args: ['create', IN('text'), '--output', OUT('agent', '01-never-written.zip'), '--dry-run', '--json'], after: () => { if (existsSync(OUT('agent', '01-never-written.zip'))) throw new Error('--dry-run wrote output'); } },
@@ -246,6 +282,8 @@ const JOBS = [
   { category: 'agent', id: '03-token-economy-summary', stdout: OUT('agent', '03-summary.json'), args: ['inspect', '--input', OUT('agent', '01-status.zip'), '--json', '--summary'] },
   // --summary and --fields do not combine (summary wins); project the full report instead.
   { category: 'agent', id: '03-token-economy-fields', stdout: OUT('agent', '03-fields.json'), args: ['inspect', '--input', OUT('agent', '01-status.zip'), '--json', '--fields', 'archive.bytes,determinism.deterministic'] },
+  { category: 'agent', id: '04-timeout', expectExit: 1, expectCode: 'E_LIMIT', args: ['create', INPUT_DIR, '--stream', '--timeout', '1ms', '--output', OUT('agent', '04-timed-out.zip'), '--json'], after: () => { if (existsSync(OUT('agent', '04-timed-out.zip'))) throw new Error('--timeout left a partial file'); } },
+  { category: 'agent', id: '04-progress', args: ['create', INPUT_DIR, '--stream', '--progress', '--json', '--output', OUT('agent', '04-progress.zip')] },
 
   // ── govern (print-only) ─────────────────────────────────────────────────
   { category: 'govern', id: '01-rules', args: ['govern', 'rules'] },

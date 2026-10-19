@@ -465,6 +465,49 @@ const CORPUS = [
         },
     },
     {
+        // `--zip64` (zipnative 1.1 AddEntryOptions.zip64): the speculative
+        // streaming form — a Zip64 extra in the LOCAL header and an 8-byte
+        // data descriptor, the pairing WF/DESCRIPTOR-WIDTH checks.
+        file: 'streaming-zip64.zip',
+        run: (f) => cli(f, ['create', '--stdin-name', 'streamed.bin', '-o', dest(f), '--stream', '--zip64'], { input: readFileSync(input('stdin-payload.bin')) }),
+        after: (f) => {
+            const entry = inspectEntries(f).find((e) => e.name === 'streamed.bin');
+            if (!entry) fail(f, ['inspect --entries reports no entry named streamed.bin']);
+            if (entry.usesDataDescriptor !== true || entry.usesZip64 !== true) fail(f, [`entry streamed.bin: usesDataDescriptor ${entry.usesDataDescriptor}, usesZip64 ${entry.usesZip64} (both must be true)`]);
+        },
+    },
+    {
+        // A date before the DOS epoch is clamped to 1980-01-01 by the engine
+        // (ZIP_TIMESTAMP_CLAMPED, zipnative 1.1) — never a fictitious date.
+        file: 'clamped-date.zip',
+        run: (f) => cli(f, ['create', src('text'), '-o', dest(f), '--base', SRC_DIR, '--date', '1975-07-15', '--deterministic']),
+        after: (f) => {
+            const wrong = inspectEntries(f).filter((e) => e.dosDate !== 0x0021).map((e) => `${e.name}: 0x${Number(e.dosDate).toString(16)}`);
+            if (wrong.length > 0) fail(f, [`entries not clamped to the DOS epoch (0x0021): ${wrong.join(', ')}`]);
+        },
+    },
+    {
+        // `canonicalize` (zipnative 1.1 canonicalizeZip): the data-descriptor
+        // archive above rewritten into the canonical form, payloads copied.
+        file: 'canonicalized.zip',
+        run: (f) => cli(f, ['canonicalize', dest('stream-parity-chunked.zip'), '-o', dest(f)]),
+        after: (f) => {
+            cli(`${f} (inspect)`, ['inspect', dest(f), '--check', 'canonical-form,deterministic', '--json', '--summary']);
+            assertSameContent('stream-parity-chunked.zip', f, 'stream layout vs canonicalized');
+        },
+    },
+    {
+        // `merge` (zipnative 1.1 addFromReader): two corpus archives combined,
+        // every entry verified and copied without recompression.
+        file: 'merged.zip',
+        run: (f) => cli(f, ['merge', dest('deterministic-a.zip'), dest('streaming-descriptor.zip'), '-o', dest(f)]),
+        after: (f) => {
+            const names = inspectEntries(f).map((e) => e.name).sort().join(',');
+            const want = [...inspectEntries('deterministic-a.zip'), ...inspectEntries('streaming-descriptor.zip')].map((e) => e.name).sort().join(',');
+            if (names !== want) fail(f, [`merged entries ${names} ≠ ${want}`]);
+        },
+    },
+    {
         file: 'incremental-original.zip',
         run: (f) => cli(f, ['create', '--from-manifest', manifestFile('incremental.json', {
             entries: [

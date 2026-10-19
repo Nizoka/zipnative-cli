@@ -17,10 +17,12 @@ import {
     ZipLimitError,
     ZipSecurityError,
     ZipUnsupportedError,
+    type ZipDiagnosticCode,
     type ZipErrorCode,
 } from '../core-bridge/index.js';
 import { CliError, ErrorCode, type ErrorCodeValue, type ErrorDetail } from './error.js';
 import { LIMIT_FLAGS } from './limits.js';
+import { runSignal } from './control.js';
 
 type Mapping = readonly [code: ErrorCodeValue, exitCode: number];
 
@@ -87,46 +89,34 @@ export const ZIP_TO_CLI = {
 /** Every frozen `ZIP_*` code (39), in table order. */
 export const ZIP_ERROR_CODES: readonly ZipErrorCode[] = Object.keys(ZIP_TO_CLI) as ZipErrorCode[];
 
-/** Every core diagnostic code (11) — informational, never thrown unless `--strict`. */
-export const ZIP_DIAGNOSTIC_CODES = [
-    'ZIP_PREPENDED_DATA',
-    'ZIP_MULTIPLE_EOCD',
-    'ZIP_NAME_MISMATCH',
-    'ZIP_UNICODE_PATH_CONFLICT',
-    'ZIP_INVALID_UTF8_NAME',
-    'ZIP_DUPLICATE_NAME',
-    'ZIP_EXTRA_FIELD_MALFORMED',
-    'ZIP_ZIP64_EXTRA_IGNORED',
-    'ZIP_TIMESTAMP_NOT_PINNED',
-    'ZIP_NONDETERMINISTIC_CODEC',
-    'ZIP_DEAD_BYTES_RATIO',
-] as const;
+/**
+ * Every core diagnostic code (12) — informational, never thrown unless
+ * `--strict`. Typed like ZIP_TO_CLI: an engine minor that adds a diagnostic
+ * fails `tsc` here until the CLI lists (and documents) it.
+ */
+const DIAGNOSTIC_TABLE = {
+    ZIP_PREPENDED_DATA: true,
+    ZIP_MULTIPLE_EOCD: true,
+    ZIP_NAME_MISMATCH: true,
+    ZIP_UNICODE_PATH_CONFLICT: true,
+    ZIP_INVALID_UTF8_NAME: true,
+    ZIP_DUPLICATE_NAME: true,
+    ZIP_EXTRA_FIELD_MALFORMED: true,
+    ZIP_ZIP64_EXTRA_IGNORED: true,
+    ZIP_TIMESTAMP_NOT_PINNED: true,
+    ZIP_NONDETERMINISTIC_CODEC: true,
+    ZIP_DEAD_BYTES_RATIO: true,
+    // zipnative 1.1 (issue #9): a date outside 1980..2107 (or an invalid
+    // Date) was clamped to the DOS range when the entry was written.
+    ZIP_TIMESTAMP_CLAMPED: true,
+} as const satisfies Record<ZipDiagnosticCode, true>;
+
+export const ZIP_DIAGNOSTIC_CODES: readonly ZipDiagnosticCode[] = Object.keys(DIAGNOSTIC_TABLE) as ZipDiagnosticCode[];
 
 const FS_ERROR_CODES = new Set([
     'ENOENT', 'EACCES', 'EPERM', 'EISDIR', 'ENOTDIR', 'ENOSPC', 'EPIPE', 'EEXIST',
     'EMFILE', 'ENFILE', 'EBUSY', 'EROFS', 'ELOOP', 'ENAMETOOLONG', 'EIO', 'EINVAL',
 ]);
-
-/**
- * node:zlib errors that reach the CLI unwrapped. The engine's `node-zlib`
- * tier calls `inflateRawSync` directly, so a corrupt or truncated raw
- * stream on the sync path (`inflate --sync`, `readEntry`) surfaces zlib's
- * own Error (`code: Z_DATA_ERROR` / `Z_BUF_ERROR`) instead of a `ZipError`.
- * They are the same two conditions the pure tier reports as
- * `ZIP_DEFLATE_CORRUPT` / `ZIP_DEFLATE_TRUNCATED`, so map them identically —
- * the class an agent sees must not depend on the codec tier.
- */
-const ZLIB_TO_ZIP: Readonly<Record<string, ZipErrorCode>> = {
-    Z_DATA_ERROR: 'ZIP_DEFLATE_CORRUPT',
-    Z_NEED_DICT: 'ZIP_DEFLATE_CORRUPT',
-    Z_BUF_ERROR: 'ZIP_DEFLATE_TRUNCATED',
-};
-
-function zlibCodeOf(err: unknown): ZipErrorCode | undefined {
-    if (!(err instanceof Error)) return undefined;
-    const code = (err as NodeJS.ErrnoException).code;
-    return typeof code === 'string' ? ZLIB_TO_ZIP[code] : undefined;
-}
 
 /** True when `err` is a Node filesystem/stream error (has a known `code`). */
 export function isFsError(err: unknown): err is NodeJS.ErrnoException {
@@ -173,6 +163,12 @@ function entryNameOf(err: ZipError): string | undefined {
  */
 export function mapZipError(err: unknown, context: string, entryName?: string): CliError {
     if (err instanceof CliError) return err;
+    // Past the --timeout deadline every failure IS the deadline: the engine
+    // wraps an abort that reaches a decompressor as ZIP_DECOMPRESSION_FAILED
+    // (it passes through only ZipErrors and errors named AbortError), which
+    // would misreport a timeout as corrupt data.
+    const signal = runSignal();
+    if (signal?.aborted === true && signal.reason instanceof CliError) return signal.reason;
     if (err instanceof ZipError) {
         // `satisfies Record<ZipErrorCode, …>` makes the fallback unreachable for a
         // 1.0.0 engine; it stays for a code a NEWER engine may add at runtime.
@@ -186,21 +182,16 @@ export function mapZipError(err: unknown, context: string, entryName?: string): 
             zipCode: err.code,
             ...(name !== undefined ? { entryName: name } : {}),
             ...(detail !== undefined ? { detail } : {}),
-            ...(limitFlag !== undefined ? { remedy: `--${limitFlag.flag} <value> (raise the bound for trusted input only; "none" disables it)` } : {}),
+            ...(limitFlag !== undefined ? { remedy: `--${limitFlag.flag} <value> (raise the bound for trusted input only)` } : {}),
         });
     }
     if (isFsError(err)) {
         const path = err.path !== undefined ? ` (${err.path})` : '';
         return new CliError(`${context}: ${err.code}${path}: ${err.message}`, 1, ErrorCode.IO);
     }
-    const zlibCode = zlibCodeOf(err);
-    if (zlibCode !== undefined) {
-        const [code, exitCode] = ZIP_TO_CLI[zlibCode];
-        return new CliError(`${context}: ${(err as Error).message}`, exitCode, code, {
-            zipCode: zlibCode,
-            ...(entryName !== undefined ? { entryName } : {}),
-        });
-    }
+    // zipnative 1.1 normalises corrupt deflate on every tier (node:zlib,
+    // DecompressionStream, pure TS) to ZipFormatError ZIP_DEFLATE_CORRUPT /
+    // ZIP_DEFLATE_TRUNCATED (issue #10), so no raw zlib error is translated here.
     const message = err instanceof Error ? err.message : String(err);
     return new CliError(`${context}: ${message}`, 1, ErrorCode.RUNTIME);
 }

@@ -151,7 +151,9 @@ describe('governance constants', () => {
         expect(AI_GOVERNANCE_POLICY.verification.command).toBe('zipnative govern verify-issue <draft.md>');
         expect(AI_GOVERNANCE_POLICY.verification.blocks_submission_on_failure).toBe(true);
         expect(AI_GOVERNANCE_POLICY.human_in_the_loop.role_of_agent).toBe('draftsman');
-        expect(AI_GOVERNANCE_POLICY.version).toBe('1.0.0');
+        expect(AI_GOVERNANCE_POLICY.version).toBe('1.1.0');
+        expect(AI_GOVERNANCE_POLICY.policy.ai_attribution_trailers_allowed).toBe(false);
+        expect(AI_GOVERNANCE_POLICY.policy.configuration_relaxes_checks).toBe(false);
     });
 
     it('is frozen', () => {

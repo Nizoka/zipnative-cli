@@ -1,8 +1,8 @@
 # zipnative-cli — Samples
 
-A comprehensive collection of runnable samples covering every command of zipnative-cli, organized by command: **41 demos**, each a **`.sh` + `.ps1` pair** with identical behaviour, plus a dependency-free runner (`run-all.js`, **73 jobs**) that exercises the same invocations from Node.js.
+A comprehensive collection of runnable samples covering every command of zipnative-cli, organized by command: **48 demos**, each a **`.sh` + `.ps1` pair** with identical behaviour, plus a dependency-free runner (`run-all.js`, **96 jobs**) that exercises the same invocations from Node.js.
 
-> **Generated archives are not committed.** All output goes to `samples/output/` which is git-ignored. The committed inputs under `samples/input/` are tiny, deterministic and text-only (except one 4 KiB pattern binary), so every `--deterministic` build hashes the same on every machine.
+> **Generated archives are not committed.** All output goes to `samples/output/` which is git-ignored. The committed inputs under `samples/input/` are tiny, deterministic and text-only — except one 4 KiB pattern binary and one 139-byte foreign archive with legacy Shift_JIS names (see [Committed input archive](#committed-input-archive)) — so every `--deterministic` build hashes the same on every machine.
 
 Every sample is **offline** (no command in zipnative-cli can open a socket) and needs **no `unzip` / `7z`** — the CLI is the only archive tool involved. Scripts call `zipnative` when it is on `PATH` and fall back to the local build (`node dist/cli.cjs`) otherwise.
 
@@ -67,11 +67,15 @@ samples/
 │   ├── manifest/empty.json       {"entries":[]} — a valid, empty manifest
 │   ├── manifest/edits.json       `modify --from-manifest` demo (remove, rename, replace, add, add-dir)
 │   ├── batch/tasks.json          `batch --manifest` pipeline: create → verify → inspect → extract → crc32 (@id refs)
-│   ├── config/.zipnativerc.json  { create: { deterministic, level 9 }, extract: { overwrite } }
+│   ├── legacy/shift-jis-names.zip  One entry named 日本語/挨拶.txt in Shift_JIS, no UTF-8 flag (foreign producer)
+│   ├── config/.zipnativerc.json  Presentation defaults: { pretty, list: { format, long }, inspect: { format, summary } }
+│   ├── config-unsafe/.zipnativerc.json  { extract: { overwrite, skip-unsafe } } — refused (E_USAGE)
 │   └── govern/draft-{good,bad}.md  HITL drafts for `govern verify-issue` (bad one proposes `npm install some-lib`)
-├── create/                       Build archives: basic, store/deflate, deterministic, manifest, stdin, parallel, comments
-├── list/                         Central-directory listing: table, JSON + --fields, NDJSON
-├── inspect/                      Forensic report, --check gates, --strict diagnostics
+├── canonicalize/                 Make any archive reproducible (canonical form), idempotently
+├── merge/                        Merge archives / split one, every entry verified, nothing recompressed
+├── create/                       Build archives: basic, store/deflate, deterministic, manifest, stdin, parallel, comments, streamed Zip64
+├── list/                         Central-directory listing: table, JSON + --fields, NDJSON, legacy name encodings, --range
+├── inspect/                      Forensic report, --check gates, --strict diagnostics, canonical form + offenders
 ├── extract/                      Secure extraction: basic, globs + --flat, --dry-run, refusals
 ├── cat/                          Stream entries to stdout (decoded and --raw)
 ├── verify/                       Integrity verification + tamper detection
@@ -83,8 +87,8 @@ samples/
 ├── doctor/                       Environment / capability preflight
 ├── schema/                       JSON Schemas, error catalogue, capability manifest
 ├── completion/                   bash / zsh / fish / powershell completion scripts
-├── config/                       .zipnativerc.json defaults, --config, --no-config
-├── agent/                        --json envelopes, --dry-run, error codes, token economy
+├── config/                       .zipnativerc.json presentation defaults, a refused planted file, --config, --no-config
+├── agent/                        --json envelopes, --dry-run, error codes, token economy, --timeout, --progress
 ├── govern/                       AI-governance rules / policy / verify-issue
 └── output/                       (git-ignored) every sample writes under output/<command>/
 ```
@@ -106,6 +110,19 @@ Build a deterministic ZIP from files, directories, stdin or a manifest.
 | [05-stdin-stream.sh](create/05-stdin-stream.sh) / [.ps1](create/05-stdin-stream.ps1) | Pipe a file into `--stdin-name <name> --stream --chunk-size`; the data-descriptor layout (same content as the buffered writer, different bytes — `inspect` reports `canonicalLayout: false`); CRC round trip |
 | [06-parallel.sh](create/06-parallel.sh) / [.ps1](create/06-parallel.ps1) | `--parallel --workers 2 --min-job-size 1k`; proves byte identity with the sequential writer |
 | [07-comment-and-order.sh](create/07-comment-and-order.sh) / [.ps1](create/07-comment-and-order.ps1) | `--comment`, `--entry-comment name=text`, `--order insertion` (the **argv order**, directories still name-sorted — how an EPUB gets `mimetype` first), `--date <ISO>` (UTC wall-clock, 2-second resolution); what `inspect` reports for each |
+| [08-zip64-stream.sh](create/08-zip64-stream.sh) / [.ps1](create/08-zip64-stream.ps1) | `--stdin-name --stream --zip64`: a Zip64 local header and the 24-byte data descriptor, so a streamed entry may exceed 4 GiB; `list --long` flags D and Z; `inspect --check zip64` |
+
+## canonicalize Samples
+
+| File | Description |
+|------|-------------|
+| [01-canonicalize.sh](canonicalize/01-canonicalize.sh) / [.ps1](canonicalize/01-canonicalize.ps1) | The foreign bsdtar fixture is not in the canonical form; `canonicalize` rewrites it (no recompression), `inspect --check canonical-form` passes, and canonicalising again yields the same bytes |
+
+## merge Samples
+
+| File | Description |
+|------|-------------|
+| [01-merge-and-split.sh](merge/01-merge-and-split.sh) / [.ps1](merge/01-merge-and-split.ps1) | Merge two archives (every entry verified, nothing recompressed), split the result with `--include`, and the duplicate-name refusal (`E_INPUT`, `--on-duplicate first\|last` to pick one) |
 
 ## list Samples
 
@@ -116,6 +133,8 @@ List archive entries without decompressing anything.
 | [01-table.sh](list/01-table.sh) / [.ps1](list/01-table.ps1) | Text table, `--long` (mode + flags; no `-l` short form — flags and positionals are order-independent), `--validate eager`, `--include` glob |
 | [02-json-fields.sh](list/02-json-fields.sh) / [.ps1](list/02-json-fields.ps1) | `--format json`, `--summary`, `--fields entries.name,entries.uncompressedSize`, compact vs `--pretty` under `--json` |
 | [03-ndjson.sh](list/03-ndjson.sh) / [.ps1](list/03-ndjson.ps1) | `--format ndjson` — one row per line, filtered with `--exclude` and a shell / `ConvertFrom-Json` pipeline |
+| [05-range.sh](list/05-range.sh) / [.ps1](list/05-range.ps1) | `--range`: an archive above `--max-input-size` is refused buffered (`E_LIMIT`) but listed, read and verified by byte ranges |
+| [04-name-encoding.sh](list/04-name-encoding.sh) / [.ps1](list/04-name-encoding.ps1) | A legacy archive without the UTF-8 flag: CP437 mojibake by default, `--name-encoding shift_jis` decodes 日本語/挨拶.txt; `nameEncoding: "custom"`, `rawNameHex` keeps the bytes |
 
 ## inspect Samples
 
@@ -126,6 +145,7 @@ Forensic archive report with determinism / security assertions.
 | [01-report.sh](inspect/01-report.sh) / [.ps1](inspect/01-report.ps1) | Text and JSON report, `--entries`, `--fields determinism` |
 | [02-check-gates.sh](inspect/02-check-gates.sh) / [.ps1](inspect/02-check-gates.ps1) | **CI gate** — passing `--check` set, then a failing `store-only` check → exit 1 / `E_CHECK_FAILED` |
 | [03-strict-diagnostics.sh](inspect/03-strict-diagnostics.sh) / [.ps1](inspect/03-strict-diagnostics.ps1) | Prepend a stub with `node -e` → `ZIP_PREPENDED_DATA` diagnostic; `--strict` escalates it to `E_CHECK_FAILED` (and `verify --strict` to `E_VERIFY_FAILED`) |
+| [04-canonical-form.sh](inspect/04-canonical-form.sh) / [.ps1](inspect/04-canonical-form.ps1) | The engine's verdict (`analyzeDeterminism`): `--deterministic` passes `--check canonical-form`; a pinned non-epoch `--date` lists `timestamp` offenders and fails the gate (`E_CHECK_FAILED`) |
 
 ## extract Samples
 
@@ -214,7 +234,7 @@ Incremental edits without recompressing untouched entries.
 
 | File | Description |
 |------|-------------|
-| [01-config.sh](config/01-config.sh) / [.ps1](config/01-config.ps1) | `--config samples/input/config/.zipnativerc.json` vs `--no-config`; upward discovery from the config's directory; CLI flag precedence; command-scoped `extract.overwrite` |
+| [01-config.sh](config/01-config.sh) / [.ps1](config/01-config.ps1) | Presentation-only defaults: `--config samples/input/config/.zipnativerc.json` vs `--no-config`; upward discovery; command-scoped sections; CLI flag precedence; the `info: defaults from …` line and `config` in the envelope; a planted `config-unsafe/.zipnativerc.json` (`overwrite`, `skip-unsafe`) refused with `E_USAGE` |
 
 ## agent Samples
 
@@ -225,6 +245,7 @@ The agent-native contract: stdout carries the artefact, stderr carries one JSON 
 | [01-json-and-dry-run.sh](agent/01-json-and-dry-run.sh) / [.ps1](agent/01-json-and-dry-run.ps1) | `--json` status envelope (anywhere on the command line — flags and positionals are order-independent), `--dry-run` (nothing written), capturing stderr separately, `--pretty` |
 | [02-error-envelope.sh](agent/02-error-envelope.sh) / [.ps1](agent/02-error-envelope.ps1) | Deterministic failures: `E_NOT_FOUND` (+ `ZIP_ENTRY_NOT_FOUND`), `E_PARSE` + `zipCode`, `E_IO`, `E_USAGE` (exit 2), `E_INPUT`, `E_DATA` + `detail` |
 | [03-token-economy.sh](agent/03-token-economy.sh) / [.ps1](agent/03-token-economy.ps1) | Six report sizes side by side: pretty vs compact, `--summary`, `--fields`, `list --fields entries.name` |
+| [04-timeout-and-progress.sh](agent/04-timeout-and-progress.sh) / [.ps1](agent/04-timeout-and-progress.ps1) | `--timeout 1ms` → `E_LIMIT` (`detail.limit: "timeout"`), no partial file; `--progress` text lines, silenced by `--quiet`, NDJSON `{"type":"progress",…}` events under `--json` |
 
 ## govern Samples
 
@@ -237,12 +258,24 @@ AI-governance / Human-in-the-Loop contract.
 
 ---
 
+## Committed input archive
+
+`samples/input/legacy/shift-jis-names.zip` is the only archive committed under `samples/`. The CLI
+cannot produce it — zipnative always writes the UTF-8 flag — so it comes from a foreign producer,
+the same rule as [tests/fixtures/](../tests/fixtures/README.md):
+
+| File | Producer (exact version) | How | SHA-256 |
+|---|---|---|---|
+| `legacy/shift-jis-names.zip` | PowerShell 7.6.7 on .NET 10.0.13, `System.IO.Compression.ZipArchive`, Windows 11 | `new ZipArchive(stream, Create, false, Encoding.GetEncoding(932))`, one stored entry `日本語/挨拶.txt` (`konnichiwa` + LF), dated 2024-01-02T03:04:06Z | `e613aa1d637ec29952c6d4f2cd5f034c7c603e6b3027079541609456693483f0` |
+
+---
+
 ## run-all.js Options
 
 `samples/run-all.js` executes a declarative table of CLI invocations (one or more per sample) directly with Node.js — no shell needed — and asserts what the scripts assert: byte identity for the deterministic and parallel builds, `stream` vs `extract` parity, and the expected exit code + `E_*` code for every failure demo.
 
 ```bash
-node samples/run-all.js                     # every job (73 jobs across the 41 demos)
+node samples/run-all.js                     # every job (96 jobs across the 48 demos)
 node samples/run-all.js --category extract  # one directory's jobs
 node samples/run-all.js --clean             # wipe samples/output/ first
 node samples/run-all.js --verbose           # echo every command line

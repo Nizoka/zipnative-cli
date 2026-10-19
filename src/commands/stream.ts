@@ -26,9 +26,10 @@ import {
 import { createDiagnosticSink, formatDiagnosticLine } from '../utils/diagnostics.js';
 import { prepareEngine } from '../utils/engine.js';
 import { rowFromHeader, renderTable, type EntryRow } from '../utils/entryfmt.js';
+import { escapeTerminal } from '../utils/sanitize.js';
 import { CliError, ErrorCode } from '../utils/error.js';
 import { openInputStream, overwriteRefused, pathExists, readableToByteSource, safeJoin, writeStreamingOutput } from '../utils/io.js';
-import { emitJsonReport, serializeJson } from '../utils/projection.js';
+import { emitJsonReport, serializeJson, warnTextProjection } from '../utils/projection.js';
 import { duplicatePolicy, ensureSinkDir, ensureSinkParent, resolveSinkTarget, writeSinkFile } from '../utils/sink.js';
 import { mapZipError } from '../utils/ziperr.js';
 import { commonOptions, parseFormat, parseNameFilter, parseOnDuplicate } from '../utils/zipops.js';
@@ -89,7 +90,9 @@ export async function stream(args: ParsedArgs): Promise<void> {
 
     const sink = createDiagnosticSink(format === 'ndjson' && isJsonMode());
     const source = readableToByteSource(openInputStream(inputPath)) as ByteSource;
-    const iterator = iterateZipEntries(source, commonOptions(args, sink));
+    // No engine signal here (see commonOptions): the deadline is enforced by
+    // checkAborted() in readableToByteSource() and in the sink's write loop.
+    const iterator = iterateZipEntries(source, commonOptions(args, sink, 'stream', { signal: false }));
 
     const rows: EntryRow[] = [];
     const skipped: { name: string; reason: string }[] = [];
@@ -198,14 +201,15 @@ export async function stream(args: ParsedArgs): Promise<void> {
 
     if (mode === 'cat' && remainingCat.size > 0) {
         const missing = [...remainingCat];
-        throw new CliError(`Entry not found in stream: ${missing.join(', ')} (forward mode sees local headers only; try \`zipnative stream --list\`).`, 1, ErrorCode.NOT_FOUND, { entryName: missing[0] as string, zipCode: 'ZIP_ENTRY_NOT_FOUND' });
+        throw new CliError(`Entry not found in stream: ${missing.join(', ')} (forward mode sees local headers only; try \`zipnative stream --list\`).`, 1, ErrorCode.NOT_FOUND, { entryName: missing[0] as string, zipCode: 'ZIP_ENTRY_NOT_FOUND', remedy: 'zipnative stream --list < archive (forward mode sees local headers only; names are case-sensitive)' });
     }
 
     for (const s of skipped) progress(`warning: skipped ${s.name} (${s.reason})`);
 
     if (mode === 'list') {
         if (format === 'text') {
-            process.stdout.write(renderTable(rows, long));
+            warnTextProjection(args);
+            process.stdout.write(escapeTerminal(renderTable(rows, long)));
         } else if (format === 'json') {
             const report: StreamReport = { mode: 'list', trust: TRUST, entries: rows, diagnostics: sink.diagnostics };
             emitJsonReport(args, report, () => streamSummary(report));

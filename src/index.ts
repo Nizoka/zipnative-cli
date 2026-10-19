@@ -1,8 +1,10 @@
 import { parseArgs, hasFlag, getStringFlag } from './utils/args.js';
 import { CliError, ErrorCode } from './utils/error.js';
-import { isJsonMode, emitJsonError, remedyFor } from './utils/agent.js';
-import { loadConfig, applyConfigDefaults } from './utils/config.js';
-import { installSignalCleanup } from './utils/inflight.js';
+import { isJsonMode, emitJsonError, normalizeEnvSwitches, remedyFor } from './utils/agent.js';
+import { loadConfig, applyConfigDefaults, setActiveConfig } from './utils/config.js';
+import { armTimeout, runSignal } from './utils/control.js';
+import { escapeLine } from './utils/sanitize.js';
+import { installSignalCleanup, removeInFlight } from './utils/inflight.js';
 import { installEpipeGuard } from './utils/io.js';
 import { cliVersion, engineVersion } from './utils/version.js';
 
@@ -21,13 +23,26 @@ Global options (any command):
                     zipnative's ZIP_* code verbatim.
   --pretty          Indent JSON output under --json
   --dry-run         Validate inputs and plan without writing output (create,
-                    extract, modify, stream, cat, inflate, batch)
+                    canonicalize, merge, extract, modify, stream, cat,
+                    inflate, batch)
   --strict          Escalate the first engine diagnostic into E_CHECK_FAILED
                     before any output byte (verify: the report is printed and
                     the verdict becomes E_VERIFY_FAILED)
-  --max-entries <n>            Security bounds (zipnative ZipLimits); "none"
-  --max-entry-size <size>      disables a bound. Defaults: 100000 entries,
-  --max-total-size <size>      1 GiB per entry, 8 GiB total, ratio 1024:1,
+  --timeout <duration>  Deadline for the run: 500, 500ms, 30s, 5m, 1h. Past
+                    it the run stops at the next chunk or entry boundary with
+                    E_LIMIT (detail.limit "timeout"); any file being written is
+                    removed. A synchronous step already running (opening or
+                    verifying a buffered archive) always completes.
+  --progress        Progress snapshots on stderr where the engine measures
+                    them (create --stream / --stdin-name / --parallel,
+                    extract without --buffered, stream, cat): one throttled
+                    line per update, or NDJSON {"type":"progress",...}
+                    under --json; off under --quiet
+  --max-entries <n>            Security bounds (zipnative ZipLimits), always
+  --max-entry-size <size>      finite and positive. Defaults: 100000 entries,
+  --max-entry-compressed-size <size>
+                               1 GiB per entry, 1 GiB + 1 MiB per entry
+  --max-total-size <size>      fetched by --range, 8 GiB total, ratio 1024:1,
   --max-ratio <n>              4096-byte names, 65535-byte extra fields and
   --max-name-bytes <size>      comments, 256 MiB central directory.
   --max-extra-bytes <size>     <size> accepts 65536, 512k, 1m, 8g, 1GiB.
@@ -37,9 +52,11 @@ Global options (any command):
                     or payload read from stdin or a file into memory (list,
                     inspect, verify, extract, cat, modify, create --stdin-name,
                     inflate --sync, govern verify-issue). Default 4 GiB;
-                    "none" disables it;
-                    exceeding it is E_LIMIT. The streaming commands (stream,
-                    crc32, inflate, create --stream) are not bounded by it.
+                    a file is read through one descriptor (regular files
+                    capped at the size checked; pipes and devices byte-
+                    counted), so exceeding it is always E_LIMIT. The
+                    streaming commands (stream, crc32, inflate, create
+                    --stream) are not bounded by it.
   --pure-codecs     Skip node:zlib and run the pure-TS codec tier
   --codec <module>  Load an ESM module exporting { codecs: ZipCodec[] } and
                     register it. A codec for method 0/8 (or a deflateImpl)
@@ -57,6 +74,9 @@ Environment:
   ZIPNATIVE_JSON=1         same as --json         ZIPNATIVE_DRY_RUN=1  --dry-run
   ZIPNATIVE_QUIET=1        same as --quiet        ZIPNATIVE_STRICT=1   --strict
   ZIPNATIVE_PURE_CODECS=1  same as --pure-codecs  ZIPNATIVE_DEBUG=1    traces
+  ZIPNATIVE_PROGRESS=1     same as --progress
+  The ZIPNATIVE_* switches take 1/true/yes/on or 0/false/no/off; any other
+  value is a usage error (exit 2).
   NO_COLOR / FORCE_COLOR / TERM=dumb              colour of the stderr lines
 `;
 
@@ -66,12 +86,15 @@ zipnative-cli — Official CLI for zipnative
 Usage:
   zipnative <command> [options]
 
-Commands (15):
+Commands (17):
 
  Create & modify
   create      Build a deterministic ZIP from files, dirs, stdin or a manifest
   modify      Incremental edits: add/replace/remove/rename/comment (append-only
               or --compact)
+  canonicalize  Rewrite any archive into the canonical deterministic form
+  merge       Merge archives (or split one with filters): entries copied
+              verified, never recompressed
 
  Read & extract
   list        List archive entries (text | json | ndjson)
@@ -118,8 +141,8 @@ Inputs:
   --stdin-name <n>    Read stdin as one entry named <n>
   --from-manifest <f> JSON manifest ({ comment|commentBase64, order, date,
                       compression, entries: [{ name, path|data|dataBase64|
-                      directory, method, level, date, comment, mode,
-                      extraFields }] }) —
+                      directory, raw, method, level, deterministic, date,
+                      comment, mode, extraFields }] }) —
                       see \`zipnative schema create-manifest\`
   --output,  -o       Output path (default: stdout)
   --overwrite         Replace an existing output file (default: refuse, E_IO)
@@ -161,7 +184,10 @@ Output modes:
                            (data-descriptor layout, so the bytes differ from
                            the buffered layout — the content is identical);
                            entries > 4 GiB are refused
-                           (ZIP_UNSUPPORTED_ZIP64_STREAMING)
+                           (ZIP_UNSUPPORTED_ZIP64_STREAMING) unless --zip64
+  --zip64                  With --stream / --stdin-name: write every streamed
+                           entry with a Zip64 local header and the 24-byte
+                           descriptor, so it may exceed 4 GiB
   --chunk-size <size>      Output chunk size for the chunked writer (--stream
                            or --stdin-name; default 65536)
   --parallel               Deflate across a worker pool (zipnative/worker);
@@ -169,8 +195,8 @@ Output modes:
                            Refused (exit 2) with a --codec module registering
                            method 0/8, or a deflateImpl without --deterministic:
                            workers never see the module
-  --workers <n>            Worker count (default cores-1, max 8; 0 = main
-                           thread)
+  --workers <n>            Worker count (default min(cores-1, 8); 0 = main
+                           thread; at most 64)
   --min-job-size <size>    Minimum entry size sent to a worker (default 32k)
   --job-timeout <ms>       Per-job cap before inline fallback (default 60000)
 
@@ -179,7 +205,72 @@ Output modes:
 
 Status envelope (--json): { ok, command, dryRun, output, entries, files,
 directories, bytes, bytesIn, method, level, deterministic, tier, order, stream,
-layout, parallel, skipped, diagnostics }.
+zip64, layout, parallel, skipped, diagnostics }.
+`;
+
+const CANONICALIZE_USAGE = `\
+zipnative canonicalize — Rewrite an archive into the canonical form
+
+Usage:
+  zipnative canonicalize <in.zip> -o <out.zip> [--date epoch|<ISO>]
+  zipnative canonicalize --input <in.zip> -o - > out.zip
+
+The "fix" half of inspect --check canonical-form (zipnative canonicalizeZip):
+timestamps pinned, entries sorted by raw name bytes, names re-encoded as UTF-8
+(flag bit 11), extra fields and comments dropped, version-made-by and internal
+attributes constant. NO recompression: payloads are copied bit for bit, so an
+encrypted or corrupt entry travels unchanged (run verify first). Running it
+twice yields the same bytes. Names keep their meaning: a traversal or device
+name travels into the output (counted in unsafeNames, with a warning) —
+reproducible is not safe to extract.
+
+Options:
+  --input,   -i       Archive path (default: stdin)
+  --output,  -o       Output path ("-" = stdout); required
+  --date epoch|<ISO>  Timestamp of every entry (default: the DOS epoch; an ISO
+                      date is UTC wall-clock, as in create). "now" is refused:
+                      it is not a canonical form
+  --keep-comments     Keep the archive and entry comments
+  --normalize-modes   Write the canonical modes (0644 files, 0755 dirs)
+                      instead of keeping each entry's external attributes
+  --overwrite         Replace an existing --output file (default: refuse, E_IO)
+  --dry-run           Canonicalise and report; write nothing
+
+Envelope (--json): { output, entries, bytes, changed, deterministic,
+canonicalForm } — the last two measured on the OUTPUT by analyzeDeterminism.
+`;
+
+const MERGE_USAGE = `\
+zipnative merge — Merge archives (or split one) without recompression
+
+Usage:
+  zipnative merge <a.zip> <b.zip>... -o <out.zip>
+  zipnative merge <a.zip> --include 'docs/**' -o <docs.zip>      (split)
+
+Each entry's COMPRESSED bytes are transplanted with its method, CRC, sizes,
+timestamp, attributes, comment and extra fields (zipnative addFromReader).
+Every source is opened eagerly and every entry is VERIFIED (CRC-32 and size)
+before it is copied — no opt-out: a lying source is refused, never laundered.
+
+Options:
+  --input,   -i       Source archive (repeatable; positionals too; "-" =
+                      stdin, once)
+  --output,  -o       Output path ("-" = stdout); required
+  --include <glob>    Keep only matching names (repeatable)
+  --exclude <glob>    Drop matching names (repeatable)
+  --on-duplicate error|first|last  A name present in two sources (default
+                      error; the same directory twice is one directory)
+  --order canonical|insertion  Entry order (default canonical; insertion =
+                      sources in argv order, entries in directory order)
+  --comment <text>    Archive comment (--comment-file <path> for raw bytes)
+  --skip-unsupported  Leave out entries that cannot be verified (encrypted, or
+                      a method no registered codec decodes) instead of
+                      refusing (E_UNSUPPORTED)
+  --overwrite         Replace an existing --output file (default: refuse, E_IO)
+  --dry-run           Plan and verify the sources; write nothing
+
+Envelope (--json): { output, inputs, entries, files, directories, order,
+layout, skipped: [{ name, input, reason }], bytes }.
 `;
 
 const LIST_USAGE = `\
@@ -194,10 +285,21 @@ Options:
   --format, -f text|json|ndjson   (default text; json under --json)
   --long              Add mode, flags, versions, offsets and extra fields
   --validate lazy|eager       Cross-check every local header up front (eager)
+  --range             Read the archive by byte ranges through one file
+                      descriptor (zipnative openZipRange): only the central
+                      directory is fetched, so an archive larger than memory
+                      lists; --max-input-size does not apply. A regular file
+                      only, not stdin
   --include <glob>    Keep only matching names (repeatable)
   --exclude <glob>    Drop matching names (repeatable)
+  --name-encoding <label>  Decode names WITHOUT the UTF-8 flag with this
+                      encoding (default cp437; any WHATWG label the runtime
+                      knows: shift_jis, gbk, windows-1252, ...). nameEncoding
+                      becomes "custom"; --long keeps the bytes in rawNameHex
   --summary           { entries, files, directories, compressedSize,
-                        uncompressedSize, zip64, encrypted }
+                        uncompressedSize, zip64, zip64Entries, encrypted }
+                      (zip64 = a Zip64 EOCD record; zip64Entries = entries
+                      with a Zip64 extra field, e.g. a streamed --zip64 archive)
   --fields a,b.c      Dot-path projection of the JSON report
 
 JSON shape: \`zipnative schema entries\`.
@@ -217,11 +319,14 @@ Options:
   --entries           Include every entry (long form) in the report
   --entry <name>      Include only the named entries (repeatable)
   --extra             Include extra-field payloads as hex
+  --name-encoding <label>  As in \`list\`
   --check <assert>    Assertion (repeatable, comma-separable). Any failure
                       prints
                       the report then exits 1 with E_CHECK_FAILED:
                         deterministic (reproducible: epoch timestamps +
-                        canonical order + UTF-8 flags), epoch-timestamps,
+                        canonical order + UTF-8 flags), canonical-form (the
+                        engine's verdict: also Zip64-only extras and
+                        version-made-by 0x032D), epoch-timestamps,
                         canonical-order, utf8-names, canonical-layout /
                         no-data-descriptor (buffered layout — a --stream
                         archive is reproducible but not canonical), no-zip64,
@@ -230,9 +335,11 @@ Options:
                         no-diagnostics, store-only, deflate-only,
                         max-entries=N, min-entries=N, max-uncompressed=<size>,
                         max-ratio=N, has=<name>, method=store|deflate|<id>
-  --summary           { entries, bytes, uncompressedSize, zip64, encrypted,
-                        deterministic, canonicalLayout, diagnostics,
-                        checksPassed? }
+  --summary           { entries, bytes, uncompressedSize, zip64, zip64Entries,
+                        encrypted, deterministic, canonicalLayout,
+                        canonicalForm, unsafeNames, symlinks, duplicateNames,
+                        diagnostics, checksPassed? } (zip64 = a Zip64 EOCD
+                        record; zip64Entries = entries with a Zip64 extra field)
   --fields a,b.c      Dot-path projection
 
 JSON shape: \`zipnative schema inspect\`.
@@ -252,6 +359,14 @@ Options:
   --overwrite         Replace an existing --output file (default: refuse, E_IO)
   --raw               Output the COMPRESSED payload (zero-copy), no decoding
   --no-verify-crc     Skip the CRC-32 check at the end of the stream
+  --range             Read the archive by byte ranges through one file
+                      descriptor (zipnative openZipRange): only the central
+                      directory and the requested entries are fetched, in
+                      chunks (--raw fetches the whole compressed entry,
+                      bounded by --max-entry-compressed-size); never bounded
+                      by --max-input-size. A regular file only, not stdin
+  --name-encoding <label>  Decode non-UTF-8 names (as in \`list\`) — --entry
+                      then matches the decoded name
   --dry-run           Resolve the entries and report their sizes; output nothing
 
 Note: the CRC is verified at the END of the stream (like \`unzip -p\`), so
@@ -287,6 +402,8 @@ Options:
   --buffered          Use the in-memory extractor (many tiny entries)
   --preserve-mode     Apply POSIX mode bits (never setuid/setgid/sticky)
   --preserve-mtime    Apply the entry timestamp to each file
+  --name-encoding <label>  Decode non-UTF-8 names (as in \`list\`) BEFORE the
+                      path is sanitised and contained
   --dry-run           Plan and validate; write nothing
 
 Refusals (E_SECURITY + zipCode): ZIP_PATH_TRAVERSAL, ZIP_SYMLINK_REJECTED,
@@ -313,7 +430,11 @@ Options:
   --include/--exclude <glob>, --overwrite, --on-duplicate, --flat,
   --preserve-mtime    As in \`extract\`
   --skip-unsafe       Skip unsafe names instead of failing
-  --skip-unsupported  Skip encrypted / unknown-method entries instead of failing
+  --skip-unsupported  Skip encrypted / unknown-method entries, and --codec
+                      methods without createDecompressor, instead of failing
+                      (a codec streams through createDecompressor(maxOutput)
+                      -> { push(chunk): Uint8Array[], end(): Uint8Array[] })
+  --name-encoding <label>  Decode non-UTF-8 names (as in \`list\`)
   --summary, --fields Token-economy projection of the --format json report
   --dry-run           Iterate and plan; write nothing
 
@@ -353,6 +474,10 @@ Options:
   --date epoch|now|<ISO>     Timestamp for new payloads (default: DOS epoch)
   --compact                  Canonical rewrite (saveCompact): removed data is
                              truly gone, still no recompression
+  --canonical                With --compact: write zipnative's canonical
+                             deterministic form (epoch or --date timestamps,
+                             sorted names, no extras or comments), as
+                             canonicalize does
   --in-place                 Write back to the input path (exclusive temp
                              file + atomic rename)
   --output,  -o              Output path (default: stdout)
@@ -386,8 +511,15 @@ Options:
                       and local header of each, after the eager structural
                       check; the report lists them under "selected". An unknown
                       name is E_NOT_FOUND before any output.
+  --name-encoding <label>  Decode non-UTF-8 names for --entry lookups (as in
+                      \`list\`), with --entry only
   --format, -f text|json  (default text; json under --json)
   --strict            Also fail when any diagnostic was emitted
+  --range             Read the archive by byte ranges through one file
+                      descriptor (zipnative openZipRange): each entry is
+                      fetched and verified one at a time, bounded by
+                      --max-entry-compressed-size, never by --max-input-size.
+                      A regular file only, not stdin
   --summary           { ok, entries, failed, skipped, diagnostics, selected?,
                         error? }
   --fields a,b.c      Dot-path projection
@@ -429,7 +561,7 @@ Options:
   --output,  -o       Decompressed output (default: stdout)
   --overwrite         Replace an existing --output file (default: refuse, E_IO)
   --max-output <size> Hard output bound (default: the effective
-                      --max-entry-size, 1 GiB); "none" only for trusted input
+                      --max-entry-size, 1 GiB); raise it for trusted input
   --method deflate|store|<id>   Codec (default deflate; ids via --codec)
   --sync              Buffer the input and use the codec's decompressSync
   --allow-trailing    Silence the warning about bytes after the stream end
@@ -462,8 +594,13 @@ Directory mode:
   --concurrency <n>   Parallel workers (default 4, max 64)
   --fail-fast         Stop scheduling after the first failure
   --method/--level/--deterministic/--order/--date/--comment
-                      Forwarded to every create task (see create --help);
-                      any other create flag is forwarded too
+                      Forwarded to every create task (see create --help),
+                      like every other create flag that names no input or
+                      output: --prefix --dir-entries --include --exclude
+                      --follow-symlinks --mtime --comment-file --entry-comment
+                      --preserve-mode --store-ext --stream --zip64
+                      --chunk-size --parallel --workers --min-job-size
+                      --job-timeout
 
 Manifest mode:
   --manifest <file>   Ordered pipeline of whitelisted commands (create, list,
@@ -482,7 +619,9 @@ Output:
   --format, -f text|json  (default text; json under --json)
   --summary           { ok, command, mode, total, succeeded, failed, skipped }
   --fields a,b.c      Dot-path projection
-  --dry-run           Validate and print the plan; execute nothing
+  --dry-run           Validate the manifest (its @ref graph, each task's flag
+                      names and arity) and print the plan; execute nothing — a
+                      task's flag values and inputs are checked when it runs
 
 Exit 1 carries the first failing task's E_* code.
 `;
@@ -493,7 +632,8 @@ zipnative doctor — Environment / capability preflight
 Usage:
   zipnative doctor [--format json|text]
 
-Checks: CLI version, Node >= 22, zipnative package vs VERSION export, the
+Checks: CLI version, Node within engines.node (^22.17.1 || >=24.4.1),
+zipnative package vs VERSION export, the
 active deflate tier (node-zlib expected; pure under --pure-codecs), the pinned
 tier used by --deterministic, platform streaming codecs, worker-thread
 availability for \`create --parallel\`, registered codecs, the effective
@@ -555,6 +695,8 @@ review before anything is submitted under a human identity.
 const COMMAND_USAGE: Readonly<Record<string, string>> = {
     create: CREATE_USAGE,
     modify: MODIFY_USAGE,
+    canonicalize: CANONICALIZE_USAGE,
+    merge: MERGE_USAGE,
     list: LIST_USAGE,
     inspect: INSPECT_USAGE,
     cat: CAT_USAGE,
@@ -574,6 +716,8 @@ async function loadCommand(name: string): Promise<CommandFn> {
     switch (name) {
         case 'create': return (await import('./commands/create.js')).create;
         case 'modify': return (await import('./commands/modify.js')).modify;
+        case 'canonicalize': return (await import('./commands/canonicalize.js')).canonicalize;
+        case 'merge': return (await import('./commands/merge.js')).merge;
         case 'list': return (await import('./commands/list.js')).list;
         case 'inspect': return (await import('./commands/inspect.js')).inspect;
         case 'cat': return (await import('./commands/cat.js')).cat;
@@ -597,17 +741,17 @@ async function loadCommand(name: string): Promise<CommandFn> {
 // The command being dispatched, captured for the agent JSON error envelope.
 let activeCommand: string | null = null;
 
-async function main(): Promise<void> {
-    installEpipeGuard();
-    installSignalCleanup();
-    const argv = process.argv.slice(2);
-    const args = parseArgs(argv);
-
-    // Global output flags (recognised anywhere in argv).
+/**
+ * The env-backed global flags: index.ts turns them into ZIPNATIVE_* (and
+ * NO_COLOR) so every module — and every batch task run in-process — sees the
+ * same mode. Called on the raw argv and again after the config merge (a
+ * presentation default from `.zipnativerc.json` behaves like its flag).
+ */
+function applyGlobalEnv(args: ReturnType<typeof parseArgs>): void {
     if (hasFlag(args.flags, 'no-color') || process.env['NO_COLOR'] !== undefined) {
         process.env['NO_COLOR'] = '1';
     }
-    if (hasFlag(args.flags, 'quiet', 'q')) {
+    if (hasFlag(args.flags, 'quiet')) {
         process.env['ZIPNATIVE_QUIET'] = '1';
     }
     if (hasFlag(args.flags, 'json')) {
@@ -622,20 +766,70 @@ async function main(): Promise<void> {
     if (hasFlag(args.flags, 'pure-codecs')) {
         process.env['ZIPNATIVE_PURE_CODECS'] = '1';
     }
+    if (hasFlag(args.flags, 'progress')) {
+        process.env['ZIPNATIVE_PROGRESS'] = '1';
+    }
+}
 
-    if (hasFlag(args.flags, 'help', 'h') && args.positionals.length === 0) {
+async function main(): Promise<void> {
+    installEpipeGuard();
+    installSignalCleanup();
+    const argv = process.argv.slice(2);
+    // Agent mode must hold for a refusal raised BY the parse itself (a repeated
+    // switch, a prototype name): `--json` is never a flag's value (a token
+    // starting with "-" is not consumed), so the bare token decides — before
+    // `--`, after which every token is an operand.
+    const endOfFlags = argv.indexOf('--');
+    const flagTokens = endOfFlags === -1 ? argv : argv.slice(0, endOfFlags);
+    const jsonFromArgv = flagTokens.some((t) => t === '--json' || /^--json=(?:true|1|yes|on)$/i.test(t));
+    // Name the command in an envelope raised by the parse itself (`list a.zip
+    // --json --json`): the first bare token that is a command.
+    activeCommand = flagTokens.find((t) => !t.startsWith('-') && Object.hasOwn(COMMAND_USAGE, t)) ?? null;
+    // ZIPNATIVE_* switches take the same eight spellings as the flags. The
+    // --json token decides the mode of that refusal first; the raw
+    // ZIPNATIVE_JSON it shadows is still judged (release audit V-01, C-12, C-13).
+    const rawJson = process.env['ZIPNATIVE_JSON'];
+    if (jsonFromArgv) process.env['ZIPNATIVE_JSON'] = '1';
+    normalizeEnvSwitches();
+    if (jsonFromArgv && rawJson !== undefined) normalizeEnvSwitches({ ZIPNATIVE_JSON: rawJson });
+    const args = parseArgs(argv);
+
+    // Global output flags (recognised anywhere in argv).
+    applyGlobalEnv(args);
+    // The --timeout deadline starts with the process, not with the first
+    // engine call (utils/control.ts; idempotent for in-process re-arming).
+    armTimeout(args);
+    // Backstop: a read the CLI cannot cancel (a FileHandle read on a stalled
+    // FIFO) or an engine promise that never settles must not outlive the
+    // deadline. After a short grace period for the cooperative paths, the
+    // run fails with the deadline and removes the files being written.
+    const deadline = runSignal();
+    deadline?.addEventListener('abort', () => {
+        const grace = setTimeout(() => {
+            if (settled) return;
+            settled = true;
+            removeInFlight();
+            fail(deadline.reason);
+        }, DEADLINE_GRACE_MS);
+        grace.unref();
+    }, { once: true });
+
+    // Help / version: write and RETURN (exit code 0 by default) — never
+    // process.exit() right after a stdout write: on macOS and Windows a pipe
+    // is asynchronous and the tail of the text would be lost.
+    if (hasFlag(args.flags, 'help') && args.positionals.length === 0) {
         process.stdout.write(USAGE);
-        process.exit(0);
+        return;
     }
 
-    if (hasFlag(args.flags, 'version', 'V')) {
+    if (hasFlag(args.flags, 'version')) {
         const version = cliVersion();
         if (hasFlag(args.flags, 'json')) {
             process.stdout.write(JSON.stringify({ name: 'zipnative-cli', version, zipnative: engineVersion() }) + '\n');
         } else {
             process.stdout.write(version + '\n');
         }
-        process.exit(0);
+        return;
     }
 
     const commandName = args.positionals[0];
@@ -643,7 +837,7 @@ async function main(): Promise<void> {
     if (commandName === undefined) {
         if (argv.length === 0) {
             process.stdout.write(USAGE);
-            process.exit(0);
+            return;
         }
         // Flags but no command (`zipnative --frob`, `zipnative --json`): a usage
         // error, never the help text with exit 0.
@@ -655,13 +849,13 @@ async function main(): Promise<void> {
 
     activeCommand = commandName;
 
-    if (hasFlag(args.flags, 'help', 'h')) {
+    if (hasFlag(args.flags, 'help')) {
         const usage = COMMAND_USAGE[commandName];
         if (usage === undefined) {
             throw new CliError(`Unknown command: ${commandName}. Run zipnative --help for usage.`, 2);
         }
         process.stdout.write(usage);
-        process.exit(0);
+        return;
     }
 
     // Strip ONLY the first occurrence of the command name from argv.
@@ -676,41 +870,110 @@ async function main(): Promise<void> {
 
     const commandArgs = parseArgs(rest);
 
-    // Apply `.zipnativerc.json` defaults (unless --no-config). CLI flags win.
+    // An unknown command is refused before anything else looks at its flags.
+    const command = await loadCommand(commandName);
+
+    // The invocation contract (completion.ts COMMANDS is the table): only
+    // declared flags, each value flag once unless repeatable, no stray
+    // positionals — E_USAGE, exit 2, before any input is read.
+    const { assertInvocation, knownFlags } = await import('./commands/completion.js');
+    assertInvocation(commandName, commandArgs);
+
+    // Apply `.zipnativerc.json` defaults (unless --no-config): presentation
+    // keys only, and only those this command declares. CLI flags win.
     let effectiveArgs = commandArgs;
     if (!hasFlag(commandArgs.flags, 'no-config')) {
         const configPath = getStringFlag(commandArgs.flags, 'config');
-        const defaults = loadConfig(commandName, configPath);
-        effectiveArgs = applyConfigDefaults(commandArgs, defaults);
+        const loaded = loadConfig(commandName, configPath);
+        const merged = applyConfigDefaults(commandArgs, loaded.defaults, knownFlags(commandName));
+        effectiveArgs = merged.args;
+        setActiveConfig(loaded.path, merged.applied);
+        // The env-backed globals a config may set (json, quiet, no-color,
+        // progress, strict) take effect like their flags.
+        applyGlobalEnv(effectiveArgs);
+        if (loaded.path !== undefined && merged.applied.length > 0 && !isJsonMode() && process.env['ZIPNATIVE_QUIET'] !== '1') {
+            process.stderr.write(`info: defaults from ${escapeLine(loaded.path)}: ${escapeLine(merged.applied.join(', '))}\n`);
+        }
     }
 
-    const command = await loadCommand(commandName);
     await command(effectiveArgs);
 }
 
-main().catch((e: unknown) => {
+/**
+ * Exit with `code` once everything already written to stdout and stderr has
+ * been flushed: an empty write's callback runs after the queued writes, so a
+ * pipe (asynchronous on macOS and Windows) never loses the error envelope or
+ * the tail of a report. The explicit exit still ends a run whose handles
+ * (an unconsumed stdin, a worker) would keep the loop alive.
+ */
+function exitAfterFlush(code: number): void {
+    process.exitCode = code;
+    let pending = 2;
+    const done = (): void => {
+        pending--;
+        if (pending === 0) process.exit(code);
+    };
+    process.stdout.write('', done);
+    process.stderr.write('', done);
+}
+
+/** Grace period between the --timeout abort and the dispatcher's backstop. */
+const DEADLINE_GRACE_MS = 500;
+
+function fail(error: unknown): void {
+    // Past the deadline, an error that is not the CLI's own (an AbortError
+    // from a destroyed stream) IS the deadline.
+    const signal = runSignal();
+    const e = !(error instanceof CliError) && signal?.aborted === true && signal.reason instanceof CliError ? signal.reason : error;
     // Agent mode: a single JSON error envelope on stderr, with a stable code.
     if (isJsonMode()) {
         emitJsonError(activeCommand, e);
         if (process.env['ZIPNATIVE_DEBUG'] === '1' && e instanceof Error) {
             process.stderr.write((e.stack ?? e.message) + '\n');
         }
-        process.exit(e instanceof CliError ? e.exitCode : 1);
+        exitAfterFlush(e instanceof CliError ? e.exitCode : 1);
+        return;
     }
     if (e instanceof CliError) {
         if (e.message.length > 0) {
-            process.stderr.write(e.message + '\n');
+            // Text mode: the class and the engine cause lead, the message may
+            // quote archive bytes (display-escaped; the --json envelope keeps
+            // the raw text).
+            const cause = e.zipCode !== undefined ? ` (${e.zipCode})` : '';
+            process.stderr.write(`error ${e.code}${cause}: ${escapeLine(e.message)}\n`);
         }
         // The machine-actionable counterpart of the message (same text as the
         // --json envelope's error.remedy); part of the error, never suppressed.
         const remedy = remedyFor(e);
-        if (remedy !== undefined) process.stderr.write(`remedy: ${remedy}\n`);
-        process.exit(e.exitCode);
+        if (remedy !== undefined) process.stderr.write(`remedy: ${escapeLine(remedy)}\n`);
+        exitAfterFlush(e.exitCode);
+        return;
     }
     const message = e instanceof Error ? e.message : String(e);
     if (process.env['ZIPNATIVE_DEBUG'] === '1' && e instanceof Error) {
         process.stderr.write((e.stack ?? e.message) + '\n');
     }
-    process.stderr.write(`Error: ${message}\n`);
-    process.exit(1);
+    process.stderr.write(`error ${ErrorCode.RUNTIME}: ${escapeLine(message)}\n`);
+    exitAfterFlush(1);
+}
+
+// A run must never end with exit 0 while main() is still pending: if an
+// engine promise never settles and nothing else keeps the loop alive (the
+// --timeout timer is unref'd), Node drains the loop and would exit 0 with no
+// result. beforeExit catches that: the deadline's reason if the run was
+// aborted, E_RUNTIME otherwise; the files being written are removed.
+let settled = false;
+process.once('beforeExit', () => {
+    if (settled) return;
+    settled = true;
+    removeInFlight();
+    const signal = runSignal();
+    fail(signal?.aborted === true
+        ? signal.reason
+        : new CliError('The run ended with an operation still pending (an engine promise never settled); no result was produced.', 1, ErrorCode.RUNTIME));
 });
+
+main().then(
+    () => { settled = true; },
+    (e: unknown) => { settled = true; fail(e); },
+);

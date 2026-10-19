@@ -3,8 +3,9 @@
 // never from 'zipnative' / 'zipnative/worker' directly (CLAUDE.md rule 2).
 //
 // Grouped exactly like the core's own src/index.ts so the bridge doubles as a
-// coverage ledger of the frozen 1.0 surface (77 exports):
-// docs/KNOWLEDGE_BASE.md §8 maps every one of them to a CLI touchpoint.
+// coverage ledger of the 1.1 surface (106 exports: 101 from `zipnative`, 5
+// from `zipnative/worker`): docs/KNOWLEDGE_BASE.md §8 maps every one of them
+// to a CLI touchpoint, or records why 1.1.0 leaves it unexposed.
 
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
@@ -14,6 +15,11 @@ import type { createParallelZip as CreateParallelZipFn } from 'zipnative/worker'
 // ── 1. Reading: open, random access, streams ─────────────────────────
 export { openZip } from 'zipnative';
 export type { OpenZipOptions, ReadEntryOptions, ZipReader } from 'zipnative';
+
+// ── 1b. Range reading: a ByteRangeSource, never the whole archive in memory
+// (1.1). Bridged for the ledger; no command reads through it in 1.1.0.
+export { openZipRange, rangeSourceFromBytes } from 'zipnative';
+export type { ByteRangeSource, ZipRangeReader } from 'zipnative';
 
 // ── 2. Forward streaming: CD-less iteration over pipes ───────────────
 export { iterateZipEntries } from 'zipnative';
@@ -27,7 +33,10 @@ export type { ExtractedEntry, ExtractedStreamEntry, ExtractOptions } from 'zipna
 export { createZip } from 'zipnative';
 export type {
     AddEntryOptions,
+    AddFromReaderOptions,
     CreateZipOptions,
+    RawEntryMeta,
+    RawEntryReader,
     StreamOptions,
     ZipCompressionOptions,
     ZipWriter,
@@ -37,18 +46,42 @@ export type {
 export { verifyZip } from 'zipnative';
 export type { VerifiedEntry, VerifyZipOptions, ZipVerificationReport } from 'zipnative';
 
-// ── 4. Modifying: incremental save / compact rewrite ─────────────────
-export { createZipModifier } from 'zipnative';
-export type { ZipModifier, ZipModifierOptions } from 'zipnative';
+// ── 3d. Determinism analysis (1.1) ───────────────────────────────────
+export { analyzeDeterminism } from 'zipnative';
+export type {
+    AnalyzeDeterminismOptions,
+    DeterminismConcern,
+    DeterminismOffender,
+    DeterminismReport,
+} from 'zipnative';
+
+// ── 4. Modifying: incremental save / compact rewrite / canonical form ─
+export { canonicalizeZip, createZipModifier } from 'zipnative';
+export type {
+    CanonicalizeOptions,
+    CanonicalOptions,
+    CompactOptions,
+    ZipModifier,
+    ZipModifierOptions,
+} from 'zipnative';
 
 // ── 4b. Entry attributes ─────────────────────────────────────────────
-export { getUnixMode, isSymlinkEntry } from 'zipnative';
+export {
+    externalAttributesFromUnixMode,
+    getExtendedTimestamps,
+    getUnixIds,
+    getUnixMode,
+    isSymlinkEntry,
+} from 'zipnative';
+export type { ExtendedTimestamps, UnixIds, UnixModeOptions } from 'zipnative';
 
 // ── 4c. Byte sources for the streaming entry points ──────────────────
 export type { ByteSource } from 'zipnative';
 
 // ── 5. Entries and shared types ──────────────────────────────────────
 export type {
+    DosTimeMode,
+    EntrySkipReason,
     EntryVerification,
     ZipCommonOptions,
     ZipDiagnostic,
@@ -57,6 +90,10 @@ export type {
     ZipEntry,
     ZipExtraField,
     ZipLimits,
+    ZipNameDecoder,
+    ZipNameEncoding,
+    ZipProgress,
+    ZipProgressHandler,
 } from 'zipnative';
 
 // ── 6. Errors ────────────────────────────────────────────────────────
@@ -95,7 +132,13 @@ export {
     setDeflateImpl,
     setInflateImpl,
 } from 'zipnative';
-export type { CodecCompressOptions, DeflateTier, Inflator, ZipCodec } from 'zipnative';
+export type {
+    CodecCompressOptions,
+    DeflateTier,
+    Inflator,
+    ZipCodec,
+    ZipDecompressor,
+} from 'zipnative';
 export {
     FLAG_DATA_DESCRIPTOR,
     FLAG_ENCRYPTED,

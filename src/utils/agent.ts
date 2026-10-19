@@ -19,6 +19,8 @@
 // presentation layer over the existing dispatch, never a separate runtime.
 
 import type { ZipErrorCode } from '../core-bridge/index.js';
+import { activeConfig } from './config.js';
+import { escapeLine } from './sanitize.js';
 import { CliError, ErrorCode, type ErrorCodeValue, type ErrorDetail } from './error.js';
 
 /**
@@ -36,9 +38,9 @@ export const ZIP_REMEDY = {
     ZIP_LIMIT_EXCEEDED: '--max-<bound> <size> (the bound is named in detail.limit; trusted input only)',
     ZIP_UNSUPPORTED_ENCRYPTION: '--skip-unsupported (extract, stream); no password support in 1.x',
     ZIP_UNSUPPORTED_METHOD: '--codec <module> | --skip-unsupported (extract, stream)',
-    ZIP_UNSUPPORTED_CODEC_MODE: 'cat / extract --codec <module> on the complete file',
+    ZIP_UNSUPPORTED_CODEC_MODE: 'cat / extract --codec <module> on the complete file | --skip-unsupported (stream) | a codec module exposing createDecompressor (stream)',
     ZIP_UNSUPPORTED_CD_LESS_DESCRIPTOR: 'cat / extract on the complete file (random access)',
-    ZIP_UNSUPPORTED_ZIP64_STREAMING: 'create without --stream (buffered entries are fully Zip64)',
+    ZIP_UNSUPPORTED_ZIP64_STREAMING: 'create --stream --zip64 (Zip64 streamed entries) | create without --stream (buffered entries are fully Zip64)',
     ZIP_ENTRY_NOT_FOUND: 'zipnative list <archive> (names are case-sensitive)',
     ZIP_ENTRY_EXISTS: 'modify --replace <name>=<path>',
     ZIP_STRICT_DIAGNOSTIC: 'drop --strict, or fix the producer named by the diagnostic',
@@ -56,6 +58,30 @@ export function remedyFor(err: CliError): string | undefined {
 }
 
 /** True when the caller passed the global `--json` flag (agent mode). */
+/** The environment switches the CLI reads (each mirrors a global flag). */
+export const ENV_SWITCHES: readonly string[] = [
+    'ZIPNATIVE_JSON', 'ZIPNATIVE_DRY_RUN', 'ZIPNATIVE_QUIET', 'ZIPNATIVE_STRICT',
+    'ZIPNATIVE_PURE_CODECS', 'ZIPNATIVE_PROGRESS', 'ZIPNATIVE_DEBUG',
+];
+
+/**
+ * Normalise the environment switches once, at start-up: `true|1|yes|on` →
+ * `1`, `false|0|no|off` or empty → unset; any other value is a usage error
+ * (exit 2). Before 1.1.0 only `1` counted, so `ZIPNATIVE_DRY_RUN=true` was
+ * silently OFF and the run wrote its output — the env twin of the
+ * `--overwrite=flase` typo (second 1.1.0 review). The value is not echoed.
+ */
+export function normalizeEnvSwitches(env: NodeJS.ProcessEnv = process.env): void {
+    for (const name of ENV_SWITCHES) {
+        const raw = env[name];
+        if (raw === undefined) continue;
+        const v = raw.trim().toLowerCase();
+        if (v === '1' || v === 'true' || v === 'yes' || v === 'on') env[name] = '1';
+        else if (v === '' || v === '0' || v === 'false' || v === 'no' || v === 'off') Reflect.deleteProperty(env, name);
+        else throw new CliError(`${name} is a switch: set it to 1 / true / yes / on, or 0 / false / no / off.`, 2);
+    }
+}
+
 export function isJsonMode(): boolean {
     return process.env['ZIPNATIVE_JSON'] === '1';
 }
@@ -75,9 +101,22 @@ export function isStrict(): boolean {
     return process.env['ZIPNATIVE_STRICT'] === '1';
 }
 
+/** The config file that supplied defaults to this run, as the envelopes carry it. */
+export interface ConfigField {
+    readonly path: string;
+    readonly applied: readonly string[];
+}
+
+function configField(): { readonly config?: ConfigField } {
+    const c = activeConfig();
+    return c === null ? {} : { config: { path: c.path, applied: c.applied } };
+}
+
 export interface AgentErrorEnvelope {
     readonly ok: false;
     readonly command: string | null;
+    /** Present when a `.zipnativerc.json` supplied defaults to this run. */
+    readonly config?: ConfigField;
     readonly error: {
         readonly code: ErrorCodeValue;
         readonly message: string;
@@ -109,21 +148,23 @@ const DEFAULT_MESSAGE: Readonly<Record<ErrorCodeValue, string>> = {
 export function buildErrorEnvelope(command: string | null, err: unknown): AgentErrorEnvelope {
     if (err instanceof CliError) {
         const message = err.message.length > 0 ? err.message : DEFAULT_MESSAGE[err.code];
+        const remedy = remedyFor(err);
         return {
             ok: false,
             command,
+            ...configField(),
             error: {
                 code: err.code,
                 message,
                 ...(err.zipCode !== undefined ? { zipCode: err.zipCode } : {}),
                 ...(err.entryName !== undefined ? { entryName: err.entryName } : {}),
                 ...(err.detail !== undefined ? { detail: err.detail } : {}),
-                ...(remedyFor(err) !== undefined ? { remedy: remedyFor(err) } : {}),
+                ...(remedy !== undefined ? { remedy } : {}),
             },
         };
     }
     const message = err instanceof Error ? err.message : String(err);
-    return { ok: false, command, error: { code: ErrorCode.RUNTIME, message } };
+    return { ok: false, command, ...configField(), error: { code: ErrorCode.RUNTIME, message } };
 }
 
 /** Write the JSON error envelope to stderr (single line, newline-terminated). */
@@ -138,7 +179,7 @@ export function emitJsonError(command: string | null, err: unknown): void {
  */
 export function emitStatus(envelope: Readonly<Record<string, unknown>>): void {
     if (!isJsonMode()) return;
-    process.stderr.write(JSON.stringify({ ok: true, ...envelope }) + '\n');
+    process.stderr.write(JSON.stringify({ ok: true, ...envelope, ...configField() }) + '\n');
 }
 
 /**
@@ -147,5 +188,6 @@ export function emitStatus(envelope: Readonly<Record<string, unknown>>): void {
  */
 export function progress(line: string): void {
     if (isQuiet()) return;
-    process.stderr.write(line + '\n');
+    // Progress lines quote entry names (skipped, warnings): display-escaped.
+    process.stderr.write(escapeLine(line) + '\n');
 }

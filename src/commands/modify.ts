@@ -18,11 +18,8 @@ import { dirname, resolve } from 'node:path';
 import { type ParsedArgs, getStringFlag, getStringFlagAll, hasFlag } from '../utils/args.js';
 import { emitStatus, isDryRun, progress } from '../utils/agent.js';
 import {
-    METHOD_DEFLATE,
-    METHOD_STORE,
     activeDeflateTier,
     createZipModifier,
-    getCodec,
     sanitizeEntryPath,
     type AddEntryOptions,
     type EntryVerification,
@@ -40,7 +37,9 @@ import { mapZipError } from '../utils/ziperr.js';
 import {
     commonOptions,
     describeComment,
+    entryPasses,
     externalAttributesFor,
+    isDesignSkip,
     openArchive,
     parseArchiveComment,
     parseCompression,
@@ -228,6 +227,10 @@ export async function modify(args: ParsedArgs): Promise<void> {
     const outputFlag = getStringFlag(args.flags, 'output', 'o');
     const inPlace = hasFlag(args.flags, 'in-place');
     const compact = hasFlag(args.flags, 'compact');
+    // --canonical: the compact rewrite in zipnative's canonical deterministic
+    // form (saveCompact({ canonical }), zipnative 1.1) — `canonicalize` with edits.
+    const canonical = hasFlag(args.flags, 'canonical');
+    if (canonical && !compact) throw new CliError('--canonical rewrites the archive: it requires --compact (append-only keeps the original bytes).', 2, ErrorCode.USAGE, { remedy: '--compact --canonical' });
     const manifestPath = getStringFlag(args.flags, 'from-manifest');
     const dryRun = hasFlag(args.flags, 'dry-run') || isDryRun();
     const compression = parseCompression(args);
@@ -286,9 +289,9 @@ export async function modify(args: ParsedArgs): Promise<void> {
     // edit, since untouched records are re-emitted verbatim) + wrap.
     const bytes = await readArchiveBytes(inputPath, args);
     const sink = createDiagnosticSink();
-    const reader = openArchive(bytes, { ...commonOptions(args, sink), validate: 'eager' });
+    const reader = openArchive(bytes, { ...commonOptions(args, sink, 'modify'), validate: 'eager' });
     const modifierOptions: ZipModifierOptions = {
-        ...commonOptions(args, sink),
+        ...commonOptions(args, sink, 'modify'),
         ...(compression !== undefined ? { compression } : {}),
         ...(defaultDate !== undefined ? { defaultDate } : {}),
     };
@@ -358,13 +361,15 @@ export async function modify(args: ParsedArgs): Promise<void> {
     }
 
     if (dryRun) {
-        emitStatus({ command: 'modify', dryRun: true, output: outputPath ?? '-', edits: applied, layout, verified, verifySkipped, tier, ...sink.field() });
+        emitStatus({ command: 'modify', dryRun: true, output: outputPath ?? '-', edits: applied, layout, ...(canonical ? { canonical } : {}), verified, verifySkipped, tier, ...sink.field() });
         return;
     }
 
     let out: Uint8Array;
     try {
-        out = compact ? modifier.saveCompact() : modifier.save();
+        out = compact
+            ? modifier.saveCompact(canonical ? { canonical: defaultDate instanceof Date ? { date: defaultDate } : true } : undefined)
+            : modifier.save();
     } catch (e) {
         throw mapZipError(e, 'Failed to save the modified archive');
     }
@@ -397,6 +402,7 @@ export async function modify(args: ParsedArgs): Promise<void> {
         bytes: out.length,
         edits: applied,
         layout,
+        ...(canonical ? { canonical } : {}),
         changed,
         verified,
         verifySkipped,
@@ -407,10 +413,20 @@ export async function modify(args: ParsedArgs): Promise<void> {
 
 /**
  * Cross-check (CRC, sizes, local header) every central-directory entry the
- * save will copy verbatim. Encrypted entries and entries whose registered
- * codec has no sync decompressor cannot be verified and are counted as
- * skipped — exactly the two `skipped` reasons of `verifyZip`. An entry with
- * no registered codec at all is refused (E_UNSUPPORTED via the engine).
+ * save will copy verbatim, through the engine's own classification
+ * (`verifyEntry().skipped`, zipnative 1.1 — issue #12):
+ *
+ *   • verified and ok → counted in `verified`;
+ *   • a design-time skip (encrypted, or a registered codec without a sync
+ *     decompressor) whose LOCAL HEADER agrees → counted in `verifySkipped`
+ *     (the content cannot be checked, but the header can — 1.0 skipped it
+ *     unchecked);
+ *   • a design-time skip whose local header disagrees → refused
+ *     (ZIP_CD_LFH_MISMATCH), like any mismatching survivor;
+ *   • no registered codec (`'unsupported-method'`) → refused E_UNSUPPORTED
+ *     (ZIP_UNSUPPORTED_METHOD), as in 1.0: an entry the CLI cannot verify is
+ *     never re-emitted;
+ *   • anything else that is not ok → refused (CRC / size / local header).
  */
 function verifySurvivors(reader: ZipReader, gone: ReadonlySet<string>): { verified: number; verifySkipped: number } {
     let verified = 0;
@@ -423,20 +439,23 @@ function verifySurvivors(reader: ZipReader, gone: ReadonlySet<string>): { verifi
     }
     for (const entry of entries) {
         if (gone.has(entry.name)) continue;
-        const custom = entry.compressionMethod !== METHOD_STORE && entry.compressionMethod !== METHOD_DEFLATE;
-        const codec = custom ? getCodec(entry.compressionMethod) : null;
-        if (entry.isEncrypted || (custom && codec !== null && codec.decompressSync === undefined)) {
-            verifySkipped++;
-            continue;
-        }
         let v: EntryVerification;
         try {
             v = reader.verifyEntry(entry);
         } catch (e) {
             throw mapZipError(e, `Cannot verify entry "${entry.name}" before re-emitting it`, entry.name);
         }
-        if (!v.ok) throw survivorFailure(entry, v);
-        verified++;
+        if (v.skipped === 'unsupported-method') {
+            throw new CliError(
+                `Entry "${entry.name}" uses compression method ${entry.compressionMethod}, for which no codec is registered: it cannot be verified before being re-emitted verbatim. Pass --codec <module> for that method, or --remove the entry.`,
+                1,
+                ErrorCode.UNSUPPORTED,
+                { entryName: entry.name, zipCode: 'ZIP_UNSUPPORTED_METHOD', detail: { feature: 'method' } },
+            );
+        }
+        if (!entryPasses(v)) throw survivorFailure(entry, v);
+        if (isDesignSkip(v)) verifySkipped++;
+        else verified++;
     }
     return { verified, verifySkipped };
 }

@@ -15,19 +15,21 @@
 /** Global boolean flags (accepted by every command). */
 export const GLOBAL_BOOLEAN_FLAGS: readonly string[] = [
     'help', 'h', 'version', 'V', 'json', 'dry-run', 'quiet', 'q', 'no-color', 'no-config',
-    'pretty', 'strict', 'pure-codecs',
+    'pretty', 'strict', 'pure-codecs', 'progress',
 ];
 
 /** Per-command boolean flags (bare names, without the leading dashes). */
 export const COMMAND_BOOLEAN_FLAGS: Readonly<Record<string, readonly string[]>> = {
-    create: ['dir-entries', 'follow-symlinks', 'deterministic', 'mtime', 'preserve-mode', 'stream', 'parallel', 'overwrite'],
-    modify: ['deterministic', 'compact', 'in-place', 'overwrite'],
-    list: ['long', 'summary'],
+    create: ['dir-entries', 'follow-symlinks', 'deterministic', 'mtime', 'preserve-mode', 'stream', 'zip64', 'parallel', 'overwrite'],
+    modify: ['deterministic', 'compact', 'canonical', 'in-place', 'overwrite'],
+    canonicalize: ['keep-comments', 'normalize-modes', 'overwrite'],
+    merge: ['skip-unsupported', 'overwrite'],
+    list: ['long', 'summary', 'range'],
     inspect: ['entries', 'extra', 'summary'],
-    cat: ['raw', 'no-verify-crc', 'overwrite'],
+    cat: ['raw', 'no-verify-crc', 'range', 'overwrite'],
     extract: ['overwrite', 'skip-unsafe', 'skip-unsupported', 'allow-symlinks', 'skip-symlinks', 'flat', 'buffered', 'preserve-mode', 'preserve-mtime'],
     stream: ['list', 'long', 'overwrite', 'skip-unsafe', 'skip-unsupported', 'flat', 'preserve-mtime', 'summary'],
-    verify: ['summary'],
+    verify: ['summary', 'range'],
     crc32: [],
     inflate: ['sync', 'allow-trailing', 'overwrite'],
     batch: ['fail-fast', 'continue-on-error', 'allow-codec-load', 'summary', 'deterministic', 'overwrite'],

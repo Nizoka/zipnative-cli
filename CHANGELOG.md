@@ -7,65 +7,337 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] – 2026-10-20
+
+Built on **zipnative 1.1.0** (`^1.0.0` → `^1.1.0`, still the only runtime dependency). The
+engine's 1.1.0 is additive: 77 → 106 exports, the same 39 error codes, a 12th diagnostic
+(`ZIP_TIMESTAMP_CLAMPED`) and a new `ZipLimits.maxEntryCompressedSize`. This release brings the
+CLI to parity with it — every new export is bridged, and the ones that change what a command can
+do are exposed as flags — and to the runtime and supply-chain hardening level of pkinative-cli
+and zipnative 1.1.0. Three hardening items narrow what 1.0.0 accepted; they ship as **security
+fixes in a minor release** and are listed with their migration under
+[Security](#security). Every other change is
+additive: the `--json` envelopes, the 13 `E_*` codes, the exit codes and the `ZIP_*` mapping are
+unchanged, and the 37 archives of the 1.0.0 veraZIP corpus are byte-identical when the 1.1.0 CLI
+writes them. Design decisions are recorded as ADRs in [docs/adr/](docs/adr/README.md).
+
+### Security
+
+Security fixes that change behaviour, each with its migration.
+
+
+- **The configuration file is presentation only** ([ADR 0001](docs/adr/0001-configuration-is-presentation-only.md)).
+  `.zipnativerc.json` may set `format`, `fields`, `json`, `pretty`, `quiet`, `no-color`,
+  `progress`, `strict`, `long` and `summary` — nothing else. 1.0.0 refused only `codec`, so a
+  file planted in a parent directory could disable the limits or turn on `--overwrite`,
+  `--skip-unsafe` or `--allow-symlinks` for every command run below it. Any other key is now
+  `E_USAGE` naming the file; `__proto__` / `constructor` / `prototype` are refused; only a
+  regular file is read, through one bounded descriptor; a key applies only to a command that
+  declares the flag. The file that applied is announced on stderr in text mode
+  (`info: defaults from <path>: <keys>`) and carried as `config: { path, applied }` in the
+  status and error envelopes; a read report under `--json` (`list`, `inspect`, `verify`,
+  `stream`) names it nowhere — pass `--no-config` when the shape must not depend on a file.
+  **Migration:** move safety and limit settings from the file to argv (or to a
+  `batch` manifest task's `flags`).
+- **Strict invocation** ([ADR 0003](docs/adr/0003-strict-invocation.md)). A flag the command
+  does not declare (`--overwite`), a single-value flag given twice, a repeated switch, an
+  unrecognised value given to a switch (a switch takes `true|1|yes|on` or `false|0|no|off` (case-insensitive); any other value — `--overwrite=flase`, an empty `--overwrite=` — is `E_USAGE`, never ON), `-o=x`, and surplus operands are
+  `E_USAGE` (exit 2) before any input is read — on argv and for every `batch` task before the first one runs. 1.0.0 ignored a
+  misspelt flag, so `--max-entires 10` silently ran with the default bound; `--constructor x`
+  crashed with `E_RUNTIME`. The parser is prototype-free and canonicalises the short aliases.
+  `batch` refuses a flag its mode ignores (a create flag with `--task verify`, a directory flag
+  with `--manifest`), and a manifest task cannot set a process-wide flag (`json`, `quiet`,
+  `no-color`, `config`, `no-config`, `progress`, `timeout`). `extract --entry` naming no entry
+  is `E_NOT_FOUND` (it was an empty success), like `cat` and `verify`. `--workers` is bounded
+  `0`–`64`. The `ZIPNATIVE_*` environment switches take the same eight spellings, any other
+  value is `E_USAGE` (1.0.0 counted only `1`: `ZIPNATIVE_DRY_RUN=true` was silently off and the
+  run wrote its output).
+  **Migration:** remove the flags the command never honoured; spell switch values with the
+  eight accepted words; `--codec`, `--include`, `--exclude`, `--entry`, `--check` and the other
+  declared repeatable flags still repeat.
+- **Every bound is finite** ([ADR 0002](docs/adr/0002-every-bound-is-finite.md)). `none`, `inf`
+  and `infinity` are refused on the nine `--max-*` flags, `--max-input-size` and `inflate
+  --max-output`, with a remedy naming an explicit value. **Migration:** pass the size you mean
+  (`--max-total-size 64g`).
+- **Reads through one descriptor; overwrites by rename** ([ADR 0005](docs/adr/0005-one-descriptor-reads-and-rename-overwrites.md)).
+  An input is opened once: a regular file is size-checked against `--max-input-size` on that
+  descriptor and read to that size; a pipe, FIFO or device is byte-counted, so `/dev/zero` stops
+  with `E_LIMIT` instead of exhausting memory (process substitution still works); a directory
+  is `E_IO`. An output is created with an `lstat` refusal (a dangling link counts as existing)
+  and an exclusive open; under `--overwrite` it is written to a temporary sibling and renamed
+  into place, so a planted symlink is **replaced, never followed**. This covers `create`,
+  `modify`, `cat`, `inflate`, `extract` and `stream`.
+- **Terminal-safe text** ([ADR 0004](docs/adr/0004-terminal-safe-text.md)). C0 / C1 controls,
+  DEL, the Unicode bidi controls and the invisible look-alike characters (zero-width space,
+  line separators, BOM, soft hyphen, Hangul fillers, tag characters) in attacker-controlled text (entry names, comments, engine
+  messages) are escaped as `\xNN` / `\uXXXX` in every text sink — tables, progress lines,
+  diagnostics, errors, remedies; a single field (a name, a message) has its TAB and LF escaped
+  too, so it cannot forge a row or a `remedy:` line. JSON output stays exact (`rawNameHex`
+  keeps the bytes).
+- **Text errors lead with the class and the engine code**: `error E_X (ZIP_Y): message`, then
+  the `remedy:` line. 1.0.0 printed the bare message (with an `Error: ` prefix only for an
+  unexpected runtime error); scripts that matched the start of the message should match
+  `^error E_` or, better, use `--json`. Text-mode `inspect --check`, `verify` and `batch`
+  failures now print their one-line reason too (they printed nothing on stderr).
+
 ### Added
 
-- **`error.remedy`** in the `--json` error envelope (and a `remedy:` line in text mode): the
-  CLI flag(s) or command that lift a refusal — `--skip-unsafe (extract, stream)`,
-  `--on-duplicate first|last`, `--overwrite`, the exact `--max-*` flag of an exceeded bound,
-  `--skip-unsupported`, `zipnative list` … — computed from one `ZIP_REMEDY` table and mirrored
-  in `schema error`, `schema errors` and `docs/data/errors.json` (`cli.remedy`). The engine
-  message stays verbatim (it names library options, not flags). (review Q2-F2)
-
-- **`inspect --check safe-names`** and `stats.unsafeNames`: every entry name must pass the
-  engine's `sanitizeEntryPath()` — the pre-extraction gate `verify` cannot give (it proves
-  integrity and structure, not path safety; its help and the docs now say so). (review Q2-F3)
+- **zipnative 1.1.0 parity — every export reachable.** The core bridge re-exports all **106**
+  exports (101 from `zipnative`, 5 from `zipnative/worker`), and every one is reached by a
+  command (`docs/data/core-exports.json` grades none `bridged`; the grade stays defined for a
+  future export).
+- **`canonicalize`** — rewrite any archive into zipnative's canonical deterministic form
+  (`canonicalizeZip`): pinned timestamps (`--date`), names sorted and re-encoded as UTF-8, extras
+  and comments dropped (`--keep-comments`), canonical modes on request (`--normalize-modes`). No
+  recompression; idempotent; the envelope carries `deterministic` / `canonicalForm` measured on
+  the output, plus `unsafeNames` / `encrypted` with a warning when a hostile name is carried
+  over (reproducible is not safe to extract). **`modify --compact --canonical`** applies the same form with edits
+  (`saveCompact({ canonical })`). ([ADR 0012](docs/adr/0012-copies-are-verified-canonicalisation-decodes-nothing.md))
+- **`merge`** — merge archives, or split one with `--include` / `--exclude`, copying compressed
+  entries without recompression (`addFromReader`). Every source is opened eagerly and every entry
+  verified first, with no opt-out; a duplicate name is refused unless `--on-duplicate first|last`;
+  an unverifiable entry (encrypted, unregistered method) is refused unless `--skip-unsupported`.
+- **`--range`** on `list`, `cat` and `verify` — read an archive by byte ranges through one file
+  descriptor (`openZipRange` over `fileRangeSource()`), so an archive larger than
+  `--max-input-size` is listed, read and verified without being loaded; the ninth bound,
+  **`--max-entry-compressed-size`**, limits each whole-entry fetch.
+  ([ADR 0011](docs/adr/0011-range-reading-and-the-compressed-entry-bound.md), superseding ADR 0007)
+- **Pre-compressed manifest entries** — a `create --from-manifest` entry with
+  `raw: { method, crc32, uncompressedSize }` is written with `addRaw` after the CLI decodes the
+  payload once and checks its size and CRC-32 (`ZIP_SIZE_MISMATCH` / `ZIP_CRC_MISMATCH`
+  otherwise); bytes trailing a DEFLATE stream are refused, so nothing hides inside an entry.
+- **`create --stream --zip64`** (also with `--stdin-name`): a
+  streamed entry is written with a Zip64 local header and the 24-byte data descriptor, so it may
+  exceed 4 GiB (`AddEntryOptions.zip64`). Without it, an entry past 4 GiB stays refused with
+  `ZIP_UNSUPPORTED_ZIP64_STREAMING`. The status envelope carries `zip64`.
+- **`--name-encoding <label>`** on `list`, `inspect`, `cat`, `extract` and `stream`: names
+  stored without the UTF-8 flag are decoded with any WHATWG label the runtime knows
+  (`shift_jis`, `gbk`, `windows-1252`, …) through the engine's `nameDecoder`, which applies it
+  **before** sanitising for extraction. `nameEncoding` becomes `"custom"`; `--long` keeps the
+  bytes in `rawNameHex`. `verify` takes it for its `--entry` lookups only (the whole-archive
+  `VerifyZipOptions` has no decoder; without `--entry` the flag is `E_USAGE`).
+- **`--timeout <duration>`** (global: `500`, `500ms`, `30s`, `5m`, `1h`): one `AbortSignal`
+  deadline for the run. Past it the run stops at the next chunk or entry boundary with
+  **`E_LIMIT`** (`detail.limit: "timeout"`, `configured`, `observed`) and the file being written
+  is removed; no new `E_*` code ([ADR 0006](docs/adr/0006-timeout-is-a-limit.md)). An abort
+  that reaches a decompressor is reported as the deadline, never as corrupt data. The deadline
+  is one per process: a `batch` manifest task cannot carry `timeout` (`E_USAGE`) — pass it to
+  `batch` itself.
+- **`--progress`** (global, or `ZIPNATIVE_PROGRESS=1`): the engine's `onProgress` snapshots on
+  stderr where the engine measures them (`create --stream` / `--stdin-name` / `--parallel`,
+  `extract` without `--buffered`, `stream`, `cat`) — one throttled text line, or NDJSON
+  `{"type":"progress",…}` under `--json`; off under `--quiet`; stdout is never touched.
+- **`inspect`** measures determinism with `analyzeDeterminism()`: `deterministic` keeps its
+  1.0.0 meaning, and the block adds `canonicalExtras`, `canonicalVersionMadeBy`,
+  `canonicalForm` and `offenders[{ name, concern }]`; **`--check canonical-form`** asserts the
+  engine's full verdict. `--summary` carries `canonicalForm`.
+- **`--long` rows** add `timestamps { mtime, atime, ctime, source }` (UT `0x5455`, NTFS
+  `0x000a` or DOS) and `unixIds { uid, gid }` (`0x7875`), read through
+  `getExtendedTimestamps()` / `getUnixIds()`.
+- **`stream --codec`**: methods registered by a `--codec` module are decoded through the
+  codec's `createDecompressor()`; a codec without one is refused before the first byte
+  (`ZIP_UNSUPPORTED_CODEC_MODE`), or skipped with `--skip-unsupported`.
+- **`ZIP_TIMESTAMP_CLAMPED`**, the 12th diagnostic: a date outside the DOS range is clamped by
+  the engine (before 1980 → 1980-01-01) and reported; `--strict` refuses it. The CLI's own
+  range warning is gone (the engine reports it).
+- **Agent contract, completed by the second review**: `inspect --summary` carries
+  `canonicalForm` and the extraction-safety facts `unsafeNames`, `symlinks`, `duplicateNames`;
+  `schema manifest` gives each command its `switches`, `repeatable` and `pathFlags` and its
+  `operands`, plus `globalSwitches`, and lists exit codes 130 / 143; a `verify` failure names
+  the failing entries (`detail.failedEntries`, `failedCount`; `entryName` when one);
+  `batch --task verify` rows carry `zipCode`; `verify --name-encoding` decodes the `--entry`
+  lookups; `schema` output is compact under `--json`; `--summary` / `--fields` given to a text
+  run print a warning. Every JSON document is validated against its published `schema` subject
+  by `tests/commands/schema-conformance.test.ts`.
+- **Seeded fuzzing of the CLI-owned parsers** (`tests/fuzz/`, ROADMAP A-25,
+  [ADR 0010](docs/adr/0010-seeded-fuzzing-of-cli-parsers.md)): argv and the invocation
+  contract, sizes / counts / durations, globs, `--fields`, `batch` manifests,
+  `.zipnativerc.json`, `--name-encoding` labels and the terminal escaper; invariant: return or
+  `CliError`, never `E_RUNTIME`. `FUZZ_SEED` / `FUZZ_RUNS` widen a campaign.
+- **Documentation integrity tests**: every relative link and `#anchor` in a tracked Markdown
+  file resolves, no tracked text file is stored with CRLF, and the fixture ledger records and
+  checks the SHA-256 of each committed archive.
+- **`scripts/sync-engine-data.mjs`** (`npm run sync:engine`, `--check` in CI): re-derives the
+  engine half of `docs/data/errors.json` and `docs/data/core-exports.json` from a zipnative
+  checkout, and the CLI mapping from the built CLI.
+- Twelve **ADRs** under [docs/adr/](docs/adr/README.md), pinned to the code by a consistency test.
 
 ### Changed
 
-- ESLint runs the type-aware `strictTypeChecked` set over `src/` (`no-floating-promises`,
-  `no-misused-promises`, `no-unnecessary-condition`, …; three relaxations justified in
-  `eslint.config.js`, tests keep the non-type-checked strict set) and `tsconfig.json` enables
-  `noUncheckedIndexedAccess`. No behaviour change. (review Q4-P1-3, audit A-44)
+- **`batch` directory mode declares every `create` flag it forwards** (`--include`,
+  `--exclude`, `--dir-entries`, `--store-ext`, `--mtime`, `--stream`, `--zip64`, `--parallel`,
+  …), so strict invocation accepts them and the shells complete them.
+- **A manifest `comment-file`** resolves against the manifest directory and is refused on
+  `..`, like the other path flags of a manifest task (1.0.0 resolved it against the current
+  directory).
+- **Engine compensations removed** now that 1.1.0 answers them: the zlib-error translation
+  (`ZLIB_TO_ZIP` — every inflate tier raises `ZIP_DEFLATE_CORRUPT` / `ZIP_DEFLATE_TRUNCATED`),
+  the hand-rolled skip re-derivation in `verify --entry` and `modify`
+  (`EntryVerification.skipped`, the engine's archive rule), and the Unix-mode encoder
+  (`externalAttributesFromUnixMode()`, still masked to `0o777`, so setuid / setgid / sticky bits
+  are never written).
+- **`modify`** cross-checks the local header of an encrypted or stream-only-codec survivor too
+  (a mismatch is `E_SECURITY` `ZIP_CD_LFH_MISMATCH`); an unregistered method stays
+  `E_UNSUPPORTED` `ZIP_UNSUPPORTED_METHOD`.
+- **`verify`**: a skipped entry is never `ok`. An encrypted or stream-only-codec entry whose
+  local header matches is counted in `skipped`; an unsupported method fails.
+- **DOS dates**: the engine's `dosTimeMode` is deliberately not adopted — the CLI's convention
+  is per entry (explicit dates store UTC fields; `--date now` and `--mtime` store local
+  wall-clock time), which one archive-wide mode cannot express
+  ([ADR 0008](docs/adr/0008-dos-dates-per-entry-convention.md)).
+- **Node security floor**: `engines.node` is `^22.17.1 || >=24.4.1` (was `>=22`) — the patch floor of the Windows path-normalisation fixes CVE-2025-23084 and CVE-2025-27210 (device names in `path.join` / `normalize`), which the sink's containment relies on. `doctor`
+  reads the range from `package.json` instead of a hard-coded floor and reports `error` below it,
+  and the gate's `node-floor` step enforces it. npm `engines` is advisory for installs.
+- **Exit after flush**: an exit that follows a stdout or stderr write waits for the stream to
+  drain (asynchronous pipes on macOS and Windows could truncate the output).
+- **TypeScript and lint**: `exactOptionalPropertyTypes`, `noImplicitOverride`,
+  `noPropertyAccessFromIndexSignature`, `lib` without `dom`; ESLint adds
+  `no-non-null-assertion`, `no-console` and a rule forbidding a `zipnative` import outside the
+  core bridge. Coverage thresholds ratcheted to 95 / 91 / 97 / 96 (measured
+  95.91 / 91.48 / 97.81 / 96.77).
+- **veraZIP** re-ported from zipnative 1.1.0 (`scripts/validate-zip.ts`, commit `1e2ab42`, blob
+  `604321f`): the new `WF/DESCRIPTOR-WIDTH` check keys the data-descriptor width on the local
+  header's Zip64 extra (APPNOTE 4.3.9.2), a 23-id vocabulary. The corpus gains `create --stream
+  --zip64`, a clamped pre-1980 `--date`, `canonicalize` and `merge`: **41 archives, 37 PASS, 4 XFAIL**. When an engine
+  checkout is present, the vendor test compares the pinned blobs with the upstream files at the
+  installed engine's tag.
+- `samples/config` demonstrates the presentation-only contract, including a refused planted
+  file.
 
-### Supply chain
+#### Supply chain
 
-- The CycloneDX generator is an exact-pinned devDependency (`@cyclonedx/cyclonedx-npm` 6.0.1,
-  installed from the lockfile) instead of an unpinned `npx --yes …@^1` fetched inside the
-  publish job — the old range also declared `engines.npm: 6 - 9`, incompatible with the npm ≥ 11
-  Trusted Publishing requires. (review Q4-P0-2)
-- The published tarball is attested with `actions/attest-build-provenance` (next to the SBOM),
-  attached to the release with its SHA-256, and `npm publish` ships that packed file. (P1-1)
-- CI proves the bundle is byte-reproducible (two builds, one hash), audits at
-  `--audit-level=moderate`, checks Conventional Commits on PRs (dependency-free job), and runs
-  a start-up guard (the worker bundle is reachable only through the lazy `import()`, the engine
-  is the single hoisted external; overhead over bare Node under 250 ms). (P1-2, P1-8, P2-5, P2-6)
+- **Five-job release** ([ADR 0009](docs/adr/0009-release-integrity.md)): `guard` (the tag must
+  equal `v<version>`) → `build` (no `id-token`, no cache, the publish gate, pack + SHA-256 /
+  SHA-512) → `publish` (behind the `npm-publish` environment, `.nvmrc` only, both digests
+  re-checked, an npm client pinned by SHA-512, `npm publish --provenance` through Trusted
+  Publishing) → `attest` (the tarball fetched back from the registry and compared, CycloneDX +
+  SPDX SBOMs from `npm sbom`, attested and attached to the release; no registry code runs
+  next to its signing identity) → `consumer` (read-only: install, `npm audit signatures`, the
+  installed bin). `@cyclonedx/cyclonedx-npm` is dropped.
+- **One definition of green**: `scripts/gate.mjs` (`--fast`, `--ci`, `--publish`,
+  `--require-all`) is what `ci.yml`, `node-current.yml`, `sample-regression.yml` and
+  `publish.yml` run, instead of hand-copied steps. It adds a reproducible-build step, a bundle
+  probe (engine external, no inlined engine code, no `console.log`, no attribution trailer), a
+  frozen tarball file list (`docs/data/package-files.json`, 10 files) and an install smoke test
+  of the packed tarball.
+- **Every job**: `step-security/harden-runner` first, `npm ci --ignore-scripts`, read-only
+  top-level permissions with writes granted per job, `persist-credentials: false`, one SHA per
+  action verified against the peeled upstream tag; no path filter on a required check;
+  `verazip.yml` no longer interpolates step outputs into `run:` scripts.
+- **New workflows**: `audit.yml` (weekly `npm audit` + OSV-Scanner), `dependency-review.yml`
+  (high severity, licence allow-list), `node-current.yml` (Node 26, advisory),
+  `sample-regression.yml` (`samples/run-all.js` on Linux and Windows) and a `workflow-lint` job
+  (zizmor, checksum-verified actionlint, `reuse lint`). CodeQL analyses `actions` and
+  `javascript-typescript` with `security-extended`.
+- **Repository as code**: `.github/rulesets/{main,tags}.json`, CODEOWNERS widened to the trust
+  boundary, `SECURITY-INSIGHTS.yml` (OpenSSF 2.0), `docs/.well-known/security.txt` (RFC 9116),
+  `REUSE.toml` + `LICENSES/`, `THIRD-PARTY-NOTICES.md`.
+- **Dependabot**: seven-day cooldown, GitHub Actions grouped (the four `codeql-action` steps
+  move together), `zipnative` excluded from the dev group, `@types/node` majors ignored (the
+  `engines` floor is Node 22).
+- **Package**: a tracked `.npmrc` (`ignore-scripts`, `engine-strict`, `audit-level=moderate`),
+  `.node-version`, `packageManager`, exact `overrides`, `@eslint/js` declared, no `main`
+  entry; the tarball adds `CHANGELOG.md`, `SECURITY.md` and `THIRD-PARTY-NOTICES.md`.
+- `npm audit`: the five vulnerable dev-only packages of the 1.0.0 lockfile (`brace-expansion`,
+  `source-map-js`, `fast-uri`, `http-cache-semantics`, `ip-address`) are gone; 0
+  vulnerabilities.
+- CI actions moved to `github/codeql-action` v4.37.9 (all four steps together) and
+  `ossf/scorecard-action` v2.4.4; this supersedes Dependabot PRs #1, #3, #4, #5 and #7.
+- `typescript-eslint` 8.69.0 → 8.71.1 (the dev half of Dependabot PR #11, whose other half —
+  the runtime `zipnative` — is the hand-made bump above).
+- AI governance 1.1.0: `ai_attribution_trailers_allowed: false`,
+  `configuration_relaxes_checks: false`; opt-in git hooks (`npm run hooks:install`).
 
-### Documentation
+#### Documentation
 
-- Two more upstream engine asks drafted for human filing (HITL): the node-zlib inflate tier
-  leaking raw `Z_DATA_ERROR` / `Z_BUF_ERROR` instead of `ZIP_DEFLATE_*`, and `verifyEntry()`
-  not reporting the `skipped` reason — both pass `govern verify-issue`. (review Q3)
-- `.github/drafts/` is now git-ignored except its `README.md` and a `TEMPLATE.md` whose
-  sections match what `govern verify-issue` and the compliance report expect — the same rule
-  as the engine repository; the four drafts written so far are local files until filed.
-
-- Agent docs (AGENTS.md, llms.txt, README, knowledge base): the two rules an unattended caller
-  must encode — hermetic invocation (`--no-config` / `--config`; `.zipnativerc.json` is
-  discovered cwd-upward) and line-by-line stderr parsing (the envelope is the last `{` line).
-  (review Q2-F4)
-- CONTRIBUTING: "Versioning, stability and deprecation" (the public surface, the semver rules,
-  the `deprecate()` ladder) with a README summary; the branch-protection paragraph names
-  secret scanning / push protection; npm requirements and the deliberate absence of
-  `packageManager`. README: the locale stance (English, locale-independent output).
+- README, AGENTS.md, llms.txt, the knowledge base, SECURITY.md and CONTRIBUTING.md describe the
+  1.1.0 surface: the new flags, the presentation-only configuration, strict invocation, the
+  `config` envelope field, terminal-safe text, the 12 diagnostics, `offenders`, the release
+  integrity chain and how to verify it, and the engine-bump procedure.
+- SECURITY.md: 1.1.x supported; 1.0.x receives security fixes until 2027-04-20.
+- The `[Unreleased]` entries listed after 1.0.0 shipped in the 1.0.0 tarball; they now sit
+  under [1.0.0] ("Release-branch review").
+- The pre-release audit is a tracked Claude Code skill (`.claude/skills/release-audit/`: two
+  auditors, an adversarial verifier, an autonomy pass, a GO/NO-GO ledger), with a tracked
+  `.claude/settings.json` (attribution off, the GitHub and npm writes denied). Review and triage
+  reports of a release live outside the tree (`.audit/<version>/`, `.github/drafts/`) and are
+  summarised in the release PR; `release-notes/draft/` holds the PR bodies only.
+- The release audit's documentation findings: `create --stream --zip64` is how a streamed entry
+  passes 4 GiB (the README feature table, llms.txt, AGENTS.md and the knowledge base said it
+  was refused); SECURITY.md describes the ninth bound and its flag; the `createDecompressor()`
+  contract of a `--codec` module is spelled out; `batch --manifest --dry-run` says what it
+  validates; the `--summary` / `--fields` combination in the token-economy sample; the
+  `doctor` Node check reads `engines.node`; the config announcement is text-mode only.
 
 ### Fixed
 
-- `--quiet` now also silences the text diagnostics that `list --format ndjson` and
-  `stream --list` print on stderr under `--json` (they went through `process.stderr` directly);
-  one `formatDiagnosticLine()` renders every stderr diagnostic. (review Q2-F1)
-- The bridge rule is pinned by a test: no `src/` file outside `core-bridge` references the
-  `zipnative` package, except the `zipnative/package.json` metadata probe in `version.ts`
-  (kept out of the bridge so `--version` never loads the engine). (review Q3)
+- **`verify --range` names a bound, not a corruption**: an entry over
+  `--max-entry-compressed-size` is `E_LIMIT` / `ZIP_LIMIT_EXCEEDED` with `entryName`,
+  `detail { limit, configured, observed }` and the flag as `remedy`, as `cat --raw --range`
+  reports it — the engine's range `verifyEntry()` reports the refused fetch as a plain CRC / size
+  mismatch (drafted upstream), which read as a corrupt archive (release audit A-70).
+- **`--summary` tells the two Zip64 facts apart**: `list` and `inspect` summaries carry
+  `zip64Entries` (entries with a Zip64 extra field) next to `zip64` (the Zip64 EOCD record); a
+  streamed `--zip64` archive has the first and not the second, which `--check zip64` already
+  accepted (audit B-53). The `entries-summary` and `inspect-summary` schemas declare both.
+- **A misspelt `ZIPNATIVE_*` value is refused in the mode argv asked for**: with `--json` the
+  `E_USAGE` arrives as an envelope (the switches were normalised before the `--json` token was
+  read; audit V-01).
+- **A bound is never a verdict in `verify`**: the buffered paths too — an entry whose declared
+  size exceeds `--max-entry-size` is `E_LIMIT` with the bound, not a CRC / size failure (the
+  engine's `verifyZip()` and `verifyEntry()` swallow the refusal; drafted upstream), and a
+  structural limit refusal at open (`--max-entries`, …) keeps `E_LIMIT` and its `detail`
+  instead of becoming `E_VERIFY_FAILED` (audit D-03f, V-03). `verify --strict` names
+  `ZIP_STRICT_DIAGNOSTIC` as `zipCode` like `list --strict` (D-19b).
+- **A missing or unreadable file is `E_IO` on every path**: `govern verify-issue <missing>` and
+  a manifest `raw` entry whose `path` does not exist were `E_RUNTIME` with the raw `ENOENT`
+  (audit D-31).
+- **Remedies where the message already knew the answer**: `--date now`, `--zip64` or
+  `--chunk-size` without a streamed input, `--canonical` without `--compact`,
+  `--name-encoding` without `--entry`, a malformed `--timeout`, `--range` on stdin or a pipe,
+  and `stream --cat` on a name that never arrives carry the lifting flag or command as
+  `error.remedy` (D-32, D-33). CRC details are numbers on every path (`raw` manifest entries
+  printed hex strings; D-20c). `list --format ndjson` warns when `--summary` / `--fields` are
+  ignored (D-25). `batch --task verify` rows carry `entryName`, `detail` and `remedy`, and
+  `schema batch` declares them with `zipCode` (D-17b).
+- **`--timeout` fires while an input is stalled**: a silent pipe made `list -`, `crc32`,
+  `create --stdin-name`, `stream` and `extract -` wait forever; the input streams now carry the
+  deadline, and the dispatcher fails a run still pending 500 ms after it.
+- **`batch --task verify` honours `--max-input-size`** (it read each archive whole, with no
+  bound — a FIFO named `*.zip` included).
+- **The published schemas match the output**: `inspect --summary` emitted `canonicalForm`,
+  and an error envelope carried `config`, which their closed schemas refused.
+- `extract` refuses a file entry that is also a parent directory (`f` and `f/child`) with
+  `E_IO` naming the entry, before anything is written (it failed midway with `E_RUNTIME`).
+- An undeclared alias is named as typed (`--output-dir (-d)`), and `--toString` is reported by
+  name (the alias table is prototype-free).
+- **A run never ends with exit 0 while an engine call is still pending.** If the event loop
+  drains with the command unfinished, the run fails (the deadline's `E_LIMIT` when it fired,
+  `E_RUNTIME` otherwise) and the files being written are removed. `stream` does not hand the
+  deadline to the engine's forward reader, whose pending entry read did not settle on abort;
+  the CLI's own input and write loops enforce it there.
+- **`MaxListenersExceededWarning` on large entries** (1.0.0): every backpressure wait of the
+  file writer left a `close` listener behind; one listener pair now lives per wait, so
+  stderr carries envelopes only.
+- **A pipe, FIFO or device read is bounded in memory, not only in bytes**: reads fill 64 KiB
+  blocks, so a peer trickling 1-byte reads cannot pin 64 KiB per byte below
+  `--max-input-size`.
+- **`false` in `.zipnativerc.json` never turns a switch on** (`{"json": false}` printed
+  JSON; `{"quiet": false}` silenced the warnings): it only turns off what a broader section
+  turned on.
+- `--json` after `--` is an operand, not agent mode.
+- **Data loss on an early error** (1.0.0): when the engine failed before the deferred exclusive
+  open, `cat`, `inflate` and `create` unlinked the output path — which could be a pre-existing
+  file the run had refused to overwrite. The write layer now removes only what it created.
+- A glob character class with a range out of order (`--include '[h-%]'`) is a usage error
+  (exit 2) instead of a RegExp `SyntaxError` surfacing as `E_RUNTIME` (found by the fuzz suite).
+- `--constructor x`, `--__proto__ x` and other prototype names no longer crash the parser with
+  `E_RUNTIME`; they are `E_USAGE`.
+- `--json` is honoured for the refusals raised while argv is parsed (the envelope used to be
+  text).
+- A literal NUL in `src/utils/diagnostics.ts` made git treat the source as binary;
+  `tests/docs/source-hygiene.test.ts` now forbids raw control and bidi characters in every
+  tracked text file (Trojan Source, CVE-2021-42574).
 
 ## [1.0.0] – 2026-09-05
 
@@ -481,5 +753,71 @@ Considerations" (A-11, A-25, A-36, B-21, B-39, B-42) and one was rejected (B-44)
   tarball is verified (bin, `AGENTS.md`, `llms.txt`, `docs/data/errors.json`; no maps, no
   tests) before `npm publish --provenance`; every action stays SHA-pinned (audit A-41, A-42).
 
-[Unreleased]: https://github.com/Nizoka/zipnative-cli/compare/v1.0.0...HEAD
+### Release-branch review
+
+The review pass that closed the release branch. These entries were listed under
+[Unreleased] until 1.1.0, but they shipped in the 1.0.0 tarball.
+
+#### Added
+
+- **`error.remedy`** in the `--json` error envelope (and a `remedy:` line in text mode): the
+  CLI flag(s) or command that lift a refusal — `--skip-unsafe (extract, stream)`,
+  `--on-duplicate first|last`, `--overwrite`, the exact `--max-*` flag of an exceeded bound,
+  `--skip-unsupported`, `zipnative list` … — computed from one `ZIP_REMEDY` table and mirrored
+  in `schema error`, `schema errors` and `docs/data/errors.json` (`cli.remedy`). The engine
+  message stays verbatim (it names library options, not flags). (review Q2-F2)
+
+- **`inspect --check safe-names`** and `stats.unsafeNames`: every entry name must pass the
+  engine's `sanitizeEntryPath()` — the pre-extraction gate `verify` cannot give (it proves
+  integrity and structure, not path safety; its help and the docs now say so). (review Q2-F3)
+
+#### Changed
+
+- ESLint runs the type-aware `strictTypeChecked` set over `src/` (`no-floating-promises`,
+  `no-misused-promises`, `no-unnecessary-condition`, …; three relaxations justified in
+  `eslint.config.js`, tests keep the non-type-checked strict set) and `tsconfig.json` enables
+  `noUncheckedIndexedAccess`. No behaviour change. (review Q4-P1-3, audit A-44)
+
+#### Supply chain
+
+- The CycloneDX generator is an exact-pinned devDependency (`@cyclonedx/cyclonedx-npm` 6.0.1,
+  installed from the lockfile) instead of an unpinned `npx --yes …@^1` fetched inside the
+  publish job — the old range also declared `engines.npm: 6 - 9`, incompatible with the npm ≥ 11
+  Trusted Publishing requires. (review Q4-P0-2)
+- The published tarball is attested with `actions/attest-build-provenance` (next to the SBOM),
+  attached to the release with its SHA-256, and `npm publish` ships that packed file. (P1-1)
+- CI proves the bundle is byte-reproducible (two builds, one hash), audits at
+  `--audit-level=moderate`, checks Conventional Commits on PRs (dependency-free job), and runs
+  a start-up guard (the worker bundle is reachable only through the lazy `import()`, the engine
+  is the single hoisted external; overhead over bare Node under 250 ms). (P1-2, P1-8, P2-5, P2-6)
+
+#### Documentation
+
+- Two more upstream engine asks drafted for human filing (HITL): the node-zlib inflate tier
+  leaking raw `Z_DATA_ERROR` / `Z_BUF_ERROR` instead of `ZIP_DEFLATE_*`, and `verifyEntry()`
+  not reporting the `skipped` reason — both pass `govern verify-issue`. (review Q3)
+- `.github/drafts/` is now git-ignored except its `README.md` and a `TEMPLATE.md` whose
+  sections match what `govern verify-issue` and the compliance report expect — the same rule
+  as the engine repository; the four drafts written so far are local files until filed.
+
+- Agent docs (AGENTS.md, llms.txt, README, knowledge base): the two rules an unattended caller
+  must encode — hermetic invocation (`--no-config` / `--config`; `.zipnativerc.json` is
+  discovered cwd-upward) and line-by-line stderr parsing (the envelope is the last `{` line).
+  (review Q2-F4)
+- CONTRIBUTING: "Versioning, stability and deprecation" (the public surface, the semver rules,
+  the `deprecate()` ladder) with a README summary; the branch-protection paragraph names
+  secret scanning / push protection; npm requirements and the deliberate absence of
+  `packageManager`. README: the locale stance (English, locale-independent output).
+
+#### Fixed
+
+- `--quiet` now also silences the text diagnostics that `list --format ndjson` and
+  `stream --list` print on stderr under `--json` (they went through `process.stderr` directly);
+  one `formatDiagnosticLine()` renders every stderr diagnostic. (review Q2-F1)
+- The bridge rule is pinned by a test: no `src/` file outside `core-bridge` references the
+  `zipnative` package, except the `zipnative/package.json` metadata probe in `version.ts`
+  (kept out of the bridge so `--version` never loads the engine). (review Q3)
+
+[Unreleased]: https://github.com/Nizoka/zipnative-cli/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/Nizoka/zipnative-cli/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/Nizoka/zipnative-cli/releases/tag/v1.0.0

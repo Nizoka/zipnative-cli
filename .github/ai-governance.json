@@ -2,8 +2,8 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "zipnative AI Governance Configuration",
   "description": "Machine-readable contract governing how AI coding agents may propose issues, contributions, and changes across the zipnative ecosystem. Agents that scan repository configuration on initialization MUST honour this file.",
-  "version": "1.0.0",
-  "spec_updated": "2026-09-03",
+  "version": "1.1.0",
+  "spec_updated": "2026-10-18",
   "applies_to": [
     "zipnative",
     "zipnative-cli",
@@ -16,6 +16,8 @@
     "autonomous_github_writes_allowed": false,
     "security_default_weakening_requires_human": true,
     "deterministic_bytes_are_semver_major": true,
+    "ai_attribution_trailers_allowed": false,
+    "configuration_relaxes_checks": false,
     "required_issue_fields": [
       "minimal_reproduction",
       "environment",
@@ -76,6 +78,8 @@
     "zero_dependency_policy": "README.md#zero-dependency",
     "anti_goals": "https://github.com/Nizoka/zipnative#what-zipnative-will-not-do",
     "security_defaults": "SECURITY.md",
-    "issue_templates": [".github/ISSUE_TEMPLATE"]
+    "issue_templates": [
+      ".github/ISSUE_TEMPLATE"
+    ]
   }
 }

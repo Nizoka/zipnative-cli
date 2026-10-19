@@ -1,34 +1,28 @@
 name: CI
 
+# The `ci` jobs run `scripts/gate.mjs --ci`, the single definition of "green":
+# the step list lives in that file's STEPS table and is not repeated here, so
+# CI, publish.yml and the contributor loop cannot drift apart. `--require-all`
+# turns a SKIP into a FAIL (the zipnative checkout of the engine-data step is
+# the one convenience skip; the Linux 22 leg provides it).
+#
+# `npm audit` runs outside the gate on purpose: the gate's verdict should be
+# the same on a laptop and on a runner, and the advisory database is not.
+#
+# No path filter. Every job here reports a check the ruleset requires
+# (.github/rulesets/main.json), and GitHub leaves the checks of a
+# path-filtered workflow pending forever, which blocks the pull request.
+
 on:
   push:
     branches: [main, master]
-    # Docs are NOT ignored: tests/docs/consistency.test.ts pins README,
-    # AGENTS.md, llms.txt and the knowledge base to the code, so a docs-only
-    # change can break the suite and must run it.
-    paths-ignore:
-      - '.github/ISSUE_TEMPLATE/**'
-      - '.github/FUNDING.yml'
-      - 'LICENSE'
-      - '.editorconfig'
-      - '.gitignore'
   pull_request:
     branches: [main, master]
-    # `edited` is added to the default types so a PR title change re-runs the
-    # commitlint job (a "Re-run" of an existing run replays the old event
-    # payload, i.e. the old title). The whole matrix runs on that event on
-    # purpose: skipping jobs would report "skipped", which GitHub counts as a
-    # passing required check.
+    # `edited` re-runs the commitlint job when the PR title changes (a "Re-run"
+    # replays the old event payload, i.e. the old title). The whole matrix
+    # runs on that event on purpose: a skipped job reports "skipped", which
+    # GitHub counts as a passing required check.
     types: [opened, synchronize, reopened, edited]
-    # Docs are NOT ignored: tests/docs/consistency.test.ts pins README,
-    # AGENTS.md, llms.txt and the knowledge base to the code, so a docs-only
-    # change can break the suite and must run it.
-    paths-ignore:
-      - '.github/ISSUE_TEMPLATE/**'
-      - '.github/FUNDING.yml'
-      - 'LICENSE'
-      - '.editorconfig'
-      - '.gitignore'
 
 permissions:
   contents: read
@@ -38,16 +32,39 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # One job, five runs. `name:` is the status-check context the ruleset
+  # requires; renaming one leaves every pull request waiting for a context
+  # that never reports again.
+  #
+  # Windows and macOS are blocking: `\` vs `/` in entry names, reserved device
+  # names (CON, NUL, COM1…) the sink must refuse, the case-insensitive
+  # filesystems where two entries collide on disk (win32 AND darwin), Windows
+  # symbolic-link semantics for the exclusive writes, CRLF checkouts that
+  # would corrupt fixture bytes and the deterministic SHA-256 proofs, and the
+  # npm.cmd shim are facts a Linux runner never exercises.
   ci:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
 
     strategy:
       fail-fast: false
       matrix:
-        node-version: [22, 24]
+        include:
+          - { name: 'ci (22)', os: ubuntu-latest, node-version: 22, slug: linux-node22, audit: true, engine: true }
+          - { name: 'ci (24)', os: ubuntu-latest, node-version: 24, slug: linux-node24, audit: false, engine: false }
+          - { name: 'windows (22)', os: windows-latest, node-version: 22, slug: windows-node22, audit: false, engine: false }
+          - { name: 'windows (24)', os: windows-latest, node-version: 24, slug: windows-node24, audit: false, engine: false }
+          - { name: 'macos (22)', os: macos-latest, node-version: 22, slug: macos-node22, audit: false, engine: false }
 
     steps:
+      # One step serves every leg, so the policy is the one Windows and macOS
+      # allow (audit: the vendor's platform matrix at the pinned SHA).
+      - name: Harden the runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit # 2026-10-18: audit only on Windows/macOS (vendor matrix), and one step serves every leg
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
@@ -58,176 +75,107 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: npm
 
+      # No lifecycle script of any dependency runs on the runner; the
+      # repository's own .npmrc says the same for every developer machine.
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
+      # Once per commit, not once per platform: the advisory database does
+      # not depend on the runner.
       - name: Audit dependencies
+        if: matrix.audit
         run: npm audit --audit-level=moderate
 
-      - name: Type check
-        run: npm run typecheck:all
-
-      - name: Lint
-        run: npm run lint
-
-      - name: Test with coverage
-        run: npm run test:coverage
-
-      - name: Build
-        run: npm run build
-
-      # The product sells byte-reproducible archives; its own bundle must be
-      # byte-reproducible too (tsup/esbuild with a locked toolchain).
-      - name: Build is reproducible
+      # The engine-data step compares docs/data/{errors,core-exports}.json
+      # with the engine's own registries at the tag node_modules holds
+      # (scripts/sync-engine-data.mjs --check). Read-only clone.
+      - name: Check out the pinned zipnative tag (engine-data step)
+        if: matrix.engine
         shell: bash
         run: |
-          sha256sum dist/cli.cjs > build.sha
-          npm run build
-          sha256sum -c build.sha
+          set -euo pipefail
+          ENGINE=$(node -p "require('zipnative/package.json').version")
+          git clone --quiet --depth 1 --branch "v${ENGINE}" https://github.com/Nizoka/zipnative.git "${RUNNER_TEMP}/zipnative"
+          echo "ZIPNATIVE_ENGINE_CHECKOUT=${RUNNER_TEMP}/zipnative" >> "$GITHUB_ENV"
 
-      - name: Verify dist output
-        # The package ships the CJS bin only (no ESM build, no .d.ts, no maps).
-        run: |
-          test -f dist/cli.cjs
-          test ! -e dist/cli.js
-          test ! -e dist/cli.d.ts
-          test ! -e dist/cli.cjs.map
+      - name: Run the quality gate (CI profile)
+        run: node scripts/gate.mjs --ci --require-all
 
-      # The built binary must answer --help / --version and expose the full
-      # command surface through `schema manifest` (15 commands in 4 groups —
-      # the single source of truth is src/commands/completion.ts COMMANDS).
-      - name: Binary smoke test
-        run: |
-          node dist/cli.cjs --help
-          node dist/cli.cjs --version
-          node dist/cli.cjs schema manifest | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const m=JSON.parse(s);if(!Array.isArray(m.commands)||m.commands.length!==15){console.error("schema manifest: expected 15 commands, got "+(Array.isArray(m.commands)?m.commands.length:"none"));process.exit(1)}console.log("schema manifest ok: "+m.commands.length+" commands")})'
+      - name: Upload the gate logs on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: gate-logs-${{ matrix.slug }}
+          path: test-output/.gate/
+          retention-days: 7
+          if-no-files-found: ignore
 
-      # Spawns the built dist/cli.cjs as a child process (real argv, real
-      # stdin/stdout pipes, real exit codes) — this suite self-skips when
-      # dist/ is absent, so it must run post-build.
-      - name: Built-binary integration (post-build)
-        run: npx vitest run tests/integration/built-binary-smoke.test.ts tests/integration/startup-budget.test.ts
-
-  # A ZIP CLI lives or dies on Windows correctness: `\` vs `/` path
-  # separators in entry names and --base/--prefix handling, reserved device
-  # names (CON, NUL, COM1…) that the extraction sink must refuse, the
-  # case-insensitive filesystem where two entries can collide on disk, and
-  # CRLF checkouts that silently corrupt fixture bytes and the deterministic
-  # SHA-256 proofs. This job is BLOCKING from 1.0.0 — any `skip on win32`
-  # needs a linked issue. `shell: bash` keeps the POSIX `test -f` steps
-  # portable (Git Bash ships on windows-latest).
-  windows:
-    runs-on: windows-latest
-    timeout-minutes: 20
-
-    strategy:
-      fail-fast: false
-      matrix:
-        node-version: [22, 24]
+  # The workflows themselves are code that holds tokens. zizmor reads them for
+  # the GitHub Actions weaknesses (template injection, excessive permissions,
+  # unpinned or impostor actions, cache poisoning); actionlint checks syntax,
+  # expressions and every `run:` script through shellcheck; `reuse lint`
+  # checks that every file carries its licence (REUSE.toml). Pinned: zizmor
+  # by the action and its version, actionlint by the SHA-256 of its release
+  # archive, reuse by its version.
+  workflow-lint:
+    name: workflow lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit # 2026-10-18: the container registry hosts behind ghcr.io and PyPI are not baselined yet
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
-      - name: Setup Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - name: zizmor
+        uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
         with:
-          node-version: ${{ matrix.node-version }}
-          cache: npm
+          version: 1.30.1
+          min-severity: medium
+          advanced-security: false
+          annotations: true
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Type check
-        run: npm run typecheck:all
-
-      - name: Lint
-        run: npm run lint
-
-      - name: Test
-        run: npm run test
-
-      - name: Build
-        run: npm run build
-
-      # The product sells byte-reproducible archives; its own bundle must be
-      # byte-reproducible too (tsup/esbuild with a locked toolchain).
-      - name: Build is reproducible
-        shell: bash
+      - name: actionlint
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
         run: |
-          sha256sum dist/cli.cjs > build.sha
-          npm run build
-          sha256sum -c build.sha
+          set -euo pipefail
+          ARCHIVE="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl --fail --silent --show-error --location --proto '=https' \
+            --output "${RUNNER_TEMP}/${ARCHIVE}" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${ARCHIVE}"
+          echo "${ACTIONLINT_SHA256}  ${RUNNER_TEMP}/${ARCHIVE}" | sha256sum --check --strict
+          tar -xzf "${RUNNER_TEMP}/${ARCHIVE}" -C "${RUNNER_TEMP}" actionlint
+          shellcheck --version | head -2
+          "${RUNNER_TEMP}/actionlint" -color
 
-      - name: Verify dist output
-        shell: bash
-        run: |
-          test -f dist/cli.cjs
-          test ! -e dist/cli.js
-          test ! -e dist/cli.d.ts
-
-      - name: Binary smoke test
-        shell: bash
-        run: |
-          node dist/cli.cjs --help
-          node dist/cli.cjs --version
-          node dist/cli.cjs schema manifest | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const m=JSON.parse(s);if(!Array.isArray(m.commands)||m.commands.length!==15){console.error("schema manifest: expected 15 commands, got "+(Array.isArray(m.commands)?m.commands.length:"none"));process.exit(1)}console.log("schema manifest ok: "+m.commands.length+" commands")})'
-
-      - name: Built-binary integration (post-build)
-        run: npx vitest run tests/integration/built-binary-smoke.test.ts tests/integration/startup-budget.test.ts
-
-  # macOS is the second case-insensitive filesystem the sink handles
-  # (utils/sink.ts CASE_INSENSITIVE_FS covers win32 AND darwin): the
-  # case-fold collision and --flat duplicate policies must be exercised on
-  # a real APFS volume, not only inferred from the Windows leg. Tests + a
-  # build + the spawn smoke test; the veraZIP corpus stays Linux/Windows.
-  macos:
-    runs-on: macos-latest
-    timeout-minutes: 20
-
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Setup Node.js 22
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Test
-        run: npm run test
-
-      - name: Build
-        run: npm run build
-
-      # The product sells byte-reproducible archives; its own bundle must be
-      # byte-reproducible too (tsup/esbuild with a locked toolchain).
-      - name: Build is reproducible
-        shell: bash
-        run: |
-          sha256sum dist/cli.cjs > build.sha
-          npm run build
-          sha256sum -c build.sha
-
-      - name: Built-binary integration (post-build)
-        run: npx vitest run tests/integration/built-binary-smoke.test.ts tests/integration/startup-budget.test.ts
+      - name: REUSE compliance
+        env:
+          REUSE_VERSION: 6.2.0
+        run: pipx run --spec "reuse==${REUSE_VERSION}" reuse lint
 
   # Conventional Commits, enforced without a dependency: every commit subject
   # of the PR and the PR title (the squash-merge subject) must match the
-  # pattern CONTRIBUTING.md documents. Not a required check until it has
-  # run quietly for a while.
+  # pattern CONTRIBUTING.md documents.
   commitlint:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
     steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0

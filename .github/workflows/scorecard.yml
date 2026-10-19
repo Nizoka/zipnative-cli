@@ -1,12 +1,17 @@
 name: Scorecard supply-chain security
 
+# OpenSSF Scorecard: weekly and on every push to main, results published to
+# the OpenSSF dataset and uploaded to code scanning. Least privilege at the
+# top level; the job holds exactly what the action documents.
+
 on:
   schedule:
     - cron: '27 3 * * 1'
   push:
     branches: [main, master]
 
-permissions: read-all
+permissions:
+  contents: read
 
 concurrency:
   group: scorecard-${{ github.ref }}
@@ -18,19 +23,24 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
-      security-events: write
-      id-token: write
-      contents: read
-      actions: read
+      security-events: write # Upload the SARIF results to the Security tab.
+      id-token: write # Publish signed results to the OpenSSF public dataset.
+      contents: read # Read repository metadata (branch protection, etc.).
+      actions: read # Read the workflow runs and their files, which several checks score.
 
     steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit # 2026-10-18: the Scorecard API and the GitHub APIs it walks are not baselined yet
+
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
       - name: Run analysis
-        uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.4.3
+        uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc # v2.4.4
         with:
           results_file: results.sarif
           results_format: sarif
@@ -43,7 +53,8 @@ jobs:
           path: results.sarif
           retention-days: 5
 
+      # The same codeql-action release as codeql.yml (one SHA across the tree).
       - name: Upload to code-scanning
-        uses: github/codeql-action/upload-sarif@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           sarif_file: results.sarif

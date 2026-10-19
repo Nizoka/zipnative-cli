@@ -25,6 +25,8 @@ import {
     loadParallelZip,
     sanitizeEntryPath,
     type AddEntryOptions,
+    type RawEntryMeta,
+    DEFAULT_ZIP_LIMITS,
     type ByteSource,
     type CreateZipOptions,
     type ParallelZipWriter,
@@ -35,15 +37,18 @@ import { createDiagnosticSink } from '../utils/diagnostics.js';
 import { isPureCodecs, prepareEngine } from '../utils/engine.js';
 import { CliError, ErrorCode } from '../utils/error.js';
 import {
+    DEFAULT_MAX_INPUT_SIZE,
+    readFileOrStdin,
     readJsonInput,
     readStdin,
     readableToByteSource,
-    unlinkQuiet,
     validatePath,
     writeOutput,
     writeStreamingOutput,
 } from '../utils/io.js';
-import { parseInputSizeFlag } from '../utils/limits.js';
+import { parseInputSizeFlag, parseLimitFlags } from '../utils/limits.js';
+import { parseRawMeta, verifyRawPayload } from '../utils/rawentry.js';
+import { escapeTerminal, escapeLine } from '../utils/sanitize.js';
 import { parseByteSize } from '../utils/sizes.js';
 import { walkPaths, type SkippedPath } from '../utils/walk.js';
 import { mapZipError } from '../utils/ziperr.js';
@@ -67,6 +72,7 @@ import {
 type Source =
     | { readonly kind: 'file'; readonly path: string; readonly size: number }
     | { readonly kind: 'bytes'; readonly data: Uint8Array }
+    | { readonly kind: 'raw'; readonly payload: Uint8Array; readonly meta: RawEntryMeta }
     | { readonly kind: 'stdin' };
 
 interface PlannedEntry {
@@ -152,10 +158,10 @@ function parseManifestCompression(raw: unknown, where: string): ZipCompressionOp
 }
 
 const MANIFEST_KEYS = new Set(['version', 'comment', 'commentBase64', 'order', 'date', 'compression', 'entries']);
-const ENTRY_KEYS = new Set(['name', 'path', 'data', 'dataBase64', 'directory', 'method', 'level', 'deterministic', 'date', 'comment', 'mode', 'extraFields']);
+const ENTRY_KEYS = new Set(['name', 'path', 'data', 'dataBase64', 'raw', 'directory', 'method', 'level', 'deterministic', 'date', 'comment', 'mode', 'extraFields']);
 
 /** Parse a `create-manifest` document into a plan (paths resolve against the manifest's directory). */
-async function planFromManifest(manifestPath: string, storeExt: Set<string>): Promise<Plan> {
+async function planFromManifest(manifestPath: string, storeExt: Set<string>, maxEntrySize: number): Promise<Plan> {
     const parsed = await readJsonInput(manifestPath, 'manifest');
     if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
         throw new CliError('--from-manifest must be a JSON object: { "entries": [...] }.', 1, ErrorCode.INPUT);
@@ -217,7 +223,27 @@ async function planFromManifest(manifestPath: string, storeExt: Set<string>): Pr
         }
 
         let source: Source;
-        if (isDirectory) {
+        if (e['raw'] !== undefined) {
+            // A pre-compressed payload (zipnative addRaw): copied verbatim, but
+            // VERIFIED first — decoded once, size and CRC-32 checked (utils/rawentry.ts).
+            if (isDirectory) throw new CliError(`${where}: a directory entry cannot carry "raw".`, 1, ErrorCode.INPUT);
+            for (const key of ['data', 'method', 'level', 'deterministic']) {
+                if (e[key] !== undefined) throw new CliError(`${where}: "raw" takes the compressed payload from "path" or "dataBase64", and its own method — "${key}" does not apply.`, 1, ErrorCode.INPUT);
+            }
+            const meta = parseRawMeta(e['raw'], where);
+            let payload: Uint8Array;
+            if (typeof e['path'] === 'string') {
+                validatePath(e['path']);
+                const buf = await readFileOrStdin(resolve(baseDir, e['path']), DEFAULT_MAX_INPUT_SIZE);
+                payload = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+            } else if (typeof e['dataBase64'] === 'string') {
+                payload = new Uint8Array(Buffer.from(e['dataBase64'], 'base64'));
+            } else {
+                throw new CliError(`${where}: "raw" needs the compressed payload in "path" or "dataBase64".`, 1, ErrorCode.INPUT);
+            }
+            verifyRawPayload(name, payload, meta, maxEntrySize);
+            source = { kind: 'raw', payload, meta };
+        } else if (isDirectory) {
             source = { kind: 'bytes', data: new Uint8Array(0) };
         } else if (typeof e['path'] === 'string') {
             validatePath(e['path']);
@@ -277,10 +303,12 @@ async function planFromManifest(manifestPath: string, storeExt: Set<string>): Pr
         entries.push({ name, isDirectory, source, options });
     }
 
+    const defaultDate = parseManifestDate(m['date'], 'manifest');
+    const compression = m['compression'] !== undefined ? parseManifestCompression(m['compression'], 'manifest') : undefined;
     const archive: Plan['archive'] = {
         ...(order !== undefined ? { order } : {}),
-        ...(parseManifestDate(m['date'], 'manifest') !== undefined ? { defaultDate: parseManifestDate(m['date'], 'manifest') } : {}),
-        ...(m['compression'] !== undefined ? { compression: parseManifestCompression(m['compression'], 'manifest') } : {}),
+        ...(defaultDate !== undefined ? { defaultDate } : {}),
+        ...(compression !== undefined ? { compression } : {}),
         ...(archiveComment !== undefined ? { comment: archiveComment } : {}),
     };
     return { entries, skipped: [], archive };
@@ -290,12 +318,13 @@ async function planFromManifest(manifestPath: string, storeExt: Set<string>): Pr
 async function planFromPaths(args: ParsedArgs, inputs: readonly string[], stdinName: string | undefined, storeExt: Set<string>): Promise<Plan> {
     const base = getStringFlag(args.flags, 'base');
     const prefix = getStringFlag(args.flags, 'prefix');
+    const filter = parseNameFilter(args);
     const walk = await walkPaths(inputs, {
         ...(base !== undefined ? { base } : {}),
         ...(prefix !== undefined ? { prefix } : {}),
         followSymlinks: hasFlag(args.flags, 'follow-symlinks'),
         dirEntries: hasFlag(args.flags, 'dir-entries'),
-        ...(parseNameFilter(args) !== undefined ? { filter: parseNameFilter(args) } : {}),
+        ...(filter !== undefined ? { filter } : {}),
         // `--order insertion` = the argv order (directories walk name-sorted).
         preserveInputOrder: parseOrder(args) === 'insertion',
     });
@@ -356,6 +385,7 @@ export async function create(args: ParsedArgs): Promise<void> {
     const stdinName = getStringFlag(args.flags, 'stdin-name');
     const inputs = [...args.positionals, ...getStringFlagAll(args.flags, 'input', 'i')];
     const streaming = hasFlag(args.flags, 'stream');
+    const zip64 = hasFlag(args.flags, 'zip64');
     const parallel = hasFlag(args.flags, 'parallel');
     const dryRun = hasFlag(args.flags, 'dry-run') || isDryRun();
 
@@ -394,11 +424,17 @@ export async function create(args: ParsedArgs): Promise<void> {
     // Both --stream and --stdin-name go through writer.stream(), the only
     // path that chunks its output.
     if (!streaming && stdinName === undefined && chunkSize !== undefined) {
-        throw new CliError('--chunk-size requires --stream or --stdin-name (the chunked writer).', 2);
+        throw new CliError('--chunk-size requires --stream or --stdin-name (the chunked writer).', 2, ErrorCode.USAGE, { remedy: '--stream | --stdin-name <name>' });
+    }
+    // zipnative 1.1 (AddEntryOptions.zip64): the per-entry Zip64 opt-in exists
+    // for addStream() only — the buffered writer sizes every entry up front
+    // and is fully Zip64 already (the engine refuses the option on add()).
+    if (zip64 && !streaming && stdinName === undefined) {
+        throw new CliError('--zip64 requires --stream or --stdin-name: buffered entries are already Zip64 when they need it.', 2, ErrorCode.USAGE, { remedy: '--stream | --stdin-name <name> (or omit --zip64)' });
     }
 
     const plan = manifestPath !== undefined
-        ? await planFromManifest(manifestPath, storeExt)
+        ? await planFromManifest(manifestPath, storeExt, parseLimitFlags(args)?.maxEntryUncompressedSize ?? DEFAULT_ZIP_LIMITS.maxEntryUncompressedSize)
         : await planFromPaths(args, inputs, stdinName, storeExt);
 
     const hasStdin = plan.entries.some((e) => e.source.kind === 'stdin');
@@ -416,7 +452,7 @@ export async function create(args: ParsedArgs): Promise<void> {
     const effectiveDate = defaultDate ?? plan.archive.defaultDate;
     const effectiveComment = comment ?? plan.archive.comment;
     const createOptions: CreateZipOptions = {
-        ...commonOptions(args, sink),
+        ...commonOptions(args, sink, 'create'),
         ...(effectiveOrder !== undefined ? { order: effectiveOrder } : {}),
         ...(effectiveDate !== undefined ? { defaultDate: effectiveDate } : {}),
         ...(effectiveCompression !== undefined ? { compression: effectiveCompression } : {}),
@@ -425,7 +461,7 @@ export async function create(args: ParsedArgs): Promise<void> {
 
     const files = plan.entries.filter((e) => !e.isDirectory).length;
     const directories = plan.entries.length - files;
-    const bytesIn = plan.entries.reduce((n, e) => n + (e.source.kind === 'file' ? e.source.size : e.source.kind === 'bytes' ? e.source.data.length : 0), 0);
+    const bytesIn = plan.entries.reduce((n, e) => n + (e.source.kind === 'file' ? e.source.size : e.source.kind === 'bytes' ? e.source.data.length : e.source.kind === 'raw' ? e.source.meta.uncompressedSize : 0), 0);
     const method = effectiveCompression?.method ?? 'deflate';
     const level = effectiveCompression?.level ?? 6;
     const deterministic = effectiveCompression?.deterministic === true;
@@ -445,6 +481,7 @@ export async function create(args: ParsedArgs): Promise<void> {
         deterministic,
         order: effectiveOrder ?? 'canonical',
         stream: streaming,
+        zip64,
         layout,
         parallel: parallel ? { workers: workers ?? 'auto' } : false,
         skipped,
@@ -455,12 +492,12 @@ export async function create(args: ParsedArgs): Promise<void> {
         // artefact; the text plan would only pollute stdout.
         if (!isJsonMode()) {
             const lines = plan.entries.map((e) => {
-                const size = e.source.kind === 'file' ? e.source.size : e.source.kind === 'bytes' ? e.source.data.length : '?';
+                const size = e.source.kind === 'file' ? e.source.size : e.source.kind === 'bytes' ? e.source.data.length : e.source.kind === 'raw' ? e.source.meta.uncompressedSize : '?';
                 const m = e.isDirectory ? 'dir' : (e.options.compression?.method ?? method);
-                return `plan  ${e.name}  ${size}  ${m}`;
+                return `plan  ${escapeLine(e.name)}  ${size}  ${m}`;
             });
-            for (const s of skipped) lines.push(`skip  ${s.name}  (${s.reason})`);
-            process.stdout.write(lines.join('\n') + (lines.length > 0 ? '\n' : ''));
+            for (const s of skipped) lines.push(`skip  ${escapeLine(s.name)}  (${s.reason})`);
+            process.stdout.write(escapeTerminal(lines.join('\n') + (lines.length > 0 ? '\n' : '')));
         }
         emitStatus({ ...summary, dryRun: true, ...sink.field() });
         return;
@@ -499,6 +536,9 @@ export async function create(args: ParsedArgs): Promise<void> {
         }
     }
 
+    // --zip64: every streamed entry gets the Zip64 local header and the
+    // 24-byte descriptor, so it may cross 4 GiB (ZIP_UNSUPPORTED_ZIP64_STREAMING otherwise).
+    const streamOptions = (o: AddEntryOptions): AddEntryOptions => (zip64 ? { ...o, zip64: true } : o);
     try {
         for (const e of plan.entries) {
             if (e.isDirectory) {
@@ -509,16 +549,19 @@ export async function create(args: ParsedArgs): Promise<void> {
                 case 'bytes':
                     writer.add(e.name, e.source.data, e.options);
                     break;
+                case 'raw':
+                    writer.addRaw(e.name, e.source.payload, e.source.meta, e.options);
+                    break;
                 case 'file':
                     if (streaming) {
-                        writer.addStream(e.name, readableToByteSource(createReadStream(e.source.path)) as ByteSource, e.options);
+                        writer.addStream(e.name, readableToByteSource(createReadStream(e.source.path)) as ByteSource, streamOptions(e.options));
                     } else {
                         const buf = await readFile(e.source.path);
                         writer.add(e.name, new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength), e.options);
                     }
                     break;
                 case 'stdin':
-                    writer.addStream(e.name, readableToByteSource(process.stdin) as ByteSource, e.options);
+                    writer.addStream(e.name, readableToByteSource(process.stdin) as ByteSource, streamOptions(e.options));
                     break;
             }
         }
@@ -542,8 +585,9 @@ export async function create(args: ParsedArgs): Promise<void> {
             bytes = out.length;
         }
     } catch (e) {
+        // The write layer removed whatever IT created (a partial archive or
+        // the --overwrite temp); an existing output is never removed here.
         if (e instanceof CliError && e.code === ErrorCode.IO) throw e;
-        if (outputPath !== undefined && outputPath !== '-') await unlinkQuiet(outputPath);
         throw mapZipError(e, 'Failed to write archive');
     }
 
@@ -590,10 +634,15 @@ function assertCodecModulesHonest(parallel: boolean, deterministic: boolean, dry
     }
 }
 
-/** `--workers` accepts 0 (main thread only), unlike the other positive-int flags. */
+/** Upper bound of `--workers` (same ceiling as `batch --concurrency`): each worker is a thread. */
+const MAX_WORKERS = 64;
+
+/** `--workers` accepts 0 (main thread only) up to {@link MAX_WORKERS}, unlike the other positive-int flags. */
 function parseIntFlagAllowZero(args: ParsedArgs, flag: string): number | undefined {
     const raw = getStringFlag(args.flags, flag);
     if (raw === undefined) return undefined;
     if (!/^\d+$/.test(raw.trim())) throw new CliError(`--${flag} expects a non-negative integer, got "${raw}".`, 2);
-    return Number(raw);
+    const n = Number(raw);
+    if (n > MAX_WORKERS) throw new CliError(`--${flag} ${raw} exceeds the maximum of ${MAX_WORKERS} (each worker is a thread; the default is min(cores - 1, 8)).`, 2);
+    return n;
 }

@@ -20,7 +20,7 @@ import {
 import { prepareEngine } from '../utils/engine.js';
 import { methodName } from '../utils/entryfmt.js';
 import { CliError, ErrorCode } from '../utils/error.js';
-import { openInputStream, readFileOrStdin, unlinkQuiet, writeOutput, writeStreamingOutput } from '../utils/io.js';
+import { openInputStream, readFileOrStdin, writeOutput, writeStreamingOutput } from '../utils/io.js';
 import { parseInputSizeFlag, parseLimitFlags, effectiveLimits } from '../utils/limits.js';
 import { parseByteSize } from '../utils/sizes.js';
 import { mapZipError } from '../utils/ziperr.js';
@@ -43,8 +43,9 @@ export async function inflate(args: ParsedArgs): Promise<void> {
     const maxOutput = maxRaw !== undefined
         ? parseByteSize(maxRaw, 'max-output')
         : effectiveLimits(parseLimitFlags(args)).maxEntryUncompressedSize;
-    if (maxOutput !== Infinity && maxOutput <= 0) throw new CliError('--max-output must be positive.', 2);
-    const bound = Number.isFinite(maxOutput) ? maxOutput : Number.MAX_SAFE_INTEGER;
+    if (maxOutput <= 0) throw new CliError('--max-output must be positive.', 2);
+    // Always finite (sizes.ts refuses the 1.0 "none" form since 1.1.0).
+    const bound = maxOutput;
     const dryRun = hasFlag(args.flags, 'dry-run') || isDryRun();
     const write = { exclusive: !hasFlag(args.flags, 'overwrite') };
 
@@ -112,8 +113,9 @@ export async function inflate(args: ParsedArgs): Promise<void> {
             await writeOutput(out, outputPath, write);
         }
     } catch (e) {
-        if (e instanceof CliError && e.code === ErrorCode.IO) throw e; // overwrite refusal: the existing file is untouched
-        if (outputPath !== undefined) await unlinkQuiet(outputPath);
+        // The write layer removed whatever IT created; an existing --output is
+        // never truncated or removed here.
+        if (e instanceof CliError && e.code === ErrorCode.IO) throw e;
         throw mapZipError(e, 'Inflate failed');
     }
 

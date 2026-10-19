@@ -5,7 +5,7 @@
 // Skipped when the bundle is absent (run `npm run build` first).
 
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -44,10 +44,10 @@ describe.skipIf(!existsSync(BIN))('integration: built binary smoke (dist/cli.cjs
         await rm(dir, { recursive: true, force: true }).catch(() => undefined);
     });
 
-    it('--help lists the 15 commands', () => {
+    it('--help lists the 17 commands', () => {
         const r = zipnative(['--help']);
         expect(r.status).toBe(0);
-        expect(r.stdout).toContain('Commands (15)');
+        expect(r.stdout).toContain('Commands (17)');
         for (const name of ['create', 'modify', 'list', 'inspect', 'cat', 'extract', 'stream', 'verify', 'crc32', 'inflate', 'batch', 'doctor', 'schema', 'completion', 'govern']) {
             expect(r.stdout).toMatch(new RegExp(`^  ${name}\\s`, 'm'));
         }
@@ -66,13 +66,13 @@ describe.skipIf(!existsSync(BIN))('integration: built binary smoke (dist/cli.cjs
         expect(doc).toEqual({ name: 'zipnative-cli', version: PKG.version, zipnative: expect.stringMatching(/^\d+\.\d+\.\d+/) });
     });
 
-    it('schema manifest exposes 15 commands from the bundle', () => {
+    it('schema manifest exposes 17 commands from the bundle', () => {
         const r = zipnative(['schema', 'manifest']);
         expect(r.status).toBe(0);
         const doc = JSON.parse(r.stdout) as { kind: string; version: string; commands: { name: string }[]; zipErrorCodes: string[] };
         expect(doc.kind).toBe('capability-manifest');
         expect(doc.version).toBe(PKG.version);
-        expect(doc.commands).toHaveLength(15);
+        expect(doc.commands).toHaveLength(17);
         expect(doc.zipErrorCodes).toHaveLength(39);
     });
 
@@ -84,7 +84,7 @@ describe.skipIf(!existsSync(BIN))('integration: built binary smoke (dist/cli.cjs
         const byName = new Map(doc.checks.map((c) => [c.name, c]));
         expect(byName.get('deflate-tier')?.value).toBe('node-zlib');
         expect(byName.get('workers')?.status).toBe('ok');
-        expect(byName.get('commands')?.value).toBe('15');
+        expect(byName.get('commands')?.value).toBe('17');
     });
 
     it('create --parallel (worker pool) then verify --format json round-trips through the bundle', async () => {
@@ -188,6 +188,190 @@ describe.skipIf(!existsSync(BIN))('integration: built binary smoke (dist/cli.cjs
         const code = await new Promise<number | null>((r) => child.on('exit', (c) => r(c)));
         expect(code).toBe(130);
         expect(existsSync(out)).toBe(false);
+    });
+
+    // ── 1.1.0 dispatcher hardening: the invocation contract and the
+    // presentation-only configuration (only the real process runs main()).
+
+    it('refuses an unknown flag, a repeated switch, a repeated single-value flag and a stray operand (exit 2, E_USAGE)', () => {
+        for (const argv of [
+            ['list', 'a.zip', '--overwite'],
+            ['list', 'a.zip', '--long', '--long'],
+            ['list', '--input', 'a.zip', '--input', 'b.zip'],
+            ['list', 'a.zip', 'b.zip'],
+            ['list', 'a.zip', '--input', 'b.zip'],
+            ['doctor', 'extra'],
+            ['list', '--constructor', 'x'],
+            ['batch', '-f', 'json', '-f', 'text'],
+        ]) {
+            const r = zipnative([...argv, '--json']);
+            expect(r.status, argv.join(' ')).toBe(2);
+            const env = JSON.parse(r.stderr.trim().split('\n').pop() as string) as { error: { code: string } };
+            expect(env.error.code, argv.join(' ')).toBe('E_USAGE');
+        }
+        // An alias means its flag on every command that declares it.
+        const e = zipnative(['inspect', join(dir, 'missing.zip'), '-e', 'x', '--json']);
+        expect(e.status).toBe(1); // E_IO for the missing archive — the flag itself was accepted
+    });
+
+    it('a text-mode error leads with its class and engine cause', () => {
+        const r = zipnative(['list', '--overwite']);
+        expect(r.status).toBe(2);
+        expect(r.stderr).toMatch(/^error E_USAGE: Unknown flag --overwite for "list"/m);
+    });
+
+    it('a planted .zipnativerc.json can only change presentation: any other key is E_USAGE naming the file', async () => {
+        const repo = join(dir, 'cloned-repo');
+        await mkdir(repo);
+        const zip = join(repo, 'a.zip');
+        expect(zipnative(['create', join(ROOT, 'package.json'), '-o', zip, '--no-config']).status).toBe(0);
+        await writeFile(join(repo, '.zipnativerc.json'), JSON.stringify({ extract: { overwrite: true, 'skip-unsafe': true } }));
+        const refused = zipnative(['list', zip, '--json'], repo);
+        expect(refused.status).toBe(2);
+        const env = JSON.parse(refused.stderr.trim().split('\n').pop() as string) as { error: { code: string; message: string; remedy: string } };
+        expect(env.error.code).toBe('E_USAGE');
+        expect(env.error.message).toContain('.zipnativerc.json');
+        expect(env.error.message).toContain('"overwrite"');
+        expect(env.error.remedy).toContain('--no-config');
+        // --no-config is always the escape hatch.
+        expect(zipnative(['list', zip, '--no-config'], repo).status).toBe(0);
+
+        // A presentation default applies, is announced on stderr and named in the envelope.
+        await writeFile(join(repo, '.zipnativerc.json'), JSON.stringify({ list: { format: 'json' } }));
+        const applied = zipnative(['list', zip], repo);
+        expect(applied.status).toBe(0);
+        expect(JSON.parse(applied.stdout)).toHaveProperty('entries');
+        expect(applied.stderr).toMatch(/^info: defaults from .*\.zipnativerc\.json: format$/m);
+        const out = join(repo, 'b.zip');
+        const created = zipnative(['create', join(ROOT, 'package.json'), '-o', out, '--json'], repo);
+        expect(created.status).toBe(0);
+        // `format` is not a create flag: nothing applied, so no `config` field.
+        expect(JSON.parse(created.stderr.trim().split('\n').pop() as string)).not.toHaveProperty('config');
+        await writeFile(join(repo, '.zipnativerc.json'), JSON.stringify({ pretty: true }));
+        const v = zipnative(['verify', zip, '--json'], repo);
+        expect(v.status).toBe(0);
+        expect(v.stdout).toContain('\n  "ok": true');
+    });
+
+    it('--max-* none is refused with an explicit-value remedy (every bound is finite since 1.1.0)', () => {
+        const r = zipnative(['list', join(ROOT, 'package.json'), '--max-entries', 'none', '--json']);
+        expect(r.status).toBe(2);
+        const env = JSON.parse(r.stderr.trim().split('\n').pop() as string) as { error: { code: string; remedy: string } };
+        expect(env.error.code).toBe('E_USAGE');
+        expect(env.error.remedy).toMatch(/^--max-entries \d+/);
+    });
+
+    it.skipIf(process.platform === 'win32')('a device (/dev/zero) is byte-counted and refused at --max-input-size, never read whole', () => {
+        const r = zipnative(['list', '/dev/zero', '--max-input-size', '1m', '--json']);
+        expect(r.status).toBe(1);
+        const env = JSON.parse(r.stderr.trim().split('\n').pop() as string) as { error: { code: string; detail: { limit: string } } };
+        expect(env.error).toMatchObject({ code: 'E_LIMIT', detail: { limit: 'maxInputSize' } });
+    });
+
+    it('--timeout firing mid-entry: stream, stream --cat and extract fail E_LIMIT and leave no partial file (1.1.0 review)', async () => {
+        // 64 MiB at a ratio under 1024:1: decompression outlasts the deadline.
+        // zipnative 1.1's forward reader, given the signal, left the pending
+        // entry read unsettled — the loop drained and the run exited 0 with a
+        // truncated file. Only a child process shows that.
+        const big = Buffer.alloc(64 * 1024 * 1024);
+        for (let i = 0; i < big.length; i += 97) big[i] = i & 255;
+        await writeFile(join(dir, 'big.bin'), big);
+        const zip = join(dir, 'big.zip');
+        expect(zipnative(['create', join(dir, 'big.bin'), '--base', dir, '-o', zip, '--quiet']).status).toBe(0);
+        for (const args of [
+            ['stream', zip, '-d', join(dir, 'sx'), '--timeout', '60ms', '--json'],
+            ['stream', zip, '--cat', 'big.bin', '--timeout', '60ms', '--json'],
+            ['extract', zip, '-d', join(dir, 'ex'), '--timeout', '60ms', '--json'],
+        ]) {
+            const r = zipnative(args);
+            expect(r.status, args.join(' ')).toBe(1);
+            const env = JSON.parse(r.stderr.trim().split('\n').pop() as string) as { error: { code: string; detail?: { limit: string } } };
+            expect(env.error, args.join(' ')).toMatchObject({ code: 'E_LIMIT', detail: { limit: 'timeout' } });
+            expect(r.stderr).not.toContain('MaxListenersExceededWarning');
+        }
+        expect(existsSync(join(dir, 'sx', 'big.bin'))).toBe(false);
+        expect(existsSync(join(dir, 'ex', 'big.bin'))).toBe(false);
+    });
+
+    it('--timeout fires while stdin is stalled: list, crc32 and stream end E_LIMIT instead of waiting forever (1.1.0 review M-03)', async () => {
+        for (const args of [['list', '-'], ['crc32'], ['stream', '--list']]) {
+            const child = spawn(process.execPath, [BIN, ...args, '--timeout', '300ms', '--json'], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, NO_COLOR: '1' } });
+            let stderr = '';
+            child.stderr.on('data', (d: Buffer) => { stderr += d.toString('utf8'); });
+            child.stdout.resume();
+            child.stdin.write(Buffer.from('PK\u0003\u0004'));
+            // stdin stays open: the peer stalls.
+            const code = await new Promise<number | null>((done) => {
+                const kill = setTimeout(() => { child.kill(); done(null); }, 5000);
+                child.on('exit', (c) => { clearTimeout(kill); done(c); });
+            });
+            child.stdin.destroy();
+            expect(code, args.join(' ')).toBe(1);
+            const env = JSON.parse(stderr.trim().split('\n').pop() as string) as { error: { code: string; detail?: { limit: string } } };
+            expect(env.error, args.join(' ')).toMatchObject({ code: 'E_LIMIT', detail: { limit: 'timeout' } });
+        }
+    });
+
+    it('--json after -- is an operand, not agent mode (1.1.0 review)', () => {
+        const r = zipnative(['cat', join(ROOT, 'package.json'), 'x', '--', '--json']);
+        expect(r.status).not.toBe(0);
+        expect(r.stderr).toMatch(/^error E_/m);
+        expect(r.stderr).not.toContain('"ok":false');
+    });
+
+    it('a planted config key cannot reach the terminal raw through the remedy line (1.1.0 review)', async () => {
+        const repo = join(dir, 'cfg-esc');
+        await mkdir(repo);
+        const ESC = String.fromCharCode(27);
+        const BEL = String.fromCharCode(7);
+        await writeFile(join(repo, '.zipnativerc.json'), JSON.stringify({ [`${ESC}]0;PWNED${BEL}${ESC}[2Jx`]: true }));
+        const r = zipnative(['doctor'], repo);
+        expect(r.status).toBe(2);
+        expect(r.stderr).toContain('remedy:');
+        expect(r.stderr).not.toContain(ESC);
+        expect(r.stderr).not.toContain(BEL);
+    });
+
+    it('a false in .zipnativerc.json never turns a switch on (1.1.0 review)', async () => {
+        const repo = join(dir, 'cfg-false');
+        await mkdir(repo);
+        const zip = join(repo, 'a.zip');
+        expect(zipnative(['create', join(ROOT, 'package.json'), '-o', zip, '--quiet', '--no-config'], repo).status).toBe(0);
+        await writeFile(join(repo, '.zipnativerc.json'), JSON.stringify({ json: false, quiet: false, long: false }));
+        const r = zipnative(['list', zip], repo);
+        expect(r.status).toBe(0);
+        expect(r.stdout).toContain('Length');
+        expect(r.stdout.trimStart().startsWith('{')).toBe(false);
+    });
+
+    it('a misspelt ZIPNATIVE_* switch is refused in the mode argv asked for (audit V-01)', () => {
+        const r = spawnSync(process.execPath, [BIN, 'list', join(ROOT, 'package.json'), '--json'], {
+            encoding: 'utf8',
+            env: { ...process.env, NO_COLOR: '1', ZIPNATIVE_DRY_RUN: 'maybe' },
+            timeout: 15000,
+        });
+        expect(r.status).toBe(2);
+        const line = r.stderr.trim().split('\n').pop() as string;
+        expect(line.startsWith('{')).toBe(true);
+        const env = JSON.parse(line) as { ok: boolean; command: string | null; error: { code: string; message: string } };
+        expect(env.ok).toBe(false);
+        expect(env.command).toBe('list');
+        expect(env.error.code).toBe('E_USAGE');
+        expect(env.error.message).toContain('ZIPNATIVE_DRY_RUN');
+        expect(env.error.message).not.toContain('maybe');
+    });
+
+    it('a misspelt ZIPNATIVE_JSON is refused even when argv says --json (round 4, C-12)', () => {
+        const r = spawnSync(process.execPath, [BIN, 'list', join(ROOT, 'package.json'), '--json'], {
+            encoding: 'utf8',
+            env: { ...process.env, NO_COLOR: '1', ZIPNATIVE_JSON: 'maybe' },
+            timeout: 15000,
+        });
+        expect(r.status).toBe(2);
+        const env = JSON.parse(r.stderr.trim().split('\n').pop() as string) as { ok: boolean; command: string | null; error: { code: string; message: string } };
+        expect(env).toMatchObject({ ok: false, command: 'list', error: { code: 'E_USAGE' } });
+        expect(env.error.message).toContain('ZIPNATIVE_JSON');
+        expect(env.error.message).not.toContain('maybe');
     });
 
 });

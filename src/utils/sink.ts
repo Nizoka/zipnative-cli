@@ -14,15 +14,20 @@
 //      EXISTING ancestor's `realpath` must sit under the root's `realpath`
 //      (a symlink or junction pre-planted inside the destination cannot
 //      redirect `mkdir -p`), and the created directory is re-checked after;
-//   4. exclusive open        — without `--overwrite` the file is created with
+//   4. exclusive open        — without `--overwrite` any existing path (a
+//      dangling symlink included) is refused and the file is created with
 //      `wx`, so a file that appears between the plan and the write is refused
-//      like any other existing file (no check-then-write window);
-//   5. no partial output     — a failed write removes the partial file.
+//      like any other existing file (no check-then-write window); with
+//      `--overwrite` the entry is written to an exclusive temp sibling and
+//      `rename()`d over the target — a symlink planted AT the target is
+//      replaced, never followed (1.1.0; 1.0 opened it with `w`);
+//   5. no partial output     — a failed write removes only the file the write
+//      created; a pre-existing target is never truncated or removed.
 
 import { mkdir, realpath } from 'node:fs/promises';
 import { basename, dirname, relative, resolve, sep } from 'node:path';
 import { CliError, ErrorCode } from './error.js';
-import { pathExists, safeJoin, unlinkQuiet, writeFileStream } from './io.js';
+import { pathExists, safeJoin, writeFileStream } from './io.js';
 import type { OnDuplicate } from './zipops.js';
 
 /** Filesystems where `A.txt` and `a.txt` are the same file. */
@@ -128,8 +133,10 @@ export interface SinkWriteOptions {
 
 /**
  * Stream an entry's bytes into `target` (parent must exist — see
- * {@link ensureSinkParent}). Exclusive open unless `overwrite`; a failed
- * write never leaves a partial file behind. Returns the bytes written.
+ * {@link ensureSinkParent}). Exclusive create unless `overwrite`, temp file
+ * + rename with it; `writeFileStream` removes whatever it created when the
+ * write fails, so no partial file is ever left behind and an existing
+ * target is never removed. Returns the bytes written.
  */
 export async function writeSinkFile(
     target: string,
@@ -137,16 +144,7 @@ export async function writeSinkFile(
     options: SinkWriteOptions,
 ): Promise<number> {
     let written = 0;
-    try {
-        await writeFileStream(target, chunks, (n) => { written += n; }, { exclusive: !options.overwrite });
-    } catch (e) {
-        // An exclusive-open refusal never touched the existing file; anything
-        // else may have left a partial file of our own making.
-        if (!(e instanceof CliError && e.code === ErrorCode.IO && e.message.startsWith('Refusing to overwrite'))) {
-            await unlinkQuiet(target);
-        }
-        throw e;
-    }
+    await writeFileStream(target, chunks, (n) => { written += n; }, { exclusive: !options.overwrite });
     return written;
 }
 

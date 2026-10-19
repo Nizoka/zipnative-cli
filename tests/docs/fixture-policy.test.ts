@@ -1,6 +1,7 @@
 // Guards the rules in tests/fixtures/README.md: every committed archive has
 // foreign provenance recorded in the ledger, the corpus stays tiny, and no
 // adversarial (CLI- or engine-buildable) archive is ever committed.
+import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -48,6 +49,26 @@ describe('fixture policy (tests/fixtures/README.md)', () => {
             const basename = file.split(/[\\/]/).pop() as string;
             expect(ledger.includes(basename), `${file} is missing from the provenance ledger`).toBe(true);
         }
+    });
+
+    it('every committed archive matches the SHA-256 recorded in the ledger (no byte drift)', () => {
+        for (const file of archives) {
+            const basename = file.split(/[\\/]/).pop() as string;
+            const row = ledger.split('\n').find((l) => l.includes(basename));
+            const recorded = /`([0-9a-f]{64})`/.exec(row ?? '')?.[1];
+            expect(recorded, `${basename}: no SHA-256 in its ledger row`).toBeDefined();
+            expect(createHash('sha256').update(readFileSync(file)).digest('hex'), basename).toBe(recorded);
+        }
+    });
+
+    it('the one archive committed under samples/input/ is recorded, with its SHA-256, in samples/README.md', () => {
+        const samplesRoot = join(process.cwd(), 'samples', 'input');
+        const committed = walk(samplesRoot).filter((p) => p.toLowerCase().endsWith('.zip'));
+        expect(committed.map((p) => p.slice(samplesRoot.length + 1).replace(/\\/g, '/'))).toEqual(['legacy/shift-jis-names.zip']);
+        const readme = readFileSync(join(process.cwd(), 'samples', 'README.md'), 'utf8');
+        const row = readme.split('\n').find((l) => l.startsWith('| `legacy/shift-jis-names.zip`'));
+        const recorded = /`([0-9a-f]{64})`/.exec(row ?? '')?.[1];
+        expect(createHash('sha256').update(readFileSync(committed[0] as string)).digest('hex')).toBe(recorded);
     });
 
     it('only ZIP archives are committed as binary fixtures', () => {

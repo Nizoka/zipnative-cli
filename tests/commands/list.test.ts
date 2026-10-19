@@ -213,6 +213,7 @@ describe('list', () => {
             compressedSize: expect.any(Number),
             uncompressedSize: 36 + 5 + 4,
             zip64: false,
+            zip64Entries: 0,
             encrypted: 0,
         });
     });

@@ -14,7 +14,7 @@
 - [ ] New code has tests (coverage thresholds must not regress)
 - [ ] CHANGELOG.md updated (if user-facing change)
 - [ ] No breaking changes (or documented in description)
-- [ ] Binary smoke test passes (`node dist/cli.cjs --help` outputs all 15 commands)
+- [ ] Binary smoke test passes (`node dist/cli.cjs --help` outputs all 17 commands)
 - [ ] veraZIP gate passes (`npm run validate:zip` locally; CI on Linux + Windows)
 - [ ] No ZIP parsing logic in the CLI (every byte-level operation is a core call; raw bytes only in `scripts/` and `tests/helpers/`)
 - [ ] No security default loosened silently (opt-outs are named `--skip-*` / `--allow-*` and documented in SECURITY.md)

@@ -3,13 +3,14 @@
 // doc edit (or a code edit) cannot silently desynchronise them.
 //
 // Sources of truth:
-//   COMMANDS (completion.ts)      — the 15-command surface and its groups
+//   COMMANDS (completion.ts)      — the 17-command surface and its groups
 //   ErrorCode (error.ts)          — the 13 stable E_* classes
 //   ZIP_TO_CLI (ziperr.ts)        — the 39 ZIP_* → E_* / exit mapping
-//   ZIP_DIAGNOSTIC_CODES          — the 11 diagnostic codes
+//   ZIP_DIAGNOSTIC_CODES          — the 12 diagnostic codes
 //   SUBJECTS (schema.ts)          — the schema subjects
-//   LIMIT_FLAGS + DEFAULT_ZIP_LIMITS — the eight --max-* bounds and their defaults
+//   LIMIT_FLAGS + DEFAULT_ZIP_LIMITS — the nine --max-* bounds and their defaults
 //   VERSION (core-bridge)         — the engine version the data files were derived from
+//   docs/data/core-exports.json   — the 106 exports of zipnative 1.1 and their CLI reach
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -35,6 +36,9 @@ const COUNTED_DOCS = [
     'SECURITY.md',
     'CITATION.cff',
     'src/index.ts',
+    // The AI-instruction files are surfaces too (release audit E-73).
+    '.github/copilot-instructions.md',
+    '.github/instructions/cli-design.instructions.md',
 ] as const;
 
 const docs = Object.fromEntries(COUNTED_DOCS.map((f) => [f, read(f)])) as Record<(typeof COUNTED_DOCS)[number], string>;
@@ -56,8 +60,8 @@ function section(text: string, heading: string): string {
 }
 
 describe('command counts agree with COMMANDS', () => {
-    it('COMMANDS is the 15-command surface in four groups', () => {
-        expect(COMMANDS).toHaveLength(15);
+    it('COMMANDS is the 17-command surface in four groups', () => {
+        expect(COMMANDS).toHaveLength(17);
         expect(new Set(COMMANDS.map((c) => c.group)).size).toBe(4);
         expect([...KNOWN_COMMANDS].sort()).toEqual([...COMMAND_NAMES].sort());
     });
@@ -111,19 +115,30 @@ describe('docs/data/core-exports.json ↔ KNOWLEDGE_BASE §8 ↔ the bridge', ()
     const data = JSON.parse(read('docs/data/core-exports.json')) as {
         zipnativeVersion: string;
         exportCount: number;
-        exports: { name: string; kind: string; subpath: string }[];
+        exports: { name: string; kind: string; subpath: string; reach: string; via: string }[];
     };
     const mapping = section(kb, '## 8. zipnative API Mapping');
     const bridge = read('src/core-bridge/index.ts');
 
-    it('lists the 77 frozen exports of zipnative 1.0.0', () => {
-        expect(data.exportCount).toBe(77);
-        expect(data.exports).toHaveLength(77);
+    it('lists the 106 exports of zipnative 1.1 (101 + 5 worker)', () => {
+        expect(data.exportCount).toBe(106);
+        expect(data.exports).toHaveLength(106);
         expect(data.zipnativeVersion).toBe(VERSION);
-        expect(data.exports.filter((e) => e.subpath === '.')).toHaveLength(72);
+        expect(data.exports.filter((e) => e.subpath === '.')).toHaveLength(101);
         expect(data.exports.filter((e) => e.subpath === './worker')).toHaveLength(5);
         for (const e of data.exports) {
             expect(['function', 'const', 'class', 'interface', 'type'], e.name).toContain(e.kind);
+        }
+    });
+
+    it('grades every export capability | type | bridged; a bridged one points to ROADMAP', () => {
+        const roadmap = read('ROADMAP.md');
+        for (const e of data.exports) {
+            expect(['capability', 'type', 'bridged'], e.name).toContain(e.reach);
+            expect(e.via.trim().length, `${e.name} via`).toBeGreaterThan(0);
+            if (e.reach !== 'bridged') continue;
+            expect(e.via, e.name).toContain('ROADMAP');
+            expect(roadmap, `ROADMAP lacks ${e.name}`).toContain(`\`${e.name}`);
         }
     });
 
@@ -147,12 +162,12 @@ describe('docs/data/errors.json ↔ ZIP_TO_CLI ↔ AGENTS.md', () => {
         diagnostics: { code: string }[];
     };
 
-    it('carries the 39 error codes and 11 diagnostics of zipnative 1.0.0', () => {
+    it('carries the 39 error codes and 12 diagnostics of zipnative 1.1', () => {
         expect(data.zipnativeVersion).toBe(VERSION);
         expect(data.errors).toHaveLength(39);
-        expect(data.diagnostics).toHaveLength(11);
+        expect(data.diagnostics).toHaveLength(12);
         expect(ZIP_ERROR_CODES).toHaveLength(39);
-        expect(ZIP_DIAGNOSTIC_CODES).toHaveLength(11);
+        expect(ZIP_DIAGNOSTIC_CODES).toHaveLength(12);
         expect(data.errors.map((e) => e.code).sort()).toEqual([...ZIP_ERROR_CODES].sort());
         expect(data.diagnostics.map((d) => d.code).sort()).toEqual([...ZIP_DIAGNOSTIC_CODES].sort());
     });
@@ -177,7 +192,7 @@ describe('README Global options ↔ LIMIT_FLAGS / DEFAULT_ZIP_LIMITS', () => {
     const globals = section(readme, '### Global options');
 
     it('quotes every --max-* flag with its engine default', () => {
-        expect(LIMIT_FLAGS).toHaveLength(8);
+        expect(LIMIT_FLAGS).toHaveLength(9);
         for (const spec of LIMIT_FLAGS) {
             const row = globals.split('\n').find((l) => l.includes(`\`--${spec.flag} `));
             expect(row, `README lacks --${spec.flag}`).toBeDefined();
@@ -190,7 +205,7 @@ describe('README Global options ↔ LIMIT_FLAGS / DEFAULT_ZIP_LIMITS', () => {
         const row = globals.split('\n').find((l) => l.startsWith('| `--dry-run`'));
         expect(row).toBeDefined();
         for (const cmd of DRY_RUN_COMMANDS) expect(row, cmd).toContain(`\`${cmd}\``);
-        expect(DRY_RUN_COMMANDS).toHaveLength(7);
+        expect(DRY_RUN_COMMANDS).toHaveLength(9);
     });
 });
 
@@ -210,7 +225,7 @@ describe('README schema section ↔ SUBJECTS', () => {
 
 describe('agent-surface lists', () => {
     it('AGENTS.md names every manifest command and every projected command', () => {
-        expect(MANIFEST_COMMANDS.size).toBe(10);
+        expect(MANIFEST_COMMANDS.size).toBe(12);
         const batchSection = section(agents, '## 7. Recommended agent loop');
         for (const cmd of MANIFEST_COMMANDS) expect(batchSection, cmd).toContain(`\`${cmd}\``);
         const tokenSection = section(agents, '## 3. Token economy');
@@ -375,6 +390,25 @@ describe('status envelope ↔ emitStatus callers', () => {
     });
 });
 
+describe('counted figures in the prose (second 1.1.0 review, M-11)', () => {
+    it('every "N demos" / "N runnable" equals the number of dual-shell samples', () => {
+        const demos = readdirSync(join(ROOT, 'samples'), { recursive: true, encoding: 'utf8' }).filter((p) => p.endsWith('.sh')).length;
+        for (const file of ['README.md', 'llms.txt', 'samples/README.md', 'docs/KNOWLEDGE_BASE.md']) {
+            for (const m of read(file).matchAll(/\b(\d+) (?:dual-shell )?(?:runnable `\.sh` \+ `\.ps1` )?demos\b/g)) {
+                expect(Number(m[1]), `${file}: "${m[0]}"`).toBe(demos);
+            }
+        }
+    });
+
+    it('every "(N codes)" next to the diagnostics equals the diagnostic count', () => {
+        for (const file of ['README.md', 'AGENTS.md', 'llms.txt', 'docs/KNOWLEDGE_BASE.md']) {
+            for (const m of read(file).matchAll(/diagnostic[^\n]{0,40}?\((\d+) codes\)/g)) {
+                expect(Number(m[1]), `${file}: "${m[0]}"`).toBe(ZIP_DIAGNOSTIC_CODES.length);
+            }
+        }
+    });
+});
+
 describe('release metadata', () => {
     it('CITATION.cff and package.json agree on the version', () => {
         const pkg = JSON.parse(read('package.json')) as { version: string };
@@ -404,6 +438,27 @@ describe('release metadata', () => {
             if (/^https?:\/\//.test(target)) continue;
             const top = (target.replace(/^\.\//, '').split('#')[0] as string);
             expect(shipped.has(top) || shipped.has(top.split('/')[0] as string), `llms.txt links ${target}, not in package.json files`).toBe(true);
+        }
+    });
+});
+
+describe('docs/adr — numbered without gaps, front matter, index (since 1.1.0)', () => {
+    const dirEntries = readdirSync(join(ROOT, 'docs', 'adr')).filter((f) => /^\d{4}-[a-z0-9-]+\.md$/.test(f)).sort();
+    const index = read('docs/adr/README.md');
+
+    it('numbers the records 0001..N without gaps', () => {
+        expect(dirEntries.length).toBeGreaterThan(0);
+        dirEntries.forEach((f, i) => expect(f.slice(0, 4), f).toBe(String(i + 1).padStart(4, '0')));
+    });
+
+    it('every record opens with status / date / since and the index lists it with the same status', () => {
+        for (const f of dirEntries) {
+            const text = read(`docs/adr/${f}`);
+            const fm = /^---\nstatus: (proposed|accepted|superseded|deprecated)\ndate: (\d{4}-\d{2}-\d{2})\nsince: (\d+\.\d+\.\d+)\n---\n\n# .+/.exec(text);
+            expect(fm, `${f} front matter`).not.toBeNull();
+            const row = index.split('\n').find((l) => l.includes(`](${f})`));
+            expect(row, `README lacks ${f}`).toBeDefined();
+            expect(row, `${f} status`).toContain(`| ${(fm as RegExpExecArray)[1] as string} |`);
         }
     });
 });

@@ -16,13 +16,17 @@
 // command modules.
 
 import { dirname, isAbsolute, resolve } from 'node:path';
+import { FLAG_ALIASES } from './args.js';
 import { CliError, ErrorCode } from './error.js';
 import { validatePath } from './io.js';
 
 /** Commands a manifest task may invoke. Meta/orchestration commands never are. */
 export const MANIFEST_COMMANDS: ReadonlySet<string> = new Set([
-    'create', 'list', 'inspect', 'extract', 'cat', 'verify', 'stream', 'modify', 'crc32', 'inflate',
+    'create', 'modify', 'canonicalize', 'merge', 'list', 'inspect', 'extract', 'cat', 'verify', 'stream', 'crc32', 'inflate',
 ]);
+
+/** Global flags that act on the whole process, never on one task. */
+const PROCESS_WIDE_FLAGS: readonly string[] = ['timeout', 'json', 'quiet', 'q', 'no-color', 'config', 'no-config', 'progress', 'help', 'h', 'version', 'V'];
 
 /** Hard cap on manifest size in tasks (DoS guard; far above any real pipeline). */
 const MAX_TASKS = 1000;
@@ -36,7 +40,7 @@ const ID_RE = /^[A-Za-z0-9_-]+$/;
 
 /** Flags whose relative values resolve against the manifest directory. */
 const PATH_FLAGS: ReadonlySet<string> = new Set([
-    'input', 'i', 'output', 'o', 'output-dir', 'd', 'from-manifest', 'base',
+    'input', 'i', 'output', 'o', 'output-dir', 'd', 'from-manifest', 'base', 'comment-file',
 ]);
 
 /** Flags whose values are `<name>=<path>` — only the path half resolves. */
@@ -129,15 +133,25 @@ function resolveFlags(
     manifestDir: string,
     priorOutputs: ReadonlyMap<string, string | undefined>,
 ): { flags: Record<string, string | boolean | readonly string[]>; dependsOn: readonly string[] } {
-    const flags: Record<string, string | boolean | readonly string[]> = {};
+    // No prototype: a "__proto__" key from JSON.parse must stay a refused
+    // name, never reach Object.prototype through the record.
+    const flags = Object.create(null) as Record<string, string | boolean | readonly string[]>;
     const dependsOn = new Set<string>();
 
-    for (const [key, value] of Object.entries(rawFlags)) {
-        if (key.length === 0 || key.startsWith('-') || /[\s=]/.test(key)) {
+    for (const [raw, value] of Object.entries(rawFlags)) {
+        if (raw.length === 0 || raw.startsWith('-') || /[\s=]/.test(raw)) {
             throw usageError(
-                `Task "${taskId}": invalid flag name "${key}" (use the bare flag name, `
+                `Task "${taskId}": invalid flag name "${raw}" (use the bare flag name, `
                 + 'without leading dashes, whitespace or "=").',
             );
+        }
+        if (raw === '__proto__' || raw === 'constructor' || raw === 'prototype') {
+            throw usageError(`Task "${taskId}": invalid flag name "${raw}".`);
+        }
+        // One name per flag, as on argv: { "o": … } is { "output": … }.
+        const key = FLAG_ALIASES[raw] ?? raw;
+        if (key !== raw && rawFlags[key] !== undefined) {
+            throw usageError(`Task "${taskId}": "${raw}" and "${key}" are the same flag; give it once.`);
         }
         if (typeof value === 'boolean') {
             // true → bare `--key`; false → the flag is simply omitted, matching
@@ -249,10 +263,18 @@ export function parseManifest(raw: string, manifestDir: string): ManifestPlan {
         }
 
         const { flags, dependsOn } = resolveFlags(id, flagsRaw, manifestDir, priorOutputs);
+        // Process-wide settings belong to the batch invocation: every task
+        // inherits its mode (SECURITY.md), so a task-level value would be
+        // accepted and ignored — or, for `timeout`, bound every later task.
+        for (const name of PROCESS_WIDE_FLAGS) {
+            if (flags[name] !== undefined) {
+                throw usageError(`Manifest task "${id}": "${name}" is not a task flag — it applies to the whole batch run; pass --${name} to batch itself.`);
+            }
+        }
 
-        const outputValue = flags['output'] ?? flags['o'];
+        const outputValue = flags['output'];
         const output = typeof outputValue === 'string' && outputValue !== '-' ? outputValue : undefined;
-        const outputDirValue = flags['output-dir'] ?? flags['d'];
+        const outputDirValue = flags['output-dir'];
         const outputDir = typeof outputDirValue === 'string'
             ? outputDirValue
             : (output !== undefined ? dirname(output) : undefined);
@@ -291,7 +313,7 @@ export function assertCodecPolicy(plan: ManifestPlan, allowCodecLoad: boolean): 
 }
 
 /** Commands whose stdout IS the artefact unless `output` redirects it. */
-const ARTEFACT_TO_STDOUT: ReadonlySet<string> = new Set(['create', 'modify', 'cat', 'inflate']);
+const ARTEFACT_TO_STDOUT: ReadonlySet<string> = new Set(['create', 'modify', 'canonicalize', 'merge', 'cat', 'inflate']);
 
 /**
  * `batch --manifest` in JSON mode owns stdout (one document). A task that

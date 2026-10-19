@@ -34,8 +34,8 @@ describe('parseByteSize', () => {
         expect(parseByteSize(raw, 'flag')).toBe(expected);
     });
 
-    it.each(['none', 'NONE', 'inf', 'infinity', ' Inf '])('resolves %j to Infinity', (raw) => {
-        expect(parseByteSize(raw, 'flag')).toBe(Infinity);
+    it.each(['none', 'NONE', 'inf', 'infinity', ' Inf '])('refuses %j (exit 2): every size is finite since 1.1.0', (raw) => {
+        expectUsage(() => parseByteSize(raw, 'flag'), /no longer accepted/);
     });
 
     it.each(['', 'abc', '1.5m', '-1', '1x', 'k', '1kk', '1 000', '0x10', '1e3'])('rejects %j with exit 2 naming the flag', (raw) => {
@@ -61,10 +61,10 @@ describe('parseCount', () => {
         expect(parseCount(raw, 'max-entries')).toBe(expected);
     });
 
-    it('resolves none/inf/infinity to Infinity', () => {
-        expect(parseCount('none', 'f')).toBe(Infinity);
-        expect(parseCount('INF', 'f')).toBe(Infinity);
-        expect(parseCount('infinity', 'f')).toBe(Infinity);
+    it('refuses none/inf/infinity (exit 2)', () => {
+        expectUsage(() => parseCount('none', 'f'), /no longer accepted/);
+        expectUsage(() => parseCount('INF', 'f'), /no longer accepted/);
+        expectUsage(() => parseCount('infinity', 'f'), /no longer accepted/);
     });
 
     it.each(['', '-1', '1k', '1.0', 'x', '0x1'])('rejects %j with exit 2', (raw) => {
@@ -87,7 +87,7 @@ describe('parsePositiveInt', () => {
     });
 
     it('rejects none / Infinity', () => {
-        expectUsage(() => parsePositiveInt('none', 'workers'), /positive integer/);
+        expectUsage(() => parsePositiveInt('none', 'workers'), /no longer accepted/);
     });
 
     it('rejects malformed values', () => {

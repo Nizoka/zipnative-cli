@@ -1,0 +1,69 @@
+{
+  "name": "main",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": ["~DEFAULT_BRANCH"],
+      "exclude": []
+    }
+  },
+  "rules": [
+    {
+      "type": "deletion"
+    },
+    {
+      "type": "non_fast_forward"
+    },
+    {
+      "type": "pull_request",
+      "parameters": {
+        "required_approving_review_count": 0,
+        "dismiss_stale_reviews_on_push": true,
+        "require_code_owner_review": false,
+        "require_last_push_approval": false,
+        "required_review_thread_resolution": true,
+        "allowed_merge_methods": ["squash"]
+      }
+    },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": true,
+        "do_not_enforce_on_create": false,
+        "required_status_checks": [
+          { "context": "ci (22)", "integration_id": 15368 },
+          { "context": "ci (24)", "integration_id": 15368 },
+          { "context": "windows (22)", "integration_id": 15368 },
+          { "context": "windows (24)", "integration_id": 15368 },
+          { "context": "macos (22)", "integration_id": 15368 },
+          { "context": "workflow lint", "integration_id": 15368 },
+          { "context": "verazip-linux", "integration_id": 15368 },
+          { "context": "verazip-windows", "integration_id": 15368 },
+          { "context": "sample-regression (ubuntu-latest)", "integration_id": 15368 },
+          { "context": "sample-regression (windows-latest)", "integration_id": 15368 },
+          { "context": "dependency-review", "integration_id": 15368 }
+        ]
+      }
+    },
+    {
+      "type": "code_scanning",
+      "parameters": {
+        "code_scanning_tools": [
+          {
+            "tool": "CodeQL",
+            "security_alerts_threshold": "high_or_higher",
+            "alerts_threshold": "errors"
+          }
+        ]
+      }
+    }
+  ],
+  "bypass_actors": [
+    {
+      "actor_id": 5,
+      "actor_type": "RepositoryRole",
+      "bypass_mode": "pull_request"
+    }
+  ]
+}

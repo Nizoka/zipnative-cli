@@ -12,9 +12,9 @@
 //     zipnative completion fish > ~/.config/fish/completions/zipnative.fish
 //     zipnative completion powershell >> $PROFILE
 
-import type { ParsedArgs } from '../utils/args.js';
+import { type OperandRule, type ParsedArgs, assertKnownFlags, assertOperands, assertSingleValues, assertSwitchValues } from '../utils/args.js';
 import { CliError } from '../utils/error.js';
-import { isBooleanFlag } from '../utils/flags.js';
+import { BOOLEAN_FLAGS, isBooleanFlag } from '../utils/flags.js';
 import { LIMIT_FLAG_NAMES } from '../utils/limits.js';
 
 export { BOOLEAN_FLAGS, COMMAND_BOOLEAN_FLAGS, GLOBAL_BOOLEAN_FLAGS, isBooleanFlag } from '../utils/flags.js';
@@ -29,28 +29,29 @@ export interface CommandSpec {
 
 export const GLOBAL_FLAGS: readonly string[] = [
     '--help', '--version', '--json', '--dry-run', '--quiet', '--no-color', '--config', '--no-config', '--pretty',
-    '--strict', '--pure-codecs', '--codec', '--max-input-size',
+    '--strict', '--pure-codecs', '--codec', '--max-input-size', '--timeout', '--progress',
     ...LIMIT_FLAG_NAMES,
 ];
 
 /** Commands that honour `--dry-run` (validate + plan, write nothing). */
-export const DRY_RUN_COMMANDS: readonly string[] = ['create', 'extract', 'modify', 'stream', 'cat', 'inflate', 'batch'];
+export const DRY_RUN_COMMANDS: readonly string[] = ['create', 'canonicalize', 'merge', 'extract', 'modify', 'stream', 'cat', 'inflate', 'batch'];
 
 const COMPRESSION_FLAGS = ['--method', '--level', '--deterministic'];
 const PROJECTION_FLAGS = ['--summary', '--fields'];
 const FILTER_FLAGS = ['--include', '--exclude'];
+/** `create`'s flags other than its inputs and output — also `batch` directory mode's (forwarded). */
+export const CREATE_TREE_FLAGS: readonly string[] = [
+    '--prefix', '--dir-entries', ...FILTER_FLAGS, '--follow-symlinks', ...COMPRESSION_FLAGS, '--order', '--date', '--mtime',
+    '--comment', '--comment-file', '--entry-comment', '--preserve-mode', '--store-ext', '--stream', '--zip64', '--chunk-size',
+    '--parallel', '--workers', '--min-job-size', '--job-timeout', '--overwrite',
+];
 
 export const COMMANDS: readonly CommandSpec[] = [
     {
         name: 'create',
         group: 'Create & modify',
         summary: 'Build a deterministic ZIP from files, directories, stdin or a manifest',
-        flags: [
-            '--input', '--output', '--stdin-name', '--from-manifest', '--base', '--prefix', '--dir-entries',
-            ...FILTER_FLAGS, '--follow-symlinks', ...COMPRESSION_FLAGS, '--order', '--date', '--mtime',
-            '--comment', '--comment-file', '--entry-comment', '--preserve-mode', '--store-ext', '--stream', '--chunk-size',
-            '--parallel', '--workers', '--min-job-size', '--job-timeout', '--overwrite',
-        ],
+        flags: ['--input', '--output', '--stdin-name', '--from-manifest', '--base', ...CREATE_TREE_FLAGS],
     },
     {
         name: 'modify',
@@ -58,26 +59,38 @@ export const COMMANDS: readonly CommandSpec[] = [
         summary: 'Incremental edits: add/replace/remove/rename/comment, append-only or compact',
         flags: [
             '--input', '--output', '--add', '--add-dir', '--replace', '--remove', '--rename', '--comment', '--comment-file',
-            ...COMPRESSION_FLAGS, '--date', '--compact', '--in-place', '--from-manifest', '--overwrite',
+            ...COMPRESSION_FLAGS, '--date', '--compact', '--canonical', '--in-place', '--from-manifest', '--overwrite',
         ],
+    },
+    {
+        name: 'canonicalize',
+        group: 'Create & modify',
+        summary: 'Rewrite any archive into the canonical deterministic form (no recompression)',
+        flags: ['--input', '--output', '--date', '--keep-comments', '--normalize-modes', '--overwrite'],
+    },
+    {
+        name: 'merge',
+        group: 'Create & modify',
+        summary: 'Merge archives (or split one with filters): entries copied verified, never recompressed',
+        flags: ['--input', '--output', ...FILTER_FLAGS, '--on-duplicate', '--order', '--comment', '--comment-file', '--skip-unsupported', '--overwrite'],
     },
     {
         name: 'list',
         group: 'Read & extract',
         summary: 'List archive entries (text | json | ndjson)',
-        flags: ['--input', '--format', '--long', '--validate', ...FILTER_FLAGS, ...PROJECTION_FLAGS],
+        flags: ['--input', '--format', '--long', '--validate', ...FILTER_FLAGS, '--name-encoding', '--range', ...PROJECTION_FLAGS],
     },
     {
         name: 'inspect',
         group: 'Read & extract',
         summary: 'Forensic archive report with determinism/security assertions',
-        flags: ['--input', '--format', '--entries', '--entry', '--extra', '--check', ...PROJECTION_FLAGS],
+        flags: ['--input', '--format', '--entries', '--entry', '--extra', '--name-encoding', '--check', ...PROJECTION_FLAGS],
     },
     {
         name: 'cat',
         group: 'Read & extract',
         summary: 'Stream one or more entries to stdout',
-        flags: ['--input', '--entry', '--output', '--raw', '--no-verify-crc', '--overwrite'],
+        flags: ['--input', '--entry', '--output', '--raw', '--no-verify-crc', '--name-encoding', '--range', '--overwrite'],
     },
     {
         name: 'extract',
@@ -86,7 +99,7 @@ export const COMMANDS: readonly CommandSpec[] = [
         flags: [
             '--input', '--output-dir', ...FILTER_FLAGS, '--entry', '--overwrite', '--on-duplicate',
             '--skip-unsafe', '--skip-unsupported', '--allow-symlinks', '--skip-symlinks', '--flat', '--buffered',
-            '--preserve-mode', '--preserve-mtime',
+            '--preserve-mode', '--preserve-mtime', '--name-encoding',
         ],
     },
     {
@@ -96,14 +109,14 @@ export const COMMANDS: readonly CommandSpec[] = [
         flags: [
             '--input', '--list', '--output-dir', '--cat', '--format', '--long', ...FILTER_FLAGS,
             '--overwrite', '--on-duplicate', '--skip-unsafe', '--skip-unsupported', '--flat',
-            '--preserve-mtime', ...PROJECTION_FLAGS,
+            '--preserve-mtime', '--name-encoding', ...PROJECTION_FLAGS,
         ],
     },
     {
         name: 'verify',
         group: 'Integrity & codecs',
         summary: 'Deep integrity verification (CRC, sizes, local headers, diagnostics)',
-        flags: ['--input', '--entry', '--format', ...PROJECTION_FLAGS],
+        flags: ['--input', '--entry', '--name-encoding', '--range', '--format', ...PROJECTION_FLAGS],
     },
     {
         name: 'crc32',
@@ -124,7 +137,9 @@ export const COMMANDS: readonly CommandSpec[] = [
         flags: [
             '--input-dir', '--output-dir', '--task', '--concurrency', '--fail-fast', '--manifest',
             '--continue-on-error', '--allow-codec-load', '--format', ...PROJECTION_FLAGS,
-            ...COMPRESSION_FLAGS, '--order', '--date', '--comment', '--overwrite',
+            // Directory mode runs the full create per subfolder: every create
+            // flag that does not name an input or an output is forwarded.
+            ...CREATE_TREE_FLAGS,
         ],
     },
     {
@@ -154,6 +169,80 @@ export const COMMANDS: readonly CommandSpec[] = [
 ];
 
 export const COMMAND_NAMES: readonly string[] = COMMANDS.map((c) => c.name);
+
+/**
+ * Value flags a command accepts more than once (values collected in order);
+ * every other value flag given twice is refused (`assertSingleValues`).
+ * `--codec` is repeatable everywhere (one module per occurrence).
+ */
+export const GLOBAL_REPEATABLE_FLAGS: readonly string[] = ['codec'];
+export const REPEATABLE_FLAGS: Readonly<Record<string, readonly string[]>> = {
+    create: ['input', 'include', 'exclude', 'entry-comment'],
+    modify: ['add', 'add-dir', 'remove', 'rename', 'replace'],
+    canonicalize: [],
+    merge: ['input', 'include', 'exclude'],
+    list: ['include', 'exclude'],
+    inspect: ['entry', 'check'],
+    cat: ['entry'],
+    extract: ['include', 'exclude', 'entry'],
+    stream: ['include', 'exclude', 'cat'],
+    verify: ['entry'],
+    crc32: ['input'],
+    inflate: [],
+    batch: ['include', 'exclude', 'entry-comment'],
+    doctor: [],
+    schema: [],
+    completion: [],
+    govern: [],
+};
+
+/**
+ * How many positionals each command takes, and the flag that stands for the
+ * first one (giving both is refused). `Infinity` = any number (inputs, entry
+ * names).
+ */
+export const OPERANDS: Readonly<Record<string, OperandRule>> = {
+    create: { max: Infinity },
+    modify: { max: 1, for: 'input' },
+    list: { max: 1, for: 'input' },
+    inspect: { max: 1, for: 'input' },
+    cat: { max: Infinity },
+    extract: { max: 1, for: 'input' },
+    canonicalize: { max: 1, for: 'input' },
+    merge: { max: Infinity },
+    stream: { max: 1, for: 'input' },
+    verify: { max: 1, for: 'input' },
+    crc32: { max: Infinity },
+    inflate: { max: 1, for: 'input' },
+    batch: { max: 0 },
+    doctor: { max: 0 },
+    schema: { max: 1 },
+    completion: { max: 1 },
+    govern: { max: 2 },
+};
+
+/** Bare flag names `command` accepts: its own and the global ones. */
+export function knownFlags(command: string): ReadonlySet<string> {
+    const spec = COMMANDS.find((c) => c.name === command);
+    return new Set([...GLOBAL_FLAGS, ...(spec?.flags ?? [])].map((f) => f.replace(/^--/, '')));
+}
+
+/** Bare flag names `command` accepts more than once. */
+export function repeatableFlags(command: string): ReadonlySet<string> {
+    return new Set([...GLOBAL_REPEATABLE_FLAGS, ...(REPEATABLE_FLAGS[command] ?? [])]);
+}
+
+/**
+ * The invocation contract every command gets before it runs (dispatcher and
+ * `batch` manifest tasks): only declared flags, each value flag once unless
+ * repeatable, no stray positionals. All refusals are E_USAGE, exit 2.
+ */
+export function assertInvocation(command: string, args: ParsedArgs): void {
+    assertKnownFlags(args.flags, knownFlags(command), command);
+    assertSingleValues(args.flags, repeatableFlags(command), command);
+    assertSwitchValues(args.flags, BOOLEAN_FLAGS);
+    assertOperands(args, OPERANDS[command] ?? { max: Infinity }, command);
+}
 
 /**
  * Value flags whose argument is a filesystem path — the shells complete

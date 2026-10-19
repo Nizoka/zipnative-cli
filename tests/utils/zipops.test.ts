@@ -22,7 +22,6 @@ import { createDiagnosticSink } from '../../src/utils/diagnostics.js';
 import { createZip } from '../../src/core-bridge/index.js';
 import { parseArgs } from '../../src/utils/args.js';
 import { CliError } from '../../src/utils/error.js';
-import { _resetLimitWarnings } from '../../src/utils/limits.js';
 
 let dir = '';
 
@@ -40,7 +39,6 @@ function expectUsage(fn: () => unknown, pattern?: RegExp): void {
 
 beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), 'zipnative-cli-'));
-    _resetLimitWarnings();
 });
 
 afterEach(async () => {
@@ -53,29 +51,29 @@ afterEach(async () => {
 describe('commonOptions', () => {
     it('wires the sink and leaves strict off / limits absent by default', () => {
         const sink = createDiagnosticSink(true);
-        const opts = commonOptions(parseArgs([]), sink);
+        const opts = commonOptions(parseArgs([]), sink, 'list');
         expect(opts.strict).toBe(false);
         expect(opts.onDiagnostic).toBe(sink.onDiagnostic);
         expect('limits' in opts).toBe(false);
     });
 
     it('enables strict from the --strict flag', () => {
-        expect(commonOptions(parseArgs(['--strict']), createDiagnosticSink(true)).strict).toBe(true);
+        expect(commonOptions(parseArgs(['--strict']), createDiagnosticSink(true), 'list').strict).toBe(true);
     });
 
     it('enables strict from ZIPNATIVE_STRICT=1', () => {
         process.env['ZIPNATIVE_STRICT'] = '1';
-        expect(commonOptions(parseArgs([]), createDiagnosticSink(true)).strict).toBe(true);
+        expect(commonOptions(parseArgs([]), createDiagnosticSink(true), 'list').strict).toBe(true);
     });
 
     it('carries parsed --max-* limits', () => {
         process.env['ZIPNATIVE_QUIET'] = '1';
-        const opts = commonOptions(parseArgs(['--max-entries', '5', '--max-total-size', '1m']), createDiagnosticSink(true));
+        const opts = commonOptions(parseArgs(['--max-entries', '5', '--max-total-size', '1m']), createDiagnosticSink(true), 'list');
         expect(opts.limits).toEqual({ maxEntries: 5, maxTotalUncompressedSize: 1024 ** 2 });
     });
 
     it('rejects a bad limit with exit 2', () => {
-        expectUsage(() => commonOptions(parseArgs(['--max-entries', '0']), createDiagnosticSink(true)));
+        expectUsage(() => commonOptions(parseArgs(['--max-entries', '0']), createDiagnosticSink(true), 'list'));
     });
 });
 
@@ -155,7 +153,7 @@ describe('parseChunkSize', () => {
 
     it('rejects 0, none and garbage with exit 2', () => {
         expectUsage(() => parseChunkSize(parseArgs(['--chunk-size', '0'])), /--chunk-size must be a positive byte size/);
-        expectUsage(() => parseChunkSize(parseArgs(['--chunk-size', 'none'])), /--chunk-size must be a positive byte size/);
+        expectUsage(() => parseChunkSize(parseArgs(['--chunk-size', 'none'])), /--chunk-size "none" is no longer accepted/);
         expectUsage(() => parseChunkSize(parseArgs(['--chunk-size', 'big'])), /--chunk-size expects a byte size/);
     });
 });

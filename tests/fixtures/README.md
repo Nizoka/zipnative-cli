@@ -20,8 +20,8 @@ Rules (enforced by review + `tests/docs/fixture-policy.test.ts`):
 - `.gitattributes` marks everything under `tests/fixtures/` (and `*.zip`)
   as `binary`. Never remove that protection — CRLF conversion silently
   corrupts archives.
-- Every `*.zip` under this directory must appear in the ledger; the policy
-  test fails otherwise.
+- Every `*.zip` under this directory must appear in the ledger with its
+  SHA-256; the policy test fails otherwise, or when a committed byte drifts.
 
 ## Provenance ledger
 
@@ -29,7 +29,7 @@ The two interop archives are copied verbatim from zipnative's own corpus
 (`zipnative/tests/fixtures/interop/`, credit: the zipnative project) so the
 CLI and the engine are validated against the same foreign bytes.
 
-| File | Producer (exact version) | Command | Added |
-|---|---|---|---|
-| interop/powershell-compress-archive-basic.zip | PowerShell 7 Compress-Archive (System.IO.Compression), Windows 11 — via zipnative's corpus | `Compress-Archive -Path <src>/* -DestinationPath out.zip` (zipnative scripts/generate-fixtures.ts) | 2026-09-03 |
-| interop/bsdtar-basic.zip | bsdtar 3.8.8 (libarchive 3.8.8, zlib 1.2.13.1-motley), Windows 11 tar.exe — via zipnative's corpus | `tar -a -cf out.zip -C <src> .` (zipnative scripts/generate-fixtures.ts) | 2026-09-03 |
+| File | Producer (exact version) | Command | SHA-256 | Added |
+|---|---|---|---|---|
+| interop/powershell-compress-archive-basic.zip | PowerShell 7 Compress-Archive (System.IO.Compression), Windows 11 — via zipnative's corpus | `Compress-Archive -Path <src>/* -DestinationPath out.zip` (zipnative scripts/generate-fixtures.ts) | `b289f787ed695737331a366e6ee8dea647bfefc95a5a37aad7a71863b2a8a8f2` | 2026-09-03 |
+| interop/bsdtar-basic.zip | bsdtar 3.8.8 (libarchive 3.8.8, zlib 1.2.13.1-motley), Windows 11 tar.exe — via zipnative's corpus | `tar -a -cf out.zip -C <src> .` (zipnative scripts/generate-fixtures.ts) | `f67f22b4955fc385dcb2ef9302ad5021ba055116f930814c869cd1704b303ae6` | 2026-09-03 |

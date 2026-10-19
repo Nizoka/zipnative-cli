@@ -137,9 +137,10 @@ describe('ZIP_ERROR_CODES (frozen table)', () => {
 });
 
 describe('ZIP_DIAGNOSTIC_CODES', () => {
-    it('lists the 11 core diagnostic codes', () => {
-        expect(ZIP_DIAGNOSTIC_CODES).toHaveLength(11);
-        expect(new Set(ZIP_DIAGNOSTIC_CODES).size).toBe(11);
+    it('lists the 12 core diagnostic codes', () => {
+        expect(ZIP_DIAGNOSTIC_CODES).toHaveLength(12);
+        expect(new Set(ZIP_DIAGNOSTIC_CODES).size).toBe(12);
+        expect(ZIP_DIAGNOSTIC_CODES).toContain('ZIP_TIMESTAMP_CLAMPED');
         expect(ZIP_DIAGNOSTIC_CODES).toContain('ZIP_PREPENDED_DATA');
         expect(ZIP_DIAGNOSTIC_CODES).toContain('ZIP_DEAD_BYTES_RATIO');
         for (const c of ZIP_DIAGNOSTIC_CODES) expect(c).toMatch(/^ZIP_[A-Z0-9_]+$/);

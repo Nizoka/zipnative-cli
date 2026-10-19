@@ -13,9 +13,9 @@ import { METHOD_DEFLATE, METHOD_STORE, getCodec, type ZipEntry } from '../core-b
 import { createDiagnosticSink } from '../utils/diagnostics.js';
 import { prepareEngine } from '../utils/engine.js';
 import { CliError, ErrorCode } from '../utils/error.js';
-import { unlinkQuiet, writeStreamingOutput } from '../utils/io.js';
+import { writeStreamingOutput } from '../utils/io.js';
 import { mapZipError } from '../utils/ziperr.js';
-import { commonOptions, openArchive, readArchiveBytes } from '../utils/zipops.js';
+import { type ArchiveReader, commonOptions, openArchiveSource } from '../utils/zipops.js';
 
 /** True for a `--codec` method that decompresses synchronously only. */
 function isSyncOnlyCodec(method: number): boolean {
@@ -45,9 +45,23 @@ export async function cat(args: ParsedArgs): Promise<void> {
     const verifyCrc = !hasFlag(args.flags, 'no-verify-crc');
     const dryRun = hasFlag(args.flags, 'dry-run') || isDryRun();
 
-    const bytes = await readArchiveBytes(inputPath, args);
     const sink = createDiagnosticSink();
-    const reader = openArchive(bytes, commonOptions(args, sink));
+    // Buffered by default; --range fetches only the central directory and the
+    // requested entries by byte ranges.
+    const source = await openArchiveSource(args, inputPath, commonOptions(args, sink, 'cat'));
+    try {
+        await catEntries(args, source.reader, { names, outputPath, raw, verifyCrc, dryRun, sink });
+    } finally {
+        await source.close();
+    }
+}
+
+async function catEntries(
+    args: ParsedArgs,
+    reader: ArchiveReader,
+    o: { readonly names: readonly string[]; readonly outputPath: string | undefined; readonly raw: boolean; readonly verifyCrc: boolean; readonly dryRun: boolean; readonly sink: ReturnType<typeof createDiagnosticSink> },
+): Promise<void> {
+    const { names, outputPath, raw, verifyCrc, dryRun, sink } = o;
 
     const entries: ZipEntry[] = [];
     for (const name of names) {
@@ -84,11 +98,11 @@ export async function cat(args: ParsedArgs): Promise<void> {
         for (const entry of entries) {
             current = entry.name;
             if (raw) {
-                yield reader.readEntryRaw(entry);
+                yield await reader.readEntryRaw(entry);
             } else if (isSyncOnlyCodec(entry.compressionMethod)) {
                 // A registered codec with decompressSync but no decompressStream
                 // cannot feed readEntryStream(); readEntry() buffers this one entry.
-                yield reader.readEntry(entry, { verifyCrc });
+                yield await reader.readEntry(entry, { verifyCrc });
             } else {
                 for await (const chunk of reader.readEntryStream(entry, { verifyCrc })) yield chunk;
             }
@@ -99,8 +113,9 @@ export async function cat(args: ParsedArgs): Promise<void> {
     try {
         written = await writeStreamingOutput(chunks(), outputPath, { exclusive: !hasFlag(args.flags, 'overwrite') });
     } catch (e) {
-        if (e instanceof CliError && e.code === ErrorCode.IO) throw e; // overwrite refusal: the existing file is untouched
-        if (outputPath !== undefined) await unlinkQuiet(outputPath);
+        // The write layer already removed whatever IT created (a partial file
+        // or temp); an existing --output is never truncated or removed here.
+        if (e instanceof CliError && e.code === ErrorCode.IO) throw e;
         throw mapZipError(e, `Failed to read entry "${current}"`, current);
     }
 

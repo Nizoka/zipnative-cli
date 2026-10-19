@@ -1,0 +1,7 @@
+#!/bin/sh
+# zipnative-cli — opt-in pre-push hook (ported from pkinative-cli).
+#
+# Installed with `npm run hooks:install`; removed with `npm run hooks:uninstall`.
+# Runs the fast gate (typecheck:all, lint, test) so a red push is caught
+# before CI. `git push --no-verify` skips it for the one push that must go.
+exec node scripts/gate.mjs --fast

@@ -14,7 +14,8 @@ import type { ParsedArgs } from '../utils/args.js';
 import { hasFlag } from '../utils/args.js';
 import { isJsonMode } from '../utils/agent.js';
 import { serializeJson } from '../utils/projection.js';
-import { cliVersion, engineVersion } from '../utils/version.js';
+import { satisfies } from '../utils/engines.js';
+import { cliVersion, engineVersion, nodeRange } from '../utils/version.js';
 import { COMMANDS } from './completion.js';
 import {
     METHOD_DEFLATE,
@@ -25,7 +26,16 @@ import {
 } from '../core-bridge/index.js';
 import { loadedCodecModules } from '../utils/codecs.js';
 import { prepareEngine, isPureCodecs } from '../utils/engine.js';
-import { DEFAULT_MAX_INPUT_SIZE, LIMIT_FLAGS, effectiveLimits, formatLimitValue, parseInputSizeFlag, parseLimitFlags } from '../utils/limits.js';
+import {
+    DEFAULT_MAX_INPUT_SIZE,
+    ENGINE_ONLY_LIMITS,
+    LIMIT_FLAGS,
+    LIMIT_KEYS,
+    effectiveLimits,
+    formatLimitValue,
+    parseInputSizeFlag,
+    parseLimitFlags,
+} from '../utils/limits.js';
 import { parseFormat } from '../utils/zipops.js';
 
 type CheckStatus = 'ok' | 'warn' | 'error';
@@ -39,17 +49,16 @@ interface Check {
     readonly data?: Readonly<Record<string, unknown>>;
 }
 
-const MIN_NODE_MAJOR = 22;
-
 function nodeCheck(): Check {
+    // The range is package.json engines.node (version.ts), never a copy.
     const raw = process.versions.node;
-    const major = Number.parseInt(raw.split('.')[0] ?? '0', 10);
-    const ok = Number.isInteger(major) && major >= MIN_NODE_MAJOR;
+    const range = nodeRange();
+    const ok = satisfies(raw, range);
     return {
         name: 'node',
         status: ok ? 'ok' : 'error',
         value: `v${raw}`,
-        detail: `>= ${MIN_NODE_MAJOR} required`,
+        detail: ok ? `satisfies ${range}` : `${range} required`,
     };
 }
 
@@ -140,13 +149,17 @@ function limitsCheck(args: ParsedArgs): Check {
     const overrides = parseLimitFlags(args);
     const effective = effectiveLimits(overrides);
     const maxInputSize = parseInputSizeFlag(args);
-    const parts = LIMIT_FLAGS.map((l) => `${l.key}=${formatLimitValue(l, effective[l.key])}`);
-    parts.push(`maxInputSize=${Number.isFinite(maxInputSize) ? String(maxInputSize) : 'none'}`);
+    // Every ZipLimits key in engine order: the eight flagged bounds and the
+    // engine-only maxEntryCompressedSize (no flag in 1.1 — limits.ts).
+    const specs = [...LIMIT_FLAGS, ...ENGINE_ONLY_LIMITS];
+    const ordered = LIMIT_KEYS.flatMap((key) => specs.filter((s) => s.key === key));
+    const parts = ordered.map((l) => `${l.key}=${formatLimitValue(l, effective[l.key])}`);
+    parts.push(`maxInputSize=${maxInputSize}`);
     const custom = (overrides !== undefined ? Object.keys(overrides).length : 0) + (maxInputSize !== DEFAULT_MAX_INPUT_SIZE ? 1 : 0);
-    // JSON: numbers agents can compare (Infinity has no JSON form → "none").
+    // JSON: numbers agents can compare (every bound is finite since 1.1.0).
     const data: Record<string, unknown> = {};
-    for (const l of LIMIT_FLAGS) data[l.key] = Number.isFinite(effective[l.key]) ? effective[l.key] : 'none';
-    data['maxInputSize'] = Number.isFinite(maxInputSize) ? maxInputSize : 'none';
+    for (const l of ordered) data[l.key] = effective[l.key];
+    data['maxInputSize'] = maxInputSize;
     return {
         name: 'limits',
         status: 'ok',

@@ -4,7 +4,7 @@
  * VENDORED from zipnative (the engine does not ship tests/ or scripts/ in
  * its npm tarball):
  *   upstream file:   tests/helpers/interop-tools.ts
- *   upstream commit: 4f1bc3619372e8543bccea65d2365bf0c048a10c (zipnative 1.0.0)
+ *   upstream commit: 1e2ab4216804a5936c83a94bfca10086760a6436 (zipnative 1.1.0; blob unchanged since 1.0.0)
  *   upstream blob:   2fef80f17e302384a0f6a5f57f7a0f14911401f5
  *
  * Only the integrity (`test`) half of upstream's EXTRACTORS is ported —
