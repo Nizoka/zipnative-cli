@@ -148,6 +148,9 @@ export function verifyAll(bytes: Uint8Array, args: ParsedArgs): { core: CoreOutc
     // verification would hit is E_LIMIT, and a structural limit refusal
     // (maxEntries, maxCentralDirectoryBytes, …) surfaces as the bound it is
     // instead of a failed verification. Anything else is verifyZip's report.
+    // The sink is this open's own: in text mode it prints the `info:` line a
+    // diagnostic earns (as --entry and --range do); the JSON report carries
+    // verifyZip's diagnostics, each once.
     let declared: readonly ZipEntry[] = [];
     try {
         const reader = openArchive(bytes, { ...commonOptions(args, createDiagnosticSink(), 'verify'), strict: false });

@@ -24,7 +24,7 @@ export default defineConfig({
             ],
             thresholds: {
                 // Ratcheted for 1.1.0 from the measured 95.91 / 91.48 / 97.81 /
-                // 96.77 (2026-10-18), within one point of the actuals (1.0.0 kept
+                // 96.77 (2026-10-20), within one point of the actuals (1.0.0 kept
                 // three: 93 / 88 / 94 / 93). Never lower them to make a change
                 // pass — add tests.
                 statements: 95,

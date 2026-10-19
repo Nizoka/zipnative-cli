@@ -18,10 +18,10 @@ applyTo: "src/index.ts"
 
 ## Dispatch
 
-- `loadCommand(name)` lazy-imports one of the 15 commands: `create`, `modify` | `list`,
-  `inspect`, `cat`, `extract`, `stream` | `verify`, `crc32`, `inflate` | `batch`, `doctor`,
-  `schema`, `completion`, `govern`. Adding a command means touching `loadCommand`,
-  `COMMAND_USAGE`, `USAGE` (the "Commands (15)" block), and `COMMANDS` in
+- `loadCommand(name)` lazy-imports one of the 17 commands: `create`, `modify`, `canonicalize`,
+  `merge` | `list`, `inspect`, `cat`, `extract`, `stream` | `verify`, `crc32`, `inflate` |
+  `batch`, `doctor`, `schema`, `completion`, `govern`. Adding a command means touching
+  `loadCommand`, `COMMAND_USAGE`, `USAGE` (the "Commands (17)" block), and `COMMANDS` in
   `src/commands/completion.ts` — the single source of truth that `schema manifest`,
   `doctor` and the docs consistency test all derive from.
 - `--help`/`-h` and `--version`/`-V` handled before dispatch; `zipnative <cmd> --help`
@@ -53,8 +53,8 @@ applyTo: "src/index.ts"
 
 ## Help text
 
-- One global `USAGE` block listing all 15 commands under their 4 group headings plus the
-  `GLOBAL_USAGE` block (the global options incl. the 8 `--max-*` limits and
+- One global `USAGE` block listing all 17 commands under their 4 group headings plus the
+  `GLOBAL_USAGE` block (the global options incl. the 9 `--max-*` limits and
   `--max-input-size`), and one `*_USAGE` block per command. Point agents at `AGENTS.md`;
   state "Offline, always".
 - Keep `*_USAGE` flag lists in sync with each command's actual flags AND with the `flags`

@@ -181,4 +181,17 @@ describe('batch --task verify rows (D-17b)', () => {
         expect(bigRow).toMatchObject({ code: ErrorCode.LIMIT, zipCode: 'ZIP_LIMIT_EXCEEDED', entryName: 'a.txt', detail: { limit: 'maxEntryUncompressedSize' } });
         expect(bigRow?.remedy).toContain('--max-entry-size');
     });
+
+    it('a malformed --max-* is one E_USAGE before any read, plan or not (round 4, C-02 / C-03)', async () => {
+        const archives = join(dir, 'archives2');
+        await mkdir(archives);
+        await writeFile(join(archives, 'a.zip'), buildRawZip([{ name: 'ok.txt', data: enc.encode('ok') }]));
+        for (const extra of [[], ['--dry-run']]) {
+            out = '';
+            const e = await refusal(() => batch(parseArgs(['--input-dir', archives, '--task', 'verify', '--format', 'json', '--max-entries', 'many', ...extra])));
+            expect(e.exitCode, extra.join(' ')).toBe(2);
+            expect(e.code, extra.join(' ')).toBe(ErrorCode.USAGE);
+            expect(out, extra.join(' ')).toBe('');
+        }
+    });
 });

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Official CLI companion to the `zipnative` library. Exposes fifteen commands in
+Official CLI companion to the `zipnative` library. Exposes 17 commands in
 four groups: **Create & modify** — `create` (files/dirs/stdin/manifest → deterministic
 ZIP; buffered, `--stream`, `--parallel`), `modify` (append-only or `--compact` edits, no
 recompression); **Read & extract** — `list`, `inspect` (forensic report + `--check`

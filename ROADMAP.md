@@ -173,7 +173,11 @@ should carry (recorded in the release PR's *Independent audit* section —
   sample with a minimal codec module (the `createDecompressor()` contract is documented, not
   demonstrated); the engine's verifiers surfacing a bound as a bound
   (`.github/drafts/upstream-range-verify-swallows-limit.md`), after which the CLI's declared-size
-  pre-check in `verify` can go.
+  pre-check in `verify` can go. From the release-day round: `.github/prompts/` (the Copilot
+  prompt files pdfnative-cli and zipnative carry), a `dist/cli.cjs` byte budget enforced by the
+  gate (pkinative-cli's `budgets.json`), the 1.0.0 CHANGELOG block's `### Release-branch review`
+  heading folded into the Keep a Changelog types, and a value pass in `batch --manifest --dry-run`
+  (today the plan checks flag names and arity; values are parsed when the task runs).
 
 ### Ideas feasible now (deferred from 1.1.0, which is scoped to engine parity)
 

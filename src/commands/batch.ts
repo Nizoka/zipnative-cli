@@ -23,7 +23,7 @@ import { style } from '../utils/colors.js';
 import { escapeTerminal, escapeLine } from '../utils/sanitize.js';
 import { verifyAll } from './verify.js';
 import { prepareEngine } from '../utils/engine.js';
-import { parseInputSizeFlag } from '../utils/limits.js';
+import { parseInputSizeFlag, parseLimitFlags } from '../utils/limits.js';
 import { entryPasses } from '../utils/zipops.js';
 import { parsePositiveInt } from '../utils/sizes.js';
 import {
@@ -434,6 +434,10 @@ export async function batch(args: ParsedArgs): Promise<void> {
         if (zips.length === 0) {
             throw new CliError(`No .zip files found in ${inputDir}: --task verify checks every *.zip directly inside the directory (not recursively).`, 1, ErrorCode.INPUT);
         }
+        // Every --max-* value is parsed once, before the pool and before any
+        // read: a malformed bound is one E_USAGE (exit 2), never a row per
+        // archive and never a plan that says ok (release audit C-02, C-03).
+        parseLimitFlags(args);
         // The same bound as `verify`: one descriptor, size-checked (a FIFO or
         // a symlink named *.zip is byte-counted, never read whole).
         const maxInputSize = parseInputSizeFlag(args);

@@ -30,7 +30,7 @@ Global options (any command):
                     the verdict becomes E_VERIFY_FAILED)
   --timeout <duration>  Deadline for the run: 500, 500ms, 30s, 5m, 1h. Past
                     it the run stops at the next chunk or entry boundary with
-                    E_LIMIT (detail.limit "timeout"); the file being written is
+                    E_LIMIT (detail.limit "timeout"); any file being written is
                     removed. A synchronous step already running (opening or
                     verifying a buffered archive) always completes.
   --progress        Progress snapshots on stderr where the engine measures
@@ -619,9 +619,9 @@ Output:
   --format, -f text|json  (default text; json under --json)
   --summary           { ok, command, mode, total, succeeded, failed, skipped }
   --fields a,b.c      Dot-path projection
-  --dry-run           Validate the manifest (its @ref graph and every task's
-                      flags) and print the plan; execute nothing — a task's own
-                      inputs are opened when it runs
+  --dry-run           Validate the manifest (its @ref graph, each task's flag
+                      names and arity) and print the plan; execute nothing — a
+                      task's flag values and inputs are checked when it runs
 
 Exit 1 carries the first failing task's E_* code.
 `;
@@ -781,13 +781,17 @@ async function main(): Promise<void> {
     // `--`, after which every token is an operand.
     const endOfFlags = argv.indexOf('--');
     const flagTokens = endOfFlags === -1 ? argv : argv.slice(0, endOfFlags);
-    if (flagTokens.some((t) => t === '--json' || /^--json=(?:true|1|yes|on)$/i.test(t))) process.env['ZIPNATIVE_JSON'] = '1';
-    // ZIPNATIVE_* switches take the same eight spellings as the flags. After
-    // the --json token: a misspelt switch is refused in the mode argv asked for.
-    normalizeEnvSwitches();
+    const jsonFromArgv = flagTokens.some((t) => t === '--json' || /^--json=(?:true|1|yes|on)$/i.test(t));
     // Name the command in an envelope raised by the parse itself (`list a.zip
     // --json --json`): the first bare token that is a command.
     activeCommand = flagTokens.find((t) => !t.startsWith('-') && Object.hasOwn(COMMAND_USAGE, t)) ?? null;
+    // ZIPNATIVE_* switches take the same eight spellings as the flags. The
+    // --json token decides the mode of that refusal first; the raw
+    // ZIPNATIVE_JSON it shadows is still judged (release audit V-01, C-12, C-13).
+    const rawJson = process.env['ZIPNATIVE_JSON'];
+    if (jsonFromArgv) process.env['ZIPNATIVE_JSON'] = '1';
+    normalizeEnvSwitches();
+    if (jsonFromArgv && rawJson !== undefined) normalizeEnvSwitches({ ZIPNATIVE_JSON: rawJson });
     const args = parseArgs(argv);
 
     // Global output flags (recognised anywhere in argv).

@@ -385,8 +385,8 @@ entries-summary`, `inspect-summary`, `verify-summary`, `stream-summary`,
 
 `create`, `extract`, `modify`, `stream`, `cat`, `inflate` and `batch` accept
 `--dry-run`: inputs are fully validated (inputs walked and names checked — except in
-`batch --manifest`, whose plan validates the manifest, its `@ref` graph and every task's
-flags, while a task's own inputs are opened when it runs;
+`batch --manifest`, whose plan validates the manifest, its `@ref` graph and each task's
+flag names and arity, while a task's flag values and inputs are checked when it runs;
 archives opened and every destination proven safe — existing files are already
 refused — edits applied to the modifier and every untouched entry verified,
 manifests parsed and their `@ref` graph and `--json` stdout policy resolved) but

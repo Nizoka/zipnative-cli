@@ -36,6 +36,9 @@ const COUNTED_DOCS = [
     'SECURITY.md',
     'CITATION.cff',
     'src/index.ts',
+    // The AI-instruction files are surfaces too (release audit E-73).
+    '.github/copilot-instructions.md',
+    '.github/instructions/cli-design.instructions.md',
 ] as const;
 
 const docs = Object.fromEntries(COUNTED_DOCS.map((f) => [f, read(f)])) as Record<(typeof COUNTED_DOCS)[number], string>;

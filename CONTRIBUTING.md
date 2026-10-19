@@ -65,9 +65,9 @@ npm run validate:zip   # build + corpus + veraZIP validation (see below)
 
 All new code must include tests. Coverage thresholds (enforced by `vitest.config.ts`, the single
 source of truth): **statements 95 %, branches 91 %, functions 97 %, lines 96 %** — ratcheted for
-1.1.0 from the measured 95.91 / 91.48 / 97.81 / 96.77 (2026-10-18), within one point of the actuals
+1.1.0 from the measured 95.91 / 91.48 / 97.81 / 96.77 (2026-10-20), within one point of the actuals
 (1.0.0 kept three). Never lower them to make a
-change pass — add tests. The suite is 76 files / 1394 tests (9 are platform- or checkout-conditional
+change pass — add tests. The suite is 76 files / 1396 tests (9 are platform- or checkout-conditional
 and skip with a stated reason).
 
 Tests run the command functions **in-process** with `process.stdout` / `process.stderr` captured
@@ -448,3 +448,9 @@ limit, and GitHub truncates the display at 72. Types:
 - `docs:` documentation only
 - `test:` tests only
 - `refactor:` no behaviour change
+
+## License
+
+By contributing, you agree that your contributions are licensed under the [MIT License](LICENSE).
+No contributor licence agreement and no `Signed-off-by` (DCO) line is required: that
+inbound = outbound rule is the whole agreement.

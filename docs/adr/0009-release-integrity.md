@@ -19,7 +19,7 @@ pkinative-cli and zipnative 1.1 had both split their release for exactly these r
 
 ## Decision Outcome
 
-- **Four jobs** — `guard` → `build` → `publish` → `attest` (`.github/workflows/publish.yml`):
+- **Five jobs** — `guard` → `build` → `publish` → `attest` → `consumer` (`.github/workflows/publish.yml`):
   - `guard` reads `package.json` and refuses a non-tag ref, a tag that is not `v<version>` and a
     0.x version, before any approval is asked; it installs nothing.
   - `build` holds no `id-token`, restores no cache, builds on the `.nvmrc` line, runs

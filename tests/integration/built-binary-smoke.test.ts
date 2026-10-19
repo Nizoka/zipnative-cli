@@ -353,10 +353,24 @@ describe.skipIf(!existsSync(BIN))('integration: built binary smoke (dist/cli.cjs
         expect(r.status).toBe(2);
         const line = r.stderr.trim().split('\n').pop() as string;
         expect(line.startsWith('{')).toBe(true);
-        const env = JSON.parse(line) as { ok: boolean; error: { code: string; message: string } };
+        const env = JSON.parse(line) as { ok: boolean; command: string | null; error: { code: string; message: string } };
         expect(env.ok).toBe(false);
+        expect(env.command).toBe('list');
         expect(env.error.code).toBe('E_USAGE');
         expect(env.error.message).toContain('ZIPNATIVE_DRY_RUN');
+        expect(env.error.message).not.toContain('maybe');
+    });
+
+    it('a misspelt ZIPNATIVE_JSON is refused even when argv says --json (round 4, C-12)', () => {
+        const r = spawnSync(process.execPath, [BIN, 'list', join(ROOT, 'package.json'), '--json'], {
+            encoding: 'utf8',
+            env: { ...process.env, NO_COLOR: '1', ZIPNATIVE_JSON: 'maybe' },
+            timeout: 15000,
+        });
+        expect(r.status).toBe(2);
+        const env = JSON.parse(r.stderr.trim().split('\n').pop() as string) as { ok: boolean; command: string | null; error: { code: string; message: string } };
+        expect(env).toMatchObject({ ok: false, command: 'list', error: { code: 'E_USAGE' } });
+        expect(env.error.message).toContain('ZIPNATIVE_JSON');
         expect(env.error.message).not.toContain('maybe');
     });
 
