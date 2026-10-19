@@ -52,6 +52,9 @@ Upstream: closes the CLI's engine asks answered by zipnative 1.1.0
 | `chore(release)` | the review and triage reports moved out of the tree (`.audit/1.1.0/`, `.github/drafts/`), summarised here |
 | `fix(audit)` | the 29 actionable findings of `/release-audit` (§Independent audit): a bound is never a verdict in `verify`, a missing file is `E_IO`, the env-switch envelope, `zip64Entries`, remedies, CRC shapes, batch rows, the documentation findings |
 | `docs(release)` | the audit verdict and the final figures in this draft |
+| `chore(release)` | the release date 2026-10-20 and the dates derived from it (1.0.x security fixes until 2027-04-20, `security.txt` `Expires` 2027-10-20) |
+| `fix(audit)` (release day) | the round-4 findings: `batch --task verify` parses the bounds once before the pool, the raw `ZIPNATIVE_JSON` is still judged under `--json` and the refusal names the command, the instruction files counted by the docs test, the licensing sentence, ADR 0009's five jobs, the `batch --dry-run` wording |
+| `docs(release)` (release day) | the round-4 verdict, the triage re-read and the 2026-10-20 figures in this draft |
 
 ## Behaviour changes (reviewer attention)
 
@@ -87,6 +90,7 @@ adversarial verifier, an autonomy pass, a second verifier, a GO/NO-GO ledger) at
 | 2 | **Met** on all seven criteria | 31 findings: 23 confirmed (3 in part), 5 deferred to 1.2 (ROADMAP), 1 rejected, 2 rejected in part; 3 majors — `--overwrite=flase` was ON, the published schemas rejected real output, `--timeout` did not fire on a stalled pipe — plus a bounded `batch --task verify` | fixed in `aba500a` → `0536020`, one regression test per finding (`tests/integration/review2-1-1.test.ts`, `tests/commands/schema-conformance.test.ts`); the 11 last engine exports exposed (`canonicalize`, `merge`, `--range`, manifest `raw`) |
 | 2b | every finding **closed**, no regression | 3 minors: `canonicalize` carried hostile names silently, a `raw` DEFLATE payload could hide trailing bytes, docs gaps; nits: `ZIPNATIVE_*` values strict | fixed in `887254f` |
 | 3 | **GO** | `/release-audit` at `99bf8c3`: 238 rows over three reports (A 129, B 63, D 46); verifier 1 over A + B: 13 confirmed, 1 rejected, 2 duplicate, 2 raised; verifier 2 over D: 11 confirmed, 2 downgraded, 1 duplicate, 2 raised — **0 blockers, 5 majors, 23 minors, 2 notes**. Majors: `verify` reported an intact entry over a `--max-*` bound as a CRC / size failure on every path (the engine's verifiers swallow the refusal — drafted upstream), SECURITY.md denied the ninth bound its flag, the docs said streamed entries > 4 GiB were refused (they take `--zip64`), a missing file was `E_RUNTIME` on two paths | all 29 actionable rows fixed in `b04f15f`, one regression test per code finding (`tests/integration/audit-1-1.test.ts`, `core-surfaces-1-1`, the built-binary smoke test); the one note needs no action; 0 waived |
+| 4 (release day) | **GO** | the round-3 fixes re-audited at `9eaecd9`: closure 29 / 29 (one observation), the diff `99bf8c3..HEAD` re-read hunk by hunk, release-day bookkeeping (versions, dates, no tag, 1.1.0 unpublished, `npm audit` 0, 10 tarball files, the five engine drafts), the triage re-read through `gh api`, and a 96-row 2026 standards sweep (Scorecard, OSPS Baseline, SLSA, Keep a Changelog, Conventional Commits, clig.dev, llms.txt, REUSE, RFC 9116, CITATION.cff, npm metadata, the ten native proofs); verifier 3: 13 confirmed, 2 downgraded, 0 rejected, 1 raised — **0 blockers, 2 majors** (a `b04f15f` regression: a malformed `--max-*` on `batch --task verify` became a per-row `E_USAGE` with exit 1 instead of the exit-2 refusal, with and without `--dry-run`), 7 minors (the raw `ZIPNATIVE_JSON` shadowed by `--json`, `command: null` in that envelope, the instruction files' "15 commands", the inbound = outbound sentence, ADR 0009 "four jobs", the `batch --dry-run` wording, the triage delta), 7 notes | the 9 actionable rows fixed in `64089ac` with their regression tests (`audit-1-1.test.ts`, the built-binary smoke test, `COUNTED_DOCS` now counts the `.github/` instruction files); the notes are ROADMAP 1.2 items or pre-existing; 0 waived |
 
 The seven criteria after round 2b:
 
@@ -103,10 +107,12 @@ The seven criteria after round 2b:
 Ledger: `.audit/1.1.0/` (local, git-ignored) — `review-v1.1.0.md` (round 2, every finding with
 its verdict and commit), `corpus-1.0.0.sha256`, then the round-3 files `brief.md`,
 `auditor-a.md`, `auditor-b.md`, `verifier-1.md`, `auditor-d.md`, `verifier-2.md`, `ledger.md`,
-`verdict.md`.
+`verdict.md`; the release-day round under `round-4/` (`brief.md`, `auditor-c.md`, `auditor-e.md`,
+`verifier-3.md`, `ledger.md`, `verdict.md`).
 
-`/release-audit release-notes/v1.1.0.md` — **GO** (`verdict.md`: blockers open 0, majors open 0,
-waived 0; next: the maintainer's review of this branch). The agent-autonomy pass re-measured the
+`/release-audit release-notes/v1.1.0.md` — **GO** on 2026-10-20 (`round-4/verdict.md`: blockers
+open 0, majors open 0, waived 0; gate 15 / 15 at `64089ac`; next: the maintainer's review of this
+branch). The agent-autonomy pass re-measured the
 token table: `--summary` / `--fields` cut stdout by 75–94 % against text (88–98 % against the full
 `--json` report); bare `--json` is text-sized on `inspect` and 2.8–2.9× on `list` / `verify` —
 the gain is the projection levers', as AGENTS.md §3 says.
@@ -114,7 +120,7 @@ the gain is the projection levers', as AGENTS.md §3 says.
 ## Validation (what actually ran, on Windows 11, Node 22.23.2)
 
 - [x] `npm run typecheck:all` clean; `npm run lint` 0 errors
-- [x] `npm run test:coverage` — 1385 passed, 9 skipped, 76 files; 95.91 / 91.48 / 97.81 / 96.77
+- [x] `npm run test:coverage` — 1387 passed, 9 skipped, 76 files; 95.91 / 91.48 / 97.81 / 96.77
       (thresholds 95 / 91 / 97 / 96)
 - [x] `npm run validate:zip` — 37 PASS + 4 XFAIL; the 37 inherited archives are byte-identical
       to the 1.0.0 build (SHA-256 compared)
@@ -137,15 +143,17 @@ the gain is the projection levers', as AGENTS.md §3 says.
 - Import `.github/rulesets/main.json` and `tags.json`.
 - Create the `npm-publish` environment with a required reviewer, and bind npm Trusted
   Publishing to `publish.yml` with that environment.
-- After the merge, the open PRs and alerts (read on 2026-10-18 with read-only `gh api` calls;
-  nothing was posted, closed or dismissed):
+- After the merge, the open PRs and alerts (read on 2026-10-18 and re-read on 2026-10-20 with
+  read-only `gh api` calls; nothing was posted, closed or dismissed):
 
   | Item | Verdict | Action after merge |
   |---|---|---|
   | PRs #1, #3, #4, #5, #7 (`codeql-action` ×4, `scorecard-action`) | integrated in `5c09933`, same SHAs | close as superseded |
   | PR #10 (`@types/node` 26) | rejected: the floor is Node 22, majors ignored in `dependabot.yml` | close |
   | PR #11 (dev group, `zipnative` included) | redone by hand (`a01d7c4` + the release commit); `zipnative` is bumped on its own | close |
+  | PRs #12 (`ip-address` 10.7.0 → 10.7.4), #13 (`http-cache-semantics` 4.2.0 → 4.3.0), opened 2026-10-18 | both packages are gone from the branch lockfile | close as superseded |
   | Dependabot #1 `ip-address`, #3 `http-cache-semantics` (dev-only) | gone from the lockfile; `npm audit` 0 | auto-close |
+  | Dependabot #4 `brace-expansion` < 1.1.21 (GHSA-q2hr-2g5m-vwhr, medium, dev transitive; opened 2026-10-18) | the branch lockfile holds 1.1.21 / 5.0.12; `npm audit` 0 | auto-close |
   | Scorecard #1 Branch-Protection | rulesets as code | import `main.json` + `tags.json` |
   | Scorecard #2 Token-Permissions `publish.yml` | needed: `contents: write` scoped to `attest` (ADR 0009) | dismiss "won't fix" |
   | Scorecard #3 Token-Permissions `codeql.yml`, #8 Vulnerabilities | fixed on the branch | auto-close |
@@ -173,7 +181,7 @@ the gain is the projection levers', as AGENTS.md §3 says.
 - [x] No security default loosened silently
 - [x] Docs counts updated (`tests/docs/consistency.test.ts` green)
 - [x] The audit ledger is summarised above with a fix commit for every confirmed blocker and
-      major (`b04f15f`; verdict GO, 0 waived)
+      major (`b04f15f`, `64089ac`; verdict GO on 2026-10-20, 0 waived)
 
 ## AI assistance
 
